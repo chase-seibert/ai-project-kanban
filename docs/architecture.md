@@ -50,6 +50,17 @@ StageChase/Worktrees when the checkout is dirty. Only the approved plan is copie
 other uncommitted changes stay in the original checkout. The working folder is
 recorded and shown. Worktrees are retained, never auto-deleted.
 
+## Plan feedback
+
+Mac task detail appends typed or system-dictated feedback to the saved plan for
+an incomplete task in Planned. `PlanFileStore` resolves the Markdown target
+inside its project folder, coordinates and serializes the append, retains the
+original file bytes, and verifies the resulting file before reporting success.
+Each append adds a `User feedback on the plan` heading followed by the raw text.
+Failed writes keep the editor draft. This file action does not mutate the task,
+create a run, or call the runner. Project plan paths are not part of phone sync;
+the phone directs users to append feedback on Mac.
+
 After restart, active/queued runs become Interrupted and require explicit retry.
 Retry preserves run/session identity and working folder. Exactly-once execution
 across a crash and remote service cannot be promised: inspect the session before

@@ -2,6 +2,8 @@
 
 ## 2026-09-30
 
+- Added Mac task-detail feedback that appends typed or dictated raw text to the
+  saved plan under a user-feedback heading, without starting Codex.
 - Added Close Codex session for explicit desktop handoff, preserving saved
   results and workspaces while pausing the runner queue until a later action.
 - Prevented concurrent Mac listener starts from binding twice to port 47928.

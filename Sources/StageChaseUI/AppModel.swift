@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+
 #if os(macOS)
   import AppKit
 #endif
@@ -67,6 +68,12 @@ import UniformTypeIdentifiers
 
   var selectedProject: Project? { library.projects.first { $0.id == selectedProjectID } }
   var activeRuns: [AgentRun] { library.runs.filter { $0.status.isActive } }
+  #if os(macOS)
+    private let planFileStore = PlanFileStore()
+  #endif
+  private(set) var planFeedbackDrafts: [UUID: String] = [:]
+  private(set) var planFeedbackMessages: [UUID: PlanFeedbackMessage] = [:]
+  private(set) var planFeedbackInFlight: Set<UUID> = []
   var projectRuns: [AgentRun] {
     library.runs.filter { selectedProjectID == nil || $0.projectID == selectedProjectID }.sorted {
       $0.createdAt > $1.createdAt
@@ -426,6 +433,50 @@ import UniformTypeIdentifiers
     preferences.set(project?.uuidString, forKey: "selectedProject")
   }
 
+  #if os(macOS)
+    func planFeedbackDraft(for taskID: UUID) -> String {
+      planFeedbackDrafts[taskID] ?? ""
+    }
+
+    func setPlanFeedbackDraft(_ text: String, for taskID: UUID) {
+      planFeedbackDrafts[taskID] = text
+      planFeedbackMessages.removeValue(forKey: taskID)
+    }
+
+    func appendPlanFeedback(taskID: UUID, expectedRevision: Int, text: String) async -> Bool {
+      guard !isPreview else {
+        planFeedbackMessages[taskID] = PlanFeedbackMessage(
+          text: "Appending to project files is disabled in preview mode.", isError: true)
+        return false
+      }
+      guard planFeedbackInFlight.insert(taskID).inserted else { return false }
+      defer { planFeedbackInFlight.remove(taskID) }
+      guard let item = library.tasks.first(where: { $0.id == taskID }),
+        let planPath = item.planPath,
+        item.revision == expectedRevision, item.stage == .planned, !item.completed,
+        library.latestRun(for: taskID)?.status.isActive != true,
+        let project = library.projects.first(where: { $0.id == item.projectID })
+      else {
+        planFeedbackMessages[taskID] = PlanFeedbackMessage(
+          text: "This task or plan changed. Review the task details, then try again.", isError: true
+        )
+        return false
+      }
+      do {
+        try await planFileStore.appendFeedback(
+          text, projectDirectory: project.directory, relativePath: planPath)
+        if planFeedbackDrafts[taskID] == text { planFeedbackDrafts.removeValue(forKey: taskID) }
+        planFeedbackMessages[taskID] = PlanFeedbackMessage(
+          text: "Feedback appended to plan.", isError: false)
+        return true
+      } catch {
+        planFeedbackMessages[taskID] = PlanFeedbackMessage(
+          text: error.localizedDescription, isError: true)
+        return false
+      }
+    }
+  #endif
+
   func items(_ stage: WorkflowStage) -> [WorkItem] {
     guard let selectedProjectID else { return [] }
     return library.items(in: selectedProjectID, stage: stage, completed: showCompleted).filter {
@@ -749,6 +800,11 @@ struct PendingMove: Identifiable {
     self.retryRunID = retryRunID
     self.error = error
   }
+}
+
+struct PlanFeedbackMessage {
+  var text: String
+  var isError: Bool
 }
 
 struct LibraryDocument: FileDocument {

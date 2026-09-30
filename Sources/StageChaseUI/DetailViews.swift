@@ -221,12 +221,14 @@ struct TaskDetail: View {
             TextField("Title", text: draftBinding(\.title), axis: .vertical).stageFont(
               .title2, weight: .bold
             ).textFieldStyle(.plain)
+              .disabled(model.planFeedbackInFlight.contains(taskID))
             VStack(alignment: .leading, spacing: 8) {
               Text("NOTES").stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
               TextEditor(text: draftBinding(\.notes)).frame(minHeight: 110).scrollContentBackground(
                 .hidden
               )
               .padding(8).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
+              .disabled(model.planFeedbackInFlight.contains(taskID))
             }
             if !model.isConnectedPhone {
               VStack(alignment: .leading, spacing: 8) {
@@ -242,6 +244,7 @@ struct TaskDetail: View {
                     })
                 )
                 .textFieldStyle(.roundedBorder)
+                .disabled(model.planFeedbackInFlight.contains(taskID))
                 #if os(macOS)
                   if let path = item.planPath,
                     let project = model.library.projects.first(where: { $0.id == item.projectID })
@@ -254,6 +257,56 @@ struct TaskDetail: View {
                 #endif
               }
             }
+            #if os(macOS)
+              if item.stage == .planned, !item.completed, item.planPath != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                  Text("PLAN FEEDBACK").stageFont(.caption, weight: .semibold)
+                    .foregroundStyle(.secondary)
+                  Text("Enter text or dictate to provide feedback on the plan.")
+                    .stageFont(.callout).foregroundStyle(.secondary)
+                  TextEditor(text: planFeedbackBinding)
+                    .frame(minHeight: 105)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityLabel("Plan feedback")
+                    .disabled(model.planFeedbackInFlight.contains(taskID))
+                  HStack(alignment: .firstTextBaseline) {
+                    if let message = model.planFeedbackMessages[taskID] {
+                      Text(message.text)
+                        .stageFont(.caption)
+                        .foregroundStyle(message.isError ? .red : .secondary)
+                        .textSelection(.enabled)
+                    }
+                    Spacer()
+                    Button("Append feedback", systemImage: "text.append") {
+                      let feedback = model.planFeedbackDraft(for: taskID)
+                      Task {
+                        await model.appendPlanFeedback(
+                          taskID: taskID, expectedRevision: item.revision, text: feedback)
+                      }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                      model.planFeedbackDraft(for: taskID)
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || edited || model.library.latestRun(for: taskID)?.status.isActive == true
+                        || model.planFeedbackInFlight.contains(taskID))
+                  }
+                  if model.library.latestRun(for: taskID)?.status.isActive == true {
+                    Text("Wait for the active Codex run to finish before appending feedback.")
+                      .stageFont(.caption).foregroundStyle(.secondary)
+                  }
+                }
+              }
+            #elseif os(iOS)
+              if item.stage == .planned, !item.completed {
+                Text(
+                  "Append feedback to the saved plan on the Mac where its project file is stored."
+                )
+                .stageFont(.callout).foregroundStyle(.secondary)
+              }
+            #endif
             if edited {
               Button("Save changes") {
                 guard let draft else { return }
@@ -301,7 +354,9 @@ struct TaskDetail: View {
                 }
               }
             }
-          }.disabled(edited || model.library.latestRun(for: taskID)?.status.isActive == true)
+          }.disabled(
+            edited || model.library.latestRun(for: taskID)?.status.isActive == true
+              || model.planFeedbackInFlight.contains(taskID))
           Divider()
           VStack(alignment: .leading, spacing: 12) {
             Label("Codex activity", systemImage: "sparkles").stageFont(.headline)
@@ -333,7 +388,9 @@ struct TaskDetail: View {
           }
           if !model.isConnectedPhone {
             Divider()
-            Button("Delete task", role: .destructive) { deleting = true }.buttonStyle(.borderless)
+            Button("Delete task", role: .destructive) { deleting = true }
+              .buttonStyle(.borderless)
+              .disabled(model.planFeedbackInFlight.contains(taskID))
           } else if let run = model.library.latestRun(for: taskID),
             run.status.isActive || [.needsInput, .interrupted].contains(run.status)
           {
@@ -372,6 +429,14 @@ struct TaskDetail: View {
         edited = true
       })
   }
+
+  #if os(macOS)
+    private var planFeedbackBinding: Binding<String> {
+      Binding(
+        get: { model.planFeedbackDraft(for: taskID) },
+        set: { model.setPlanFeedbackDraft($0, for: taskID) })
+    }
+  #endif
 }
 
 struct RunDetail: View {

@@ -18,6 +18,10 @@ Mac task detail is an inspector; iPhone uses a sheet. Title, notes, saved plan,
 move, and manual completion share the model. Dirty drafts require Save; stale
 revisions produce an error. Activity includes statuses, public progress, plan
 steps, approvals, errors, command output, session links, and working folders.
+For an incomplete Planned task with a saved plan, Mac task detail also accepts
+typed or system-dictated plan feedback. Append feedback explicitly; StageChase
+adds a `User feedback on the plan` heading and preserves the user's wording.
+The phone directs the user to the Mac because project plan files are not synced.
 
 Automated Next/Implementation actions require confirmation including usage cost.
 Manual mode is labeled prominently. Enabling automation alone never starts work.

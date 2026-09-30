@@ -438,16 +438,7 @@ struct AgentApproval {
   }
 
   private func safePlan(_ relative: String, root: URL) throws -> URL {
-    guard !relative.hasPrefix("/"), !relative.split(separator: "/").contains(".."),
-      relative.hasSuffix(".md")
-    else {
-      throw BoardError.invalid("Use a project-relative Markdown plan path without ‘..’.")
-    }
-    let path = root.appendingPathComponent(relative).standardizedFileURL.resolvingSymlinksInPath()
-    guard path.path.hasPrefix(root.resolvingSymlinksInPath().path + "/") else {
-      throw BoardError.invalid("The plan must be inside the project folder.")
-    }
-    return path
+    try PlanFileStore.resolve(projectDirectory: root.path, relativePath: relative)
   }
 
   private func enqueueEvent(_ method: String, _ params: [String: Any]) {

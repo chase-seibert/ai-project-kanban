@@ -24,6 +24,8 @@ not yet verified.
 | Phone snapshot refresh | Read Mac state only; never enqueue or invoke the runner |
 | Phone manual task command | Validate device, revision, sequence, and operation receipt on Mac |
 | Phone move into automated stage | Keep it on Mac until phone confirmation context is implemented |
+| Append plan feedback on Mac | Coordinate an explicit raw-text append to the saved Markdown plan; never enqueue or invoke the runner |
+| Phone plan feedback | Direct the user to the Mac, where project plan files are stored |
 
 Workspace-write sandboxing and default network restrictions remain enabled.
 Unknown requests are not silently approved. The agent is instructed not to

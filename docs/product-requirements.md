@@ -63,3 +63,15 @@ open.
   a transient failure does not lose the plan or hide the work.
 - As a user, I want Review to remain manual, so that I decide when work is
   complete.
+
+## Plan feedback
+
+- As a user, I want to type or dictate feedback on a saved plan and explicitly
+  append it under a `User feedback on the plan` heading, so my raw feedback is
+  preserved with the project document.
+- Appending feedback preserves the submitted wording and existing plan content,
+  does not start Codex or change the task, and reports file errors without
+  clearing the draft.
+- Plan feedback is available on Mac, where the project plan file is stored.
+  The phone explains where to append it; feedback and project plan files are
+  not included in phone sync.
