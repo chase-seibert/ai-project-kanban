@@ -28,7 +28,9 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     guard await model.saveProject(project, isNew: true) else {
       throw BoardError.invalid(model.error ?? "project")
     }
-    for title in ["Plan fixture", "BLOCKED_FIXTURE", "APPROVAL_FIXTURE", "STOP_FIXTURE"] {
+    for title in [
+      "Plan fixture", "BLOCKED_FIXTURE", "APPROVAL_FIXTURE", "STOP_FIXTURE", "CLOSE_FIXTURE",
+    ] {
       print("START: \(title)")
       fflush(nil)
       let item = WorkItem(projectID: project.id, title: title, stage: .next)
@@ -43,6 +45,37 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         try await wait { model.library.latestRun(for: item.id)?.turnID != nil }
         await model.stop(model.library.latestRun(for: item.id)!.id)
       }
+      if title == "CLOSE_FIXTURE" {
+        do {
+          try await wait { model.library.latestRun(for: item.id)?.turnID != nil }
+        } catch {
+          print(
+            "DEBUG: start state=\(String(describing: model.library.latestRun(for: item.id))) "
+              + "message=\(model.runnerMessage)")
+          fflush(nil)
+          throw error
+        }
+        let run = model.library.latestRun(for: item.id)!
+        guard
+          let previousRun = model.library.runs.first(where: {
+            $0.id != run.id && $0.status == .succeeded
+          }),
+          model.runner?.closeAvailability(runID: previousRun.id)?.contains("Another Codex run")
+            == true
+        else { throw BoardError.invalid("Close did not guard another active run") }
+        await model.closeCodexSession(run.id)
+        do {
+          try await wait {
+            model.library.runs.first(where: { $0.id == run.id })?.status == .interrupted
+          }
+        } catch {
+          print(
+            "DEBUG: close status=\(model.library.runs.first(where: { $0.id == run.id })?.status.rawValue ?? "missing") "
+              + "message=\(model.runnerMessage)")
+          fflush(nil)
+          throw error
+        }
+      }
       do {
         try await wait { model.library.latestRun(for: item.id)?.status.isActive == false }
       } catch {
@@ -53,8 +86,13 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         throw error
       }
       let run = model.library.latestRun(for: item.id)!
-      let expected: RunStatus =
-        title == "BLOCKED_FIXTURE" ? .failed : title == "STOP_FIXTURE" ? .cancelled : .succeeded
+      let expected: RunStatus
+      switch title {
+      case "BLOCKED_FIXTURE": expected = .failed
+      case "STOP_FIXTURE": expected = .cancelled
+      case "CLOSE_FIXTURE": expected = .interrupted
+      default: expected = .succeeded
+      }
       guard run.status == expected else {
         throw BoardError.invalid("\(title): \(run.status) / \(run.error ?? model.error ?? "")")
       }
@@ -66,6 +104,62 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         throw BoardError.invalid("Missing logs")
       }
       print("PASS: \(title) → \(run.status.rawValue), task in \(expectedStage.rawValue)")
+      if title == "CLOSE_FIXTURE" {
+        guard
+          run.threadID != nil, run.turnID != nil, run.workDirectory == folder.path,
+          model.library.tasks.first(where: { $0.id == item.id })?.completed == false
+        else { throw BoardError.invalid("Close lost active session identity or task state") }
+        let activityCount = model.library.activity.filter {
+          $0.runID == run.id && $0.message == "Session released from StageChase. Continue in Codex."
+        }.count
+        await model.closeCodexSession(run.id)
+        let repeatedActivityCount = model.library.activity.filter {
+          $0.runID == run.id && $0.message == "Session released from StageChase. Continue in Codex."
+        }.count
+        guard repeatedActivityCount == activityCount else {
+          throw BoardError.invalid("Repeated session release duplicated its activity")
+        }
+        print("PASS: active close preserves session identity and is idempotent")
+        let queued = WorkItem(projectID: project.id, title: "QUEUED_AFTER_HANDOFF", stage: .next)
+        let confirmed = WorkItem(
+          projectID: project.id, title: "CONFIRMED_AFTER_HANDOFF", stage: .next)
+        _ = await model.perform(.createTask(queued, configuration: fixtureModelConfiguration))
+        guard model.library.latestRun(for: queued.id)?.status == .queued else {
+          throw BoardError.invalid("Expected queued work after close")
+        }
+        _ = await model.perform(.createTask(confirmed, configuration: fixtureModelConfiguration))
+        model.kickRunner()
+        do {
+          try await wait {
+            model.library.latestRun(for: queued.id)?.status.isActive == false
+              && model.library.latestRun(for: confirmed.id)?.status.isActive == false
+          }
+        } catch {
+          print(
+            "DEBUG: queued=\(String(describing: model.library.latestRun(for: queued.id))) "
+              + "confirmed=\(String(describing: model.library.latestRun(for: confirmed.id))) "
+              + "message=\(model.runnerMessage)")
+          fflush(nil)
+          throw error
+        }
+        guard model.library.latestRun(for: queued.id)?.status == .succeeded,
+          model.library.latestRun(for: confirmed.id)?.status == .succeeded
+        else {
+          throw BoardError.invalid("Explicit queue resume did not complete both fixture runs")
+        }
+        print("PASS: close pauses queued work until a later explicit runner action")
+      }
+      if title == "Plan fixture" {
+        let savedPlanPath = model.library.tasks.first(where: { $0.id == item.id })?.planPath
+        let summary = run.summary
+        await model.closeCodexSession(run.id)
+        guard let saved = model.library.runs.first(where: { $0.id == run.id }),
+          saved.status == .succeeded, saved.summary == summary,
+          model.library.tasks.first(where: { $0.id == item.id })?.stage == .planned,
+          model.library.tasks.first(where: { $0.id == item.id })?.planPath == savedPlanPath
+        else { throw BoardError.invalid("Closing a successful run changed its result") }
+        print("PASS: successful close preserves outcome, stage, summary, and plan")
+      }
     }
     print("Offline runner integration checks passed; no real agent turns were started.")
     var blocked = model.library.tasks.first { $0.title == "BLOCKED_FIXTURE" }!

@@ -322,6 +322,7 @@ public enum Mutation: Sendable {
   case restoreTask(UUID, WorkItem?, expectedRevision: Int?)
   case reorder(UUID, before: UUID, expectedRevision: Int)
   case retry(UUID, configuration: ResolvedCodexConfiguration? = nil)
+  case closeRun(UUID)
   case updateRun(AgentRun)
   case finishRun(UUID, planPath: String?)
   case log(Activity)
@@ -518,6 +519,22 @@ public enum BoardReducer {
       state.runs[index].error = nil
       state.runs[index].summary = "Retry queued; existing session will be resumed"
       state.runs[index].updatedAt = .now
+    case .closeRun(let runID):
+      guard let index = state.runs.firstIndex(where: { $0.id == runID }) else {
+        throw BoardError.missing
+      }
+      let run = state.runs[index]
+      let message = "Session released from StageChase. Continue in Codex."
+      if run.status.isActive {
+        state.runs[index].status = .interrupted
+        state.runs[index].summary = message
+        state.runs[index].error = nil
+      }
+      state.runs[index].updatedAt = .now
+      if !state.activity.contains(where: { $0.runID == runID && $0.message == message }) {
+        state.activity.append(
+          Activity(message, projectID: run.projectID, taskID: run.taskID, runID: runID))
+      }
     case .updateRun(let run):
       guard let index = state.runs.firstIndex(where: { $0.id == run.id }) else {
         throw BoardError.missing

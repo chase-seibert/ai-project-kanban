@@ -45,8 +45,16 @@ return to real data. Preview mode blocks automation.
 7. Review and verify changes. Mark complete yourself.
 
 Leave the Codex executable override blank for automatic detection. StageChase
-does not store API keys. Open in Codex uses the desktop `codex://threads/<id>`
-route; Copy Session ID is a fallback for versions without that route.
+does not store API keys. **Close Codex session** releases a saved session from
+StageChase; if it is active, StageChase interrupts the turn and marks it
+Interrupted while preserving the session ID, working folder, and files. A
+finished run keeps its result. Close is unavailable while another run owns the
+shared app-server. It pauses queued work until a confirmed stage action or
+Retry. Worktrees and conversation history are retained. After close, choose
+**Open in Codex** to open the same `codex://threads/<id>` route and continue
+manually in the desktop app; Copy Session ID remains available as a fallback.
+Opening the link alone does not release the StageChase connection or confirm
+that desktop continuation succeeded.
 
 ## Experimental iPhone pairing
 

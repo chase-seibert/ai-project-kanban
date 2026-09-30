@@ -2,6 +2,8 @@
 
 ## 2026-09-30
 
+- Added Close Codex session for explicit desktop handoff, preserving saved
+  results and workspaces while pausing the runner queue until a later action.
 - Prevented concurrent Mac listener starts from binding twice to port 47928.
   Port conflicts now explain how to release the port before retrying.
 - Added a saved phone automatic-sync toggle plus board pull-to-refresh and an

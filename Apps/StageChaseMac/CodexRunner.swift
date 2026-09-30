@@ -12,9 +12,14 @@ struct AgentApproval {
   private let connection: any AgentConnection
   private var activeID: UUID?
   private var draining = false
+  private var queuePausedForHandoff = false
+  private var closingRunID: UUID?
+  private var ownedThreads = Set<String>()
+  private var connectionGeneration: UInt64 = 0
   private var handlingCompletion = false
-  private var eventQueue: [(String, [String: Any])] = []
+  private var eventQueue: [(UInt64, String, [String: Any])] = []
   private var consumingEvents = false
+  private var terminalTurnIDs = Set<String>()
   private var finalOutcome: String?
   private var fileChangeDetails: [String: String] = [:]
   private var connectedExecutable: String?
@@ -36,7 +41,13 @@ struct AgentApproval {
       self?.enqueueEvent(method, request)
     }
     connection.disconnected = { [weak self] message in
-      Task { @MainActor [weak self] in await self?.fail(message) }
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.ownedThreads.removeAll()
+        self.connectedExecutable = nil
+        self.connectionGeneration &+= 1
+        await self.fail(message)
+      }
     }
   }
 
@@ -57,17 +68,24 @@ struct AgentApproval {
     return path
   }
 
+  private func connect(executable path: String) async throws {
+    let wasConnected = connection.connected
+    try await connection.connect(executable: path)
+    if !wasConnected { connectionGeneration &+= 1 }
+    connectedExecutable = path
+  }
+
   func refreshModelCatalog() async throws -> [CodexModelOption] {
     let path = try executable()
     if let connectedExecutable, connectedExecutable != path {
       guard activeID == nil else {
         throw BoardError.invalid("Finish the active Codex run before changing the executable.")
       }
-      connection.close()
+      try await connection.shutdown()
+      ownedThreads.removeAll()
       self.connectedExecutable = nil
     }
-    try await connection.connect(executable: path)
-    connectedExecutable = path
+    try await connect(executable: path)
     var cursor: String?
     var seen = Set<String>()
     var models: [CodexModelOption] = []
@@ -105,10 +123,11 @@ struct AgentApproval {
         guard activeID == nil else {
           throw BoardError.invalid("Finish the active Codex run before changing the executable.")
         }
-        connection.close()
+        try await connection.shutdown()
+        ownedThreads.removeAll()
+        self.connectedExecutable = nil
       }
-      try await connection.connect(executable: path)
-      connectedExecutable = path
+      try await connect(executable: path)
       let result = try await connection.call("account/read", ["refreshToken": false])
       let authenticated = !(result["account"] is NSNull) && result["account"] != nil
       model?.runnerMessage =
@@ -119,7 +138,8 @@ struct AgentApproval {
   }
 
   func drain() {
-    guard !draining, activeID == nil, let model, !model.isPreview,
+    guard !queuePausedForHandoff, closingRunID == nil, !draining, activeID == nil,
+      let model, !model.isPreview,
       let run = model.library.runs.filter({ $0.status == .queued }).sorted(by: {
         $0.createdAt < $1.createdAt
       }).first
@@ -135,6 +155,78 @@ struct AgentApproval {
       {
         drain()
       }
+    }
+  }
+
+  func resumeQueueAndDrain() {
+    queuePausedForHandoff = false
+    drain()
+  }
+
+  func closeAvailability(runID: UUID) -> String? {
+    guard let run = model?.library.runs.first(where: { $0.id == runID }),
+      let threadID = run.threadID, !threadID.isEmpty
+    else { return "This run has no saved Codex session to release." }
+    if closingRunID == runID { return "Closing…" }
+    if closingRunID != nil { return "Another session is closing." }
+    if activeID != nil && activeID != runID {
+      return "Another Codex run must finish or be stopped before this session can close."
+    }
+    return nil
+  }
+
+  func closeSession(runID: UUID) async {
+    guard let model, let run = model.library.runs.first(where: { $0.id == runID }),
+      let threadID = run.threadID, !threadID.isEmpty
+    else {
+      model?.runnerMessage = "This run has no saved Codex session to release."
+      return
+    }
+    guard closingRunID == nil else { return }
+    guard activeID == nil || activeID == runID else {
+      model.runnerMessage =
+        "Another Codex run must finish or be stopped before this session can close."
+      return
+    }
+    closingRunID = runID
+    queuePausedForHandoff = true
+    let shouldShutdown = ownedThreads.contains(threadID) && connection.connected
+    if activeID == runID, let turn = run.turnID {
+      do {
+        _ = try await connection.call(
+          "turn/interrupt", ["threadId": threadID, "turnId": turn], timeout: .seconds(1))
+      } catch {
+        // Confirmed process shutdown below can still establish release.
+      }
+      for _ in 0..<10 {
+        if terminalTurnIDs.contains(turn) { break }
+        try? await Task.sleep(for: .milliseconds(50))
+      }
+      terminalTurnIDs.remove(turn)
+    }
+    do {
+      guard closingRunID == runID else { return }
+      if shouldShutdown { try await connection.shutdown() }
+      if shouldShutdown {
+        ownedThreads.removeAll()
+        connectedExecutable = nil
+        connectionGeneration &+= 1
+      }
+      approval = nil
+      if activeID == runID { activeID = nil }
+      if activeID == nil { draining = false }
+      guard await model.perform(.closeRun(runID)) else {
+        closingRunID = nil
+        model.runnerMessage =
+          "The Codex session was released, but StageChase could not save that handoff. Retry Close Codex session to finish recording it."
+        return
+      }
+      model.runnerMessage =
+        "Session released from StageChase. Open the saved session in Codex to continue."
+      closingRunID = nil
+    } catch {
+      closingRunID = nil
+      model.runnerMessage = error.localizedDescription
     }
   }
 
@@ -158,7 +250,7 @@ struct AgentApproval {
       else {
         throw BoardError.invalid("Choose a specific, existing project folder in project settings.")
       }
-      try await connection.connect(executable: executable())
+      try await connect(executable: executable())
       let account = try await connection.call("account/read", ["refreshToken": false])
       guard account["account"] != nil, !(account["account"] is NSNull) else {
         throw BoardError.invalid("Sign in to Codex, then retry this run.")
@@ -212,12 +304,14 @@ struct AgentApproval {
       guard activeID == initial.id else { return }
       run = currentRun() ?? run
       run.threadID = threadID
+      ownedThreads.insert(threadID)
       run.summary = "Codex is starting \(run.kind.rawValue)…"
       guard await model.perform(.updateRun(run)) else {
         throw BoardError.invalid("Could not save the Codex session ID. The turn was not started.")
       }
       _ = try? await connection.call(
         "thread/name/set", ["threadId": threadID, "name": "StageChase · \(item.title)"])
+      guard activeID == initial.id, closingRunID != initial.id else { return }
       let resultTurn = try await connection.call(
         "turn/start",
         [
@@ -239,14 +333,18 @@ struct AgentApproval {
             "required": ["outcome", "summary"],
           ],
         ])
-      if activeID == initial.id, var latest = currentRun(),
+      if activeID == initial.id, closingRunID != initial.id, var latest = currentRun(),
         let turn = resultTurn["turn"] as? [String: Any]
       {
         latest.turnID = turn["id"] as? String
         await model.perform(.updateRun(latest))
       }
       model.runnerMessage = "Codex is connected. Progress and approval requests appear here."
-    } catch { if activeID == initial.id { await fail(error.localizedDescription) } }
+    } catch {
+      if closingRunID != initial.id, activeID == initial.id {
+        await fail(error.localizedDescription)
+      }
+    }
   }
 
   private func prompt(item: WorkItem, run: AgentRun) -> String {
@@ -362,12 +460,13 @@ struct AgentApproval {
           "error",
         ].contains(method)
     else { return }
-    eventQueue.append((method, params))
+    eventQueue.append((connectionGeneration, method, params))
     guard !consumingEvents else { return }
     consumingEvents = true
     Task {
       while !eventQueue.isEmpty {
-        let (method, params) = eventQueue.removeFirst()
+        let (generation, method, params) = eventQueue.removeFirst()
+        guard generation == connectionGeneration else { continue }
         await event(method, params)
       }
       consumingEvents = false
@@ -379,7 +478,12 @@ struct AgentApproval {
       await handleRequest(id, method, params)
       return
     }
-    guard let model, var run = currentRun(),
+    if method == "turn/completed",
+      let turnID = (params["turn"] as? [String: Any])?["id"] as? String
+    {
+      terminalTurnIDs.insert(turnID)
+    }
+    guard closingRunID == nil, let model, var run = currentRun(),
       params["threadId"] as? String == run.threadID
     else { return }
     run.updatedAt = .now
@@ -439,6 +543,11 @@ struct AgentApproval {
         }
       }
     case "turn/completed":
+      if let eventTurnID = (params["turn"] as? [String: Any])?["id"] as? String,
+        let currentTurnID = run.turnID, eventTurnID != currentTurnID
+      {
+        return
+      }
       guard !handlingCompletion else { return }
       handlingCompletion = true
       defer { handlingCompletion = false }
@@ -461,6 +570,7 @@ struct AgentApproval {
             }
             planPath = relative
           }
+          guard closingRunID != run.id else { return }
           guard await model.perform(.finishRun(run.id, planPath: planPath)) else {
             throw BoardError.invalid(
               "Could not save completion; review the session before retrying.")
@@ -484,6 +594,10 @@ struct AgentApproval {
   }
 
   private func handleRequest(_ id: Any, _ method: String, _ params: [String: Any]) async {
+    guard closingRunID == nil else {
+      try? connection.reject(id: id, message: "StageChase is closing this session.")
+      return
+    }
     guard let run = currentRun() else {
       try? connection.reject(id: id, message: "No active StageChase run")
       return
@@ -534,7 +648,7 @@ struct AgentApproval {
   }
 
   func answerApproval(allow: Bool) async {
-    guard let approval else { return }
+    guard let approval, approval.runID == activeID, closingRunID == nil else { return }
     do {
       if var run = currentRun() {
         run.status = .running
@@ -558,8 +672,18 @@ struct AgentApproval {
       if let thread = run.threadID, let turn = run.turnID {
         _ = try? await connection.call("turn/interrupt", ["threadId": thread, "turnId": turn])
       }
-      connection.close()
+      do {
+        try await connection.shutdown()
+      } catch {
+        activeID = id
+        model.runnerMessage = error.localizedDescription
+        return
+      }
+      ownedThreads.removeAll()
+      connectedExecutable = nil
+      connectionGeneration &+= 1
       approval = nil
+      draining = false
     }
     run.status = .cancelled
     run.summary = "Stopped by you. Files already changed are preserved."
@@ -576,9 +700,22 @@ struct AgentApproval {
     run.updatedAt = .now
     activeID = nil
     approval = nil
-    connection.close()
+    do {
+      try await connection.shutdown()
+      ownedThreads.removeAll()
+      connectedExecutable = nil
+      connectionGeneration &+= 1
+    } catch {
+      model?.runnerMessage =
+        "\(message) The Codex app-server did not confirm shutdown: \(error.localizedDescription)"
+    }
     await model?.perform(.updateRun(run))
-    model?.runnerMessage = message
+    if connection.connected {
+      model?.runnerMessage =
+        "\(message) The Codex app-server did not confirm shutdown; use Close Codex session to retry release."
+    } else {
+      model?.runnerMessage = message
+    }
     // A failure pauses the queue. A deliberate new action or retry may resume it.
   }
   private func currentRun() -> AgentRun? { model?.library.runs.first { $0.id == activeID } }

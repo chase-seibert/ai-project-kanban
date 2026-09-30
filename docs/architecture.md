@@ -57,7 +57,15 @@ retrying an interrupted operation. Failure pauses the queue.
 
 The app starts a dedicated stdio app-server, not the desktop's private database.
 Requests time out, disconnects surface errors, and Stop closes the owned process.
-The runner uses the selected model from the StageChase snapshot. Protocol source:
+Close Codex session can release a saved thread by interrupting its active turn
+and waiting for the exact StageChase-owned process to exit. Other active work
+blocks this action because the process can hold several threads. A close marks
+unfinished work Interrupted while preserving its IDs, steps, and worktree; a
+finished run keeps its saved outcome and summary. Close pauses queue draining
+until a later confirmed stage action or Retry. Open in Codex is a separate
+desktop deep link; continuation and result synchronization remain manual.
+Shutdown uses a bounded asynchronous wait and reports timeout without claiming
+release. Protocol source:
 [OpenAI app-server](https://learn.chatgpt.com/docs/app-server); the installed CLI's
 generated JSON schema was checked for exact request spellings.
 

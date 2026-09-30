@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+  import AppKit
+#endif
 
 @MainActor @Observable final class AppModel {
   var library = Library()
@@ -660,9 +663,25 @@ import UniformTypeIdentifiers
   }
   func kickRunner() {
     #if os(macOS)
-      runner?.drain()
+      runner?.resumeQueueAndDrain()
     #endif
   }
+  #if os(macOS)
+    func closeCodexSession(_ id: UUID) async {
+      await runner?.closeSession(runID: id)
+    }
+    func closeCodexSessionReason(_ id: UUID) -> String? {
+      runner?.closeAvailability(runID: id) ?? "The Mac Codex runner is unavailable."
+    }
+    func openCodexSession(_ threadID: String) {
+      guard let url = URL(string: "codex://threads/\(threadID)"), NSWorkspace.shared.open(url)
+      else {
+        runnerMessage =
+          "Codex could not open this session. Use Copy session ID, then find it in the desktop app."
+        return
+      }
+    }
+  #endif
   func stop(_ id: UUID) async {
     #if os(macOS)
       await runner?.stop(id)

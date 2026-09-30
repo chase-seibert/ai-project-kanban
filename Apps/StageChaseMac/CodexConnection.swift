@@ -4,11 +4,14 @@ import Foundation
   var notification: ((String, [String: Any]) -> Void)? { get set }
   var request: ((Any, String, [String: Any]) -> Void)? { get set }
   var disconnected: ((String) -> Void)? { get set }
+  var connected: Bool { get }
   func connect(executable: String) async throws
   func call(_ method: String, _ params: [String: Any]) async throws -> [String: Any]
+  func call(_ method: String, _ params: [String: Any], timeout: Duration) async throws
+    -> [String: Any]
   func respond(id: Any, result: [String: Any]) throws
   func reject(id: Any, message: String) throws
-  func close()
+  func shutdown() async throws
 }
 
 /// JSONL transport for the official Codex app-server protocol. Never shells user input.
@@ -25,9 +28,11 @@ import Foundation
   private var pending: [Int: CheckedContinuation<Data, Error>] = [:]
   private var timeouts: [Int: Task<Void, Never>] = [:]
   var connected: Bool { process?.isRunning == true }
+  private var expectedShutdown = false
 
   func connect(executable: String) async throws {
     if connected { return }
+    if process != nil { try await shutdown() }
     let task = Process()
     let stdin = Pipe()
     let stdout = Pipe()
@@ -53,7 +58,8 @@ import Foundation
     stderr.fileHandleForReading.readabilityHandler = { handle in _ = handle.availableData }
     task.terminationHandler = { [weak self] process in
       let status = process.terminationStatus
-      Task { @MainActor [weak self] in self?.lostConnection("Codex app-server exited (\(status)).")
+      Task { @MainActor [weak self] in
+        self?.processTerminated(process, status: status)
       }
     }
     process = task
@@ -64,12 +70,18 @@ import Foundation
         ["clientInfo": ["name": "stagechase", "title": "StageChase", "version": "2.0.0"]])
       try send(["method": "initialized", "params": [:]])
     } catch {
-      close()
+      try? await shutdown()
       throw error
     }
   }
 
   func call(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
+    try await call(method, params, timeout: .seconds(45))
+  }
+
+  func call(_ method: String, _ params: [String: Any], timeout: Duration) async throws
+    -> [String: Any]
+  {
     guard connected else { throw BoardError.invalid("Codex is not connected.") }
     let id = nextID
     nextID += 1
@@ -80,7 +92,7 @@ import Foundation
         return
       }
       timeouts[id] = Task { [weak self] in
-        do { try await Task.sleep(for: .seconds(45)) } catch { return }
+        do { try await Task.sleep(for: timeout) } catch { return }
         self?.pending.removeValue(forKey: id)?.resume(
           throwing: BoardError.invalid(
             "Codex did not answer \(method). Check the session before retrying."))
@@ -95,16 +107,63 @@ import Foundation
     try send(["id": id, "error": ["code": -32601, "message": message]])
   }
 
-  func close() {
+  func shutdown() async throws {
+    guard let process else {
+      resetTransport(reason: "Codex connection closed.")
+      return
+    }
+    expectedShutdown = true
     output?.readabilityHandler = nil
     errors?.readabilityHandler = nil
-    process?.terminationHandler = nil
-    if process?.isRunning == true { process?.terminate() }
+    if process.isRunning { process.terminate() }
+    for _ in 0..<100 {
+      if !process.isRunning {
+        finishShutdown(process)
+        return
+      }
+      try? await Task.sleep(for: .milliseconds(50))
+    }
+    throw BoardError.invalid(
+      "Codex app-server did not exit within 5 seconds. The session is not confirmed released; try closing again."
+    )
+  }
+
+  private func processTerminated(_ terminated: Process, status: Int32) {
+    guard process === terminated else { return }
+    if expectedShutdown {
+      finishShutdown(terminated)
+    } else {
+      process = nil
+      closePipes()
+      resetTransport(reason: "Codex connection closed.")
+      disconnected?("Codex app-server exited (\(status)).")
+    }
+  }
+
+  private func finishShutdown(_ terminated: Process) {
+    guard process === terminated else { return }
+    terminated.terminationHandler = nil
     process = nil
+    expectedShutdown = false
+    closePipes()
+    resetTransport(reason: "Codex connection closed.")
+  }
+
+  private func closePipes() {
+    output?.readabilityHandler = nil
+    errors?.readabilityHandler = nil
+    try? input?.close()
+    try? output?.close()
+    try? errors?.close()
     input = nil
+    output = nil
+    errors = nil
+  }
+
+  private func resetTransport(reason: String) {
     buffer = Data()
     for continuation in pending.values {
-      continuation.resume(throwing: BoardError.invalid("Codex connection closed."))
+      continuation.resume(throwing: BoardError.invalid(reason))
     }
     pending.removeAll()
     for timeout in timeouts.values { timeout.cancel() }
@@ -123,7 +182,7 @@ import Foundation
     buffer.append(data)
     guard buffer.count < 32 * 1024 * 1024 else {
       lostConnection("Codex returned an oversized message.")
-      close()
+      Task { @MainActor in try? await self.shutdown() }
       return
     }
     while let newline = buffer.firstIndex(of: 0x0A) {

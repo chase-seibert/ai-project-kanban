@@ -16,7 +16,9 @@ not yet verified.
 | Approval request | Show Allow once / Deny and Needs Approval state |
 | Unsupported interaction | Fail visibly; retain session link for continuing in Codex |
 | Blocked/failed/disconnected | Keep task in its stage, preserve error and retry state |
-| Stop | Interrupt/close owned server; preserve files already changed |
+| Stop | Cancel active work; close the owned server and preserve files already changed |
+| Close Codex session | Interrupt active work as Interrupted, then confirm shutdown of the owned server; preserve finished outcomes, conversation history, working folder, and files |
+| Open in Codex | Open the saved thread link only; does not release or continue the StageChase connection |
 | Restart | Mark active/queued runs Interrupted; never automatically replay |
 | Retry | Explicitly resume the saved model, reasoning effort, session, and working folder |
 | Phone snapshot refresh | Read Mac state only; never enqueue or invoke the runner |
@@ -27,6 +29,13 @@ Workspace-write sandboxing and default network restrictions remain enabled.
 Unknown requests are not silently approved. The agent is instructed not to
 commit, push, publish, deploy, or delete unrelated files. Review approvals and
 results; prompt restrictions are not an absolute enforcement boundary.
+
+Close Codex session is available for saved sessions. It is disabled while a
+different run owns the shared app-server process. A successful close pauses
+automatic queue draining; queued work stays queued until a confirmed stage
+action or explicit Retry resumes the runner. Closing does not delete a retained
+worktree or session history. After release, use Open in Codex to open the same
+thread and continue it manually there. StageChase does not import desktop results.
 
 Events and approvals share one serial queue so a delayed Running update cannot
 overwrite Needs Approval. Public command logs are bounded per entry. Private

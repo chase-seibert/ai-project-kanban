@@ -413,14 +413,24 @@ struct RunDetail: View {
           }.padding(12).background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
         }
         if let thread = run.threadID {
+          let closeReason = model.closeCodexSessionReason(run.id)
+          let closing = closeReason == "Closing…"
           HStack {
             Button("Open in Codex", systemImage: "arrow.up.right.square") {
-              if let url = URL(string: "codex://threads/\(thread)") { NSWorkspace.shared.open(url) }
-            }
+              model.openCodexSession(thread)
+            }.disabled(closing)
             Button("Copy session ID", systemImage: "doc.on.doc") {
               NSPasteboard.general.clearContents()
               NSPasteboard.general.setString(thread, forType: .string)
             }.labelStyle(.iconOnly).help("Copy session ID")
+            Button(closing ? "Closing…" : "Close Codex session", systemImage: "xmark.circle") {
+              Task { await model.closeCodexSession(run.id) }
+            }
+            .disabled(closeReason != nil)
+            .help(
+              closeReason
+                ?? "Release this session from StageChase so you can continue in the Codex desktop app. Files and conversation history are kept."
+            )
           }
         }
         if let path = run.workDirectory {
