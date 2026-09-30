@@ -2,6 +2,9 @@
 
 ## 2026-09-30
 
+- Added an editable Mac-local plan format prompt with user requirements,
+  architecture/data model, basic test cases, and high-level implementation
+  sections, applied only to future planning turns.
 - Added Mac-local Codex approval modes: Codex no-prompt policy by default,
   explicit Ask me decisions, and one-time automatic approval for supported
   command/file requests without widening workspace or network access.

@@ -21,6 +21,40 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     let preferences = UserDefaults(suiteName: "StageChase.RunnerSmoke.\(UUID().uuidString)")!
     preferences.set(false, forKey: "localSyncEnabled")
     let model = AppModel(repository: repo, preferences: preferences, preview: false)
+    guard model.planFormatPrompt == AppModel.defaultPlanFormatPrompt else {
+      throw BoardError.invalid("The first-launch plan format prompt did not use its default")
+    }
+    let customPlanFormat = """
+      PLAN_FORMAT_SENTINEL
+      ## User requirements
+      ## Architecture and data model
+      ## Basic test cases
+      ## High-level implementation details
+      """
+    model.setPlanFormatPrompt(customPlanFormat)
+    guard model.planFormatPrompt == customPlanFormat else {
+      throw BoardError.invalid("The custom plan format prompt was not saved")
+    }
+    let restoredPlanFormat = AppModel(repository: repo, preferences: preferences, preview: false)
+    guard restoredPlanFormat.planFormatPrompt == customPlanFormat else {
+      throw BoardError.invalid(
+        "The plan format prompt did not persist across AppModel reconstruction")
+    }
+    model.setPlanFormatPrompt(" \n ")
+    guard model.resolvedPlanFormatPrompt == AppModel.defaultPlanFormatPrompt else {
+      throw BoardError.invalid("A blank plan format prompt did not fall back to the default")
+    }
+    model.resetPlanFormatPrompt()
+    guard model.planFormatPrompt == AppModel.defaultPlanFormatPrompt,
+      preferences.string(forKey: AppModel.planFormatPromptPreferenceKey) == nil
+    else { throw BoardError.invalid("Reset did not restore the default plan format prompt") }
+    model.setPlanFormatPrompt(
+      String(repeating: "x", count: AppModel.maximumPlanFormatPromptCharacters + 1))
+    guard model.planFormatPrompt.count == AppModel.maximumPlanFormatPromptCharacters,
+      model.planFormatPromptError != nil
+    else { throw BoardError.invalid("An oversized plan format prompt was not bounded visibly") }
+    model.setPlanFormatPrompt(customPlanFormat)
+    print("PASS: plan format prompt defaults, persists, falls back when blank, and resets")
     guard model.approvalMode == .approveForMe, model.approvalModeError == nil else {
       throw BoardError.invalid("Missing approval mode must default to Approve for me")
     }
@@ -36,6 +70,9 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     guard
       AppModel(repository: repo, preferences: freshPreferences, preview: false).approvalMode
         == .approveForMe
+        && AppModel(repository: repo, preferences: freshPreferences, preview: false)
+          .planFormatPrompt
+          == AppModel.defaultPlanFormatPrompt
     else {
       throw BoardError.invalid("A fresh preference suite did not default to Approve for me")
     }

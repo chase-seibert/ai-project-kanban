@@ -9,6 +9,7 @@ not yet verified.
 | --- | --- |
 | Open, poll, switch project, enable automation | Does not enqueue or start work |
 | Refresh model catalog or edit model or approval settings | Does not enqueue or start work |
+| Edit or reset the plan format prompt | Saves a Mac-local preference; does not enqueue work |
 | Confirm adding/moving to Next | Persist one planning run and invoke Codex |
 | Planning success | Require structured success plus a saved nonempty plan; move to Planned |
 | Confirm Implementation | Require plan; prepare checkout/worktree; invoke Codex |
@@ -53,6 +54,15 @@ changes apply to later runs and explicitly confirmed retries. The preference is
 stored in Mac-local UserDefaults and is excluded from library sync and exports.
 If a saved mode is malformed, Settings shows an error and the runner waits for
 the user to choose a valid mode.
+
+Mac Settings includes a bounded, editable plan-format prompt. Its default
+organizes planning output as user requirements, architecture and data model,
+basic test cases, and high-level implementation details, in that order. Blank
+or whitespace-only text falls back to the default. StageChase adds the resolved
+text only to a planning turn; implementation prompts and saved plans are
+unchanged. The preference is Mac-local, excluded from library export/sync, and
+does not override the fixed task scope, approval policy, sandbox, or final
+outcome requirements. Prompt wording is guidance rather than a security control.
 
 Close Codex session is available for saved sessions. It is disabled while a
 different run owns the shared app-server process. A successful close pauses

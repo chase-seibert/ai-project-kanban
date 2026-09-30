@@ -53,6 +53,18 @@ open.
 - As a user, I want unavailable models and unsupported reasoning choices to
   stop visibly before a turn starts, so that the app never substitutes silently.
 
+## Plan format prompt
+
+- As a user, I want generated plans to start with user-story requirements,
+  continue with substantive architecture and data-model changes, include basic
+  test cases, and finish with high-level implementation details, so that plans
+  explain intent, design, and how to recognize working behavior.
+- As a user, I want to edit and reset this prompt in Mac Settings, so that I can
+  tailor future planning runs without changing application code.
+- As a user, I want this preference to remain local to this Mac and apply only
+  to planning runs, so that it does not change saved plans or implementation
+  instructions.
+
 ## Implementation automation
 
 - As a user, I want Implementation to require a plan, so that Codex does not

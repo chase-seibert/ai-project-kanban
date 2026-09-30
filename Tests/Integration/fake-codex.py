@@ -22,6 +22,20 @@ def event(method, **params):
 def complete(params):
     prompt = params["input"][0]["text"]
     blocked = "BLOCKED_FIXTURE" in prompt
+    if "Task: Plan fixture" in prompt:
+        expected_sections = [
+            "## User requirements",
+            "## Architecture and data model",
+            "## Basic test cases",
+            "## High-level implementation details",
+        ]
+        positions = [prompt.find(section) for section in expected_sections]
+        if "PLAN_FORMAT_SENTINEL" not in prompt or any(position < 0 for position in positions):
+            blocked = True
+        elif positions != sorted(positions):
+            blocked = True
+    if "Task: Implement fixture" in prompt and "PLAN_FORMAT_SENTINEL" in prompt:
+        blocked = True
     if "Plan only" in prompt and not blocked:
         path = re.search(r"to-do/[a-f0-9-]+\.md", prompt).group()
         destination = pathlib.Path(params["cwd"]) / path

@@ -39,6 +39,8 @@ return to real data. Preview mode blocks automation.
 3. Settings → Default Codex model → refresh available models. The built-in
    setting is Latest Luna · High; choose another visible model or effort if
    needed. Project and task settings can inherit or override this pair.
+   Settings → Plan format prompt edits the structure for future planning runs
+   on this Mac; Reset to default restores the built-in format.
 4. Move an Inbox task to Next and confirm the displayed model and effort.
 5. Watch Activity; approve only commands you understand.
 6. Inspect the plan, then explicitly move to Implementation and confirm.

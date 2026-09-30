@@ -6,6 +6,25 @@ import UniformTypeIdentifiers
 #endif
 
 @MainActor @Observable final class AppModel {
+  #if os(macOS)
+    static let defaultPlanFormatPrompt = """
+      Write a concise, concrete plan grounded in this repository. Use these sections in this order:
+
+      ## User requirements
+      Start with the requested behavior as “As a user, I want …, so that …” statements. Capture the problem and scope here, preserve the user's intent, and identify assumptions rather than inventing requirements.
+
+      ## Architecture and data model
+      Explain substantive component, data-flow, persistence, schema/migration, and compatibility changes needed. State clearly when no material architecture or data-model change is required.
+
+      ## Basic test cases
+      Give observable scenarios and expected results that show whether the feature works, including important failure or boundary cases.
+
+      ## High-level implementation details
+      Outline the main code areas and sequence of work. Include concrete implementation steps, material risks, verification, and unresolved decisions without prescribing trivial edits or writing code.
+      """
+    static let planFormatPromptPreferenceKey = "codexPlanFormatPrompt"
+    static let maximumPlanFormatPromptCharacters = 12_000
+  #endif
   var library = Library()
   var selectedProjectID: UUID?
   var selectedTaskID: UUID?
@@ -21,6 +40,14 @@ import UniformTypeIdentifiers
   var runnerMessage = "Codex starts only after a confirmed stage change."
   var globalModelConfiguration = CodexModelConfiguration()
   var modelConfigurationError: String?
+  #if os(macOS)
+    var planFormatPrompt = AppModel.defaultPlanFormatPrompt
+    var planFormatPromptError: String?
+    var resolvedPlanFormatPrompt: String {
+      planFormatPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        ? Self.defaultPlanFormatPrompt : planFormatPrompt
+    }
+  #endif
   var approvalMode = CodexApprovalMode.approveForMe
   var approvalModeError: String?
   var modelCatalog: [CodexModelOption] = []
@@ -47,6 +74,15 @@ import UniformTypeIdentifiers
       preview
       ? UserDefaults(suiteName: "StageChase.Preview.\(UUID().uuidString)")!
       : preferences
+    #if os(macOS)
+      if let saved = self.preferences.string(forKey: Self.planFormatPromptPreferenceKey) {
+        planFormatPrompt = String(saved.prefix(Self.maximumPlanFormatPromptCharacters))
+        if saved.count > Self.maximumPlanFormatPromptCharacters {
+          planFormatPromptError =
+            "The saved plan prompt exceeded the character limit and was shortened. Review it in Settings."
+        }
+      }
+    #endif
     if let saved = self.preferences.data(forKey: "codexModelConfiguration") {
       do {
         globalModelConfiguration = try JSONDecoder().decode(
@@ -601,6 +637,23 @@ import UniformTypeIdentifiers
     globalModelConfiguration = CodexModelConfiguration()
     modelConfigurationError = nil
   }
+
+  #if os(macOS)
+    func setPlanFormatPrompt(_ prompt: String) {
+      planFormatPrompt = String(prompt.prefix(Self.maximumPlanFormatPromptCharacters))
+      preferences.set(planFormatPrompt, forKey: Self.planFormatPromptPreferenceKey)
+      planFormatPromptError =
+        prompt.count > Self.maximumPlanFormatPromptCharacters
+        ? "The plan prompt is limited to \(Self.maximumPlanFormatPromptCharacters) characters. Extra text was not saved."
+        : nil
+    }
+
+    func resetPlanFormatPrompt() {
+      preferences.removeObject(forKey: Self.planFormatPromptPreferenceKey)
+      planFormatPrompt = Self.defaultPlanFormatPrompt
+      planFormatPromptError = nil
+    }
+  #endif
 
   func setApprovalMode(_ mode: CodexApprovalMode) {
     approvalMode = mode

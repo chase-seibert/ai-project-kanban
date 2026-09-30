@@ -44,6 +44,14 @@ run without a model snapshot asks for explicit confirmation before adopting a
 choice. The global preference is local to this Mac and is not part of library
 export/restore; project/task overrides and run snapshots are included.
 
+The editable plan-format instruction is a bounded Mac-local `UserDefaults`
+preference, separate from `Library` and run records. Missing or whitespace-only
+text resolves to the built-in template. `CodexRunner.prompt` appends it only to
+new planning turn input, under the fixed task, scope, approval, sandbox, and
+structured-result requirements. It does not alter implementation prompts,
+existing plan files, or an already-submitted turn; it is not an enforcement
+boundary.
+
 Planning writes `to-do/<task UUID>.md`. Implementation verifies the plan, then
 uses a clean checkout or a detached HEAD worktree under Application Support/
 StageChase/Worktrees when the checkout is dirty. Only the approved plan is copied;

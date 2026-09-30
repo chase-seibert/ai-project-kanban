@@ -42,6 +42,13 @@ with High reasoning. Catalog discovery is a Settings/confirmation action and
 does not start a turn. The iPhone preserves saved overrides and run snapshots
 but does not expose Mac model controls or discover models.
 
+Mac Settings also exposes a multiline **Plan format prompt** editor with a
+reset-to-default action. Its default asks plans to start with user-story
+requirements, then cover architecture and data-model changes, basic test cases,
+and high-level implementation details. The bounded preference is stored on
+this Mac and affects future planning runs only; it does not change existing
+plans or implementation prompts.
+
 Use native SwiftUI controls, SF Symbols, semantic colors/fonts, NSOpenPanel,
 NSPasteboard, NSUndoManager, and Settings. Cmd-N adds a task; Shift-Cmd-N adds a
 project; Shift-Cmd-A opens activity; Cmd +/-/0 adjusts persisted semantic text

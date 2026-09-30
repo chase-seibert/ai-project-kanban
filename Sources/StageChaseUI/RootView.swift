@@ -380,6 +380,28 @@ private struct GeneralSettingsForm: View {
           )
           .stageFont(.caption).foregroundStyle(.secondary)
         }
+        Section("Plan format prompt") {
+          Text(
+            "StageChase adds this guidance to future planning runs on this Mac. It does not change saved plans or implementation runs."
+          ).stageFont(.callout).foregroundStyle(.secondary)
+          TextEditor(
+            text: Binding(
+              get: { model.planFormatPrompt },
+              set: { model.setPlanFormatPrompt($0) })
+          )
+          .font(.body)
+          .frame(minHeight: 220, maxHeight: 340)
+          .accessibilityLabel("Plan format prompt")
+          if let error = model.planFormatPromptError {
+            Text(error).stageFont(.caption).foregroundStyle(.orange)
+          }
+          HStack {
+            Text("Limited to \(AppModel.maximumPlanFormatPromptCharacters) characters.")
+              .stageFont(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Reset to default") { model.resetPlanFormatPrompt() }
+          }
+        }
       #endif
       Section("Backups") {
         Button(
