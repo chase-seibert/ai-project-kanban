@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftData
 
@@ -23,13 +24,38 @@ enum StageMigrationPlan: SchemaMigrationPlan {
   static var stages: [MigrationStage] { [] }
 }
 
+private struct StoredSyncReceipt: Codable, Sendable {
+  var payloadDigest: String
+  var sequence: UInt64
+  var deviceID: UUID
+  var clientSequence: UInt64
+}
+
+private struct StoredSyncState: Codable, Sendable {
+  var libraryID = UUID()
+  var sequence: UInt64 = 0
+  var deviceHighWater: [UUID: UInt64] = [:]
+  var receipts: [UUID: StoredSyncReceipt] = [:]
+}
+
+public struct SyncLibraryState: Sendable {
+  public var libraryID: UUID
+  public var sequence: UInt64
+  public var library: Library
+}
+
 /// One durable row per entity; mutations update only changed rows in a single SQLite transaction.
 /// All decoding and persistence runs on this actor, not the main UI executor.
 public actor LibraryRepository {
   private let container: ModelContainer
   private var cached: Library?
+  private var syncState: StoredSyncState?
   private let legacyURL: URL?
-  public init(url: URL? = nil, legacyURL: URL? = nil, inMemory: Bool = false) throws {
+  private let recoverActiveRuns: Bool
+  public init(
+    url: URL? = nil, legacyURL: URL? = nil, inMemory: Bool = false,
+    recoverActiveRuns: Bool = true
+  ) throws {
     let schema = Schema(versionedSchema: StageSchemaV1.self)
     let config: ModelConfiguration
     if let url {
@@ -41,6 +67,7 @@ public actor LibraryRepository {
     container = try ModelContainer(
       for: schema, migrationPlan: StageMigrationPlan.self, configurations: [config])
     self.legacyURL = legacyURL
+    self.recoverActiveRuns = recoverActiveRuns
   }
 
   public func load() throws -> Library {
@@ -56,7 +83,10 @@ public actor LibraryRepository {
       case "run": library.runs.append(try decoder.decode(AgentRun.self, from: entry.payload))
       case "activity":
         library.activity.append(try decoder.decode(Activity.self, from: entry.payload))
-      case "metadata": break
+      case "metadata":
+        if entry.key == "sync-state" {
+          syncState = try decoder.decode(StoredSyncState.self, from: entry.payload)
+        }
       default:
         throw BoardError.invalid("Unknown record in the library. Your data has not been changed.")
       }
@@ -75,23 +105,116 @@ public actor LibraryRepository {
     library.activity.sort { $0.date < $1.date }
     // Never silently restart a paid/side-effectful operation after a crash.
     var recovered = false
-    for index in library.runs.indices
-    where [.running, .needsInput, .queued].contains(library.runs[index].status) {
-      library.runs[index].status = .interrupted
-      library.runs[index].summary = "Runner stopped. Review the session, then retry explicitly."
-      recovered = true
+    if recoverActiveRuns {
+      for index in library.runs.indices
+      where [.running, .needsInput, .queued].contains(library.runs[index].status) {
+        library.runs[index].status = .interrupted
+        library.runs[index].summary = "Runner stopped. Review the session, then retry explicitly."
+        recovered = true
+      }
     }
     try library.validate()
-    if recovered { try persist(library) }
+    if syncState == nil { syncState = StoredSyncState() }
+    if recovered { syncState?.sequence &+= 1 }
+    if recovered || entries.isEmpty || syncState != nil {
+      try persist(library, syncState: syncState)
+    }
     cached = library
     return library
   }
 
   public func apply(_ command: Mutation) throws -> Library {
     let library = try BoardReducer.apply(command, to: load())
-    try persist(library)
+    var nextSyncState = syncState ?? StoredSyncState()
+    nextSyncState.sequence &+= 1
+    try persist(library, syncState: nextSyncState)
     cached = library
+    syncState = nextSyncState
     return library
+  }
+
+  public func syncStateSnapshot() throws -> SyncLibraryState {
+    let library = try load()
+    let state = syncState ?? StoredSyncState()
+    return SyncLibraryState(libraryID: state.libraryID, sequence: state.sequence, library: library)
+  }
+
+  /// Replica application persists downloaded Mac state without performing local-run recovery.
+  public func replaceReplica(_ library: Library, libraryID: UUID, sequence: UInt64) throws {
+    guard !recoverActiveRuns else {
+      throw BoardError.invalid("Replica data requires a non-recovering repository.")
+    }
+    try library.validate()
+    let existing = try load()
+    if let currentState = syncState, currentState.libraryID != libraryID,
+      !existing.projects.isEmpty
+    {
+      throw BoardError.invalid("This replica belongs to a different Mac library.")
+    }
+    var nextState = syncState ?? StoredSyncState()
+    nextState.libraryID = libraryID
+    nextState.sequence = sequence
+    try persist(library, syncState: nextState)
+    cached = library
+    syncState = nextState
+  }
+
+  /// Validates and commits an idempotent phone command with its receipt in the same store save.
+  public func applyRemote(_ envelope: SyncEnvelope) throws -> SyncCommandResult {
+    let current = try load()
+    guard var state = syncState else { throw BoardError.invalid("Sync metadata is unavailable.") }
+    guard envelope.libraryID == state.libraryID else {
+      return .rejected(message: "This phone is paired with a different Mac library.")
+    }
+    guard envelope.version == SyncProtocol.version else {
+      return .rejected(message: "This phone uses an unsupported synchronization version.")
+    }
+    let digest = try Self.digest(envelope)
+    if let receipt = state.receipts[envelope.operationID] {
+      guard receipt.payloadDigest == digest, receipt.deviceID == envelope.deviceID,
+        receipt.clientSequence == envelope.clientSequence
+      else {
+        return .rejected(message: "This operation ID was already used for different content.")
+      }
+      return .applied(
+        sequence: receipt.sequence,
+        snapshot: SyncSnapshot(
+          libraryID: state.libraryID, sequence: state.sequence, library: current))
+    }
+    let highWater = state.deviceHighWater[envelope.deviceID, default: 0]
+    guard envelope.clientSequence > highWater else {
+      return .rejected(
+        message: "The phone’s queued operation sequence is out of date. Refresh and retry.")
+    }
+    do {
+      let mutation = try SyncCommandValidator.mutation(for: envelope, in: current)
+      let updated = try BoardReducer.apply(mutation, to: current)
+      state.sequence &+= 1
+      state.deviceHighWater[envelope.deviceID] = envelope.clientSequence
+      state.receipts[envelope.operationID] = StoredSyncReceipt(
+        payloadDigest: digest, sequence: state.sequence, deviceID: envelope.deviceID,
+        clientSequence: envelope.clientSequence)
+      if state.receipts.count > 2_000 {
+        let stale = state.receipts.sorted { $0.value.sequence < $1.value.sequence }
+          .prefix(state.receipts.count - 2_000).map(\.key)
+        for id in stale { state.receipts.removeValue(forKey: id) }
+      }
+      try persist(updated, syncState: state)
+      cached = updated
+      syncState = state
+      return .applied(
+        sequence: state.sequence,
+        snapshot: SyncSnapshot(
+          libraryID: state.libraryID, sequence: state.sequence, library: updated))
+    } catch BoardError.conflict {
+      return .conflict(
+        current: SyncSnapshot(
+          libraryID: state.libraryID, sequence: state.sequence, library: current))
+    } catch BoardError.busy {
+      return .rejected(message: BoardError.busy.localizedDescription)
+    } catch {
+      return .rejected(message: error.localizedDescription)
+    }
   }
 
   public func export() throws -> Data {
@@ -112,12 +235,20 @@ public actor LibraryRepository {
       imported.runs[i].status = .interrupted
     }
     for i in imported.projects.indices { imported.projects[i].automationEnabled = false }
-    try persist(imported)
+    var nextSyncState = StoredSyncState()
+    nextSyncState.sequence = (syncState?.sequence ?? 0) &+ 1
+    try persist(imported, syncState: nextSyncState)
     cached = imported
+    syncState = nextSyncState
     return imported
   }
 
-  private func persist(_ library: Library) throws {
+  private static func digest(_ envelope: SyncEnvelope) throws -> String {
+    let data = try JSONEncoder.syncEncoder.encode(envelope)
+    return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private func persist(_ library: Library, syncState: StoredSyncState? = nil) throws {
     let context = ModelContext(container)
     context.autosaveEnabled = false
     let encoder = JSONEncoder()
@@ -151,6 +282,9 @@ public actor LibraryRepository {
       }
     }
     if cached == nil { try upsert(1, key: "schema", kind: "metadata", project: nil) }
+    if let state = syncState ?? self.syncState {
+      try upsert(state, key: "sync-state", kind: "metadata", project: nil)
+    }
     try sync(
       library.projects, previous: cached?.projects ?? [], prefix: "p:", kind: "project",
       project: { $0.id })

@@ -8,3 +8,4 @@
 - The old iOS target lacked launch-screen configuration and used a letterboxed compatibility viewport. Generated UILaunchScreen/scene settings restore full-screen rendering, verified in screenshots.
 - This Xcode installation has DeviceHub under Contents/Applications, not Simulator.app. The Makefile resolves that location instead of assuming an app named Simulator.
 - Mac screen locking intermittently blocks UI control. Do not claim a PID proves visible UI or substitute an imagined screenshot.
+- The standalone `runner-test` compile enumerates app sources instead of using the Xcode target, so adding a Mac service referenced by `AppModel` also requires adding it to that source list.

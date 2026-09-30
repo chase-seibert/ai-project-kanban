@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30
+
+- Prevented concurrent Mac listener starts from binding twice to port 47928.
+  Port conflicts now explain how to release the port before retrying.
+- Added a saved phone automatic-sync toggle plus board pull-to-refresh and an
+  explicit Sync Now action that work even when automatic syncing is off.
+
 ## 2026-09-29
 
 - Replaced prototype code with independently identified multi-project boards.
@@ -13,7 +20,12 @@
 - Added Latest Luna · High model defaults, project/task overrides, model
   catalog validation, and saved model/effort snapshots for confirmed runs and retries.
 - Added model/persistence regressions and offline runner integration fixtures.
-- Explicitly labeled the still-unimplemented Mac–iPhone synchronization boundary.
+- Added an experimental local Wi-Fi sync path: temporary-code pairing, encrypted
+  protocol messages, authoritative Mac receipts, phone replica cache, and a
+  durable phone outbox. Pairing is automatic from the temporary code. Added a
+  Connection tab on phone and in Mac Settings with progress, editable endpoint,
+  and bounded timestamped network-exchange logs. The Mac listener resumes on
+  app launch after the user has enabled it. Device-level acceptance remains open.
 
 ## 2026-09-28
 

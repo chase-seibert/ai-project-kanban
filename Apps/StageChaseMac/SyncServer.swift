@@ -1,0 +1,517 @@
+import CryptoKit
+import Darwin
+import Foundation
+import Network
+import Observation
+
+private struct SavedDevice: Codable, Sendable {
+  var id: UUID
+  var name: String
+  var key: Data
+}
+
+private struct SavedDeviceRegistry: Codable, Sendable {
+  var libraryID: UUID
+  var devices: [SavedDevice]
+}
+
+private struct PendingPhone: Sendable {
+  var offer: SyncPairingOffer
+  var status: SyncPairingStatus
+}
+
+/// Mac-owned listener. All command effects pass through LibraryRepository; polling is read-only.
+@MainActor @Observable final class SyncServer {
+  static let port: NWEndpoint.Port = 47_928
+  private static let keychainService = "com.cseibert.StageChase.sync"
+  private let repository: LibraryRepository
+  private var listener: NWListener?
+  private var pathMonitor: NWPathMonitor?
+  private var isStarting = false
+  private var startupGeneration = UUID()
+  private var pairingKey = SyncCrypto.randomSecret()
+  private var pairingExpiresAt = Date().addingTimeInterval(5 * 60)
+  private var devices: [UUID: SavedDevice] = [:]
+  private var pending: PendingPhone?
+  private var activeConnections = 0
+  private var pairingAttempts: [Date] = []
+  var status = "Off"
+  var address: String?
+  var pairingCode: String?
+  var pendingDeviceName: String?
+  var error: String?
+  var lastPhoneContactAt: Date?
+  var lastPhoneAddress: String?
+  var lastRequestResult = "No phone request received yet."
+  var networkEvents: [SyncNetworkEvent] = []
+  var eventLogError: String?
+  var onLibraryChanged: ((Library) -> Void)?
+  private let networkEventsURL: URL
+  var activeConnectionCount: Int { activeConnections }
+
+  init(repository: LibraryRepository) {
+    self.repository = repository
+    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first!.appendingPathComponent("StageChase", isDirectory: true)
+    networkEventsURL = base.appendingPathComponent("MacSyncNetworkEvents-v1.json")
+    do {
+      networkEvents = try SyncNetworkEventJournal.load(from: networkEventsURL)
+      let lastPhoneEvent = networkEvents.first { $0.direction == "Phone → Mac" }
+      lastPhoneContactAt = lastPhoneEvent?.date
+      lastPhoneAddress = lastPhoneEvent?.remoteAddress
+      lastRequestResult =
+        lastPhoneEvent.map {
+          "\($0.operation) · \($0.outcome) · \($0.detail)"
+        } ?? lastRequestResult
+    } catch let caught {
+      eventLogError = "Previous connection log could not be read: \(caught.localizedDescription)"
+    }
+  }
+
+  static func hasSavedPhonePairing() -> Bool {
+    guard let data = try? KeychainVault.read(service: keychainService, account: "devices"),
+      let registry = try? JSONDecoder().decode(SavedDeviceRegistry.self, from: data)
+    else { return false }
+    return !registry.devices.isEmpty
+  }
+
+  func start() async {
+    guard listener == nil, !isStarting else { return }
+    isStarting = true
+    let generation = UUID()
+    startupGeneration = generation
+    defer {
+      if startupGeneration == generation { isStarting = false }
+    }
+    do {
+      let state = try await repository.syncStateSnapshot()
+      guard startupGeneration == generation else { return }
+      try loadDevices(for: state.libraryID)
+      pairingKey = SyncCrypto.randomSecret()
+      renewPairingCode()
+      let listener = try NWListener(using: .tcp, on: Self.port)
+      listener.newConnectionHandler = { [weak self] connection in
+        Task { @MainActor [weak self] in self?.accept(connection) }
+      }
+      listener.stateUpdateHandler = { [weak self] state in
+        Task { @MainActor [weak self] in
+          guard let self, self.startupGeneration == generation else { return }
+          switch state {
+          case .ready:
+            self.status = "Available on this Wi-Fi network"
+            self.address = Self.localAddress().map { "\($0):\(Self.port.rawValue)" }
+            self.error = nil
+            self.recordNetworkEvent(
+              SyncNetworkEvent(
+                direction: "Mac", operation: "Listener ready", requestBytes: 0,
+                responseBytes: nil, outcome: "Listening",
+                detail: self.address ?? "Listening, but no local IPv4 address was found.",
+                elapsedMilliseconds: nil))
+          case .waiting(let failure):
+            self.status = "Waiting for network"
+            self.error = failure.localizedDescription
+            self.recordNetworkEvent(
+              SyncNetworkEvent(
+                direction: "Mac", operation: "Listener state", requestBytes: 0,
+                responseBytes: nil, outcome: "Waiting", detail: failure.localizedDescription,
+                elapsedMilliseconds: nil))
+          case .failed(let failure):
+            let detail = Self.listenerErrorMessage(failure)
+            self.status = "Unavailable"
+            self.error = detail
+            self.recordNetworkEvent(
+              SyncNetworkEvent(
+                direction: "Mac", operation: "Listener failed", requestBytes: 0,
+                responseBytes: nil, outcome: "Failed", detail: detail,
+                elapsedMilliseconds: nil))
+            self.listener?.cancel()
+            self.listener = nil
+          case .cancelled:
+            self.status = "Off"
+            self.address = nil
+          default: break
+          }
+        }
+      }
+      self.listener = listener
+      status = "Starting"
+      listener.start(queue: DispatchQueue(label: "com.cseibert.StageChase.sync-listener"))
+      let monitor = NWPathMonitor()
+      monitor.pathUpdateHandler = { [weak self] path in
+        Task { @MainActor [weak self] in
+          guard let self, self.listener != nil else { return }
+          guard path.status == .satisfied else {
+            self.status = "Waiting for network"
+            self.address = nil
+            return
+          }
+          let refreshedAddress = Self.localAddress().map { "\($0):\(Self.port.rawValue)" }
+          if refreshedAddress != self.address {
+            self.address = refreshedAddress
+            self.recordNetworkEvent(
+              SyncNetworkEvent(
+                direction: "Mac", operation: "Network address", requestBytes: 0,
+                responseBytes: nil, outcome: refreshedAddress == nil ? "Unavailable" : "Updated",
+                detail: refreshedAddress ?? "No local IPv4 address found.", elapsedMilliseconds: nil
+              ))
+          }
+          if self.status == "Waiting for network" {
+            self.status = "Available on this Wi-Fi network"
+          }
+        }
+      }
+      pathMonitor = monitor
+      monitor.start(queue: DispatchQueue(label: "com.cseibert.StageChase.sync-path"))
+    } catch {
+      guard startupGeneration == generation else { return }
+      let detail = Self.listenerErrorMessage(error)
+      self.error = detail
+      status = "Unavailable"
+      recordNetworkEvent(
+        SyncNetworkEvent(
+          direction: "Mac", operation: "Listener failed", requestBytes: 0,
+          responseBytes: nil, outcome: "Failed", detail: detail, elapsedMilliseconds: nil))
+    }
+  }
+
+  func stop() {
+    startupGeneration = UUID()
+    isStarting = false
+    recordNetworkEvent(
+      SyncNetworkEvent(
+        direction: "Mac", operation: "Listener stopped", requestBytes: 0, responseBytes: nil,
+        outcome: "Disabled", detail: "Local sync was disabled by the Mac user.",
+        elapsedMilliseconds: nil))
+    listener?.cancel()
+    listener = nil
+    pathMonitor?.cancel()
+    pathMonitor = nil
+    pairingCode = nil
+    pending = nil
+    pendingDeviceName = nil
+    address = nil
+    status = "Off"
+  }
+
+  private static func listenerErrorMessage(_ error: Error) -> String {
+    if let networkError = error as? NWError,
+      case .posix(let code) = networkError,
+      code == .EADDRINUSE
+    {
+      return
+        "Port \(Self.port.rawValue) is already in use, usually by another StageChase instance. Quit the other instance, then retry."
+    }
+    return error.localizedDescription
+  }
+
+  func renewPairingCode() {
+    pairingKey = SyncCrypto.randomSecret()
+    pairingCode = pairingKey.base64EncodedString()
+    pairingExpiresAt = Date().addingTimeInterval(5 * 60)
+    pending = nil
+    pendingDeviceName = nil
+    pairingAttempts = []
+  }
+
+  func revokeAllPhones() {
+    do {
+      devices.removeAll()
+      let state = try loadRegistry().libraryID
+      try saveDevices(libraryID: state, devices: [])
+      pending = nil
+      pendingDeviceName = nil
+    } catch let caught { self.error = caught.localizedDescription }
+  }
+
+  private func accept(_ connection: NWConnection) {
+    guard activeConnections < 8 else {
+      connection.cancel()
+      return
+    }
+    activeConnections += 1
+    let connectionQueue = DispatchQueue(label: "com.cseibert.StageChase.sync-connection")
+    let server = self
+    let startedAt = Date()
+    connection.stateUpdateHandler = { state in
+      if case .ready = state {
+        Task { @MainActor in
+          server.lastPhoneContactAt = .now
+          server.lastPhoneAddress = String(describing: connection.endpoint)
+        }
+        Self.receiveFrame(connection, buffer: Data()) { result in
+          Task { @MainActor in
+            let reply: SyncWireResponse
+            var operation = "Read request"
+            var requestBytes = 0
+            var failureDetail: String?
+            do {
+              switch result {
+              case .success(let data):
+                requestBytes = data.count
+                guard data.count <= SyncProtocol.maximumMessageBytes else {
+                  throw BoardError.invalid("Request too large.")
+                }
+                let request = try SyncFrame.decode(data, as: SyncWireRequest.self)
+                operation = Self.operationName(for: request)
+                reply = try await server.handle(request)
+              case .failure(let error):
+                failureDetail = error.localizedDescription
+                reply = .error("Invalid synchronization request.")
+              }
+            } catch let caught {
+              failureDetail = caught.localizedDescription
+              reply = .error("Synchronization request could not be processed.")
+            }
+            let bytes = (try? SyncFrame.encode(reply)) ?? Data()
+            let outcome: String
+            let detail: String
+            switch reply {
+            case .error(let message):
+              outcome = "Rejected"
+              detail = failureDetail ?? message
+            case .pairPending:
+              outcome = "Paired"
+              detail = "Temporary code accepted; phone credential issued."
+            case .pairStatus:
+              outcome = "Pair status returned"
+              detail = "Pairing response sent."
+            case .authenticated:
+              outcome = "Completed"
+              detail = server.lastRequestResult
+            }
+            server.lastPhoneContactAt = .now
+            server.lastRequestResult = "\(operation) · \(outcome) · \(detail)"
+            let remoteAddress = String(describing: connection.endpoint)
+            server.recordNetworkEvent(
+              SyncNetworkEvent(
+                direction: "Phone → Mac", remoteAddress: remoteAddress,
+                operation: operation, requestBytes: requestBytes,
+                responseBytes: bytes.isEmpty ? nil : bytes.count, outcome: outcome,
+                detail: detail,
+                elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)))
+            if bytes.isEmpty {
+              connection.cancel()
+            } else {
+              connection.send(
+                content: bytes, completion: .contentProcessed { _ in connection.cancel() })
+            }
+            server.activeConnections = max(0, server.activeConnections - 1)
+          }
+        }
+      }
+    }
+    connection.start(queue: connectionQueue)
+  }
+
+  private func handle(_ request: SyncWireRequest) async throws -> SyncWireResponse {
+    let currentLibrary = try await repository.syncStateSnapshot()
+    if devicesLibraryID != currentLibrary.libraryID {
+      try loadDevices(for: currentLibrary.libraryID)
+    }
+    switch request {
+    case .pairStart(let sealed):
+      guard Date() < pairingExpiresAt, pairingCode != nil else {
+        return .error("Pairing code expired.")
+      }
+      pairingAttempts = pairingAttempts.filter { Date().timeIntervalSince($0) < 60 }
+      guard pairingAttempts.count < 5 else {
+        return .error("Too many pairing attempts. Generate a new code and try later.")
+      }
+      pairingAttempts.append(.now)
+      let offer = try SyncCrypto.open(sealed, key: pairingKey, as: SyncPairingOffer.self)
+      guard offer.deviceKey.count == 32, offer.requestID != UUID.zero,
+        devices[offer.deviceID] == nil, pending == nil
+      else { return .error("Pairing request is invalid or already handled.") }
+      let saved = SavedDevice(
+        id: offer.deviceID, name: offer.deviceName, key: offer.deviceKey)
+      let updatedDevices = Array(devices.values) + [saved]
+      try saveDevices(libraryID: currentLibrary.libraryID, devices: updatedDevices)
+      devices[saved.id] = saved
+      let credential = SyncClientCredential(
+        deviceID: saved.id, libraryID: currentLibrary.libraryID, key: saved.key)
+      pending = PendingPhone(offer: offer, status: .approved(credential))
+      pendingDeviceName = saved.name
+      pairingCode = nil
+      lastRequestResult = "Pair phone · code accepted; device credential stored."
+      return .pairPending(offer.requestID)
+    case .pairPoll(let sealed):
+      guard Date() < pairingExpiresAt || pending?.status.isApproved == true else {
+        return .error("Pairing code expired.")
+      }
+      let poll = try SyncCrypto.open(sealed, key: pairingKey, as: SyncPairingPoll.self)
+      guard let pending, pending.offer.requestID == poll.requestID else {
+        return .error("Pairing request was not found.")
+      }
+      lastRequestResult = "Pairing status · credential returned."
+      return .pairStatus(try SyncCrypto.seal(pending.status, key: pairingKey))
+    case .authenticated(let deviceID, let sealed):
+      guard let device = devices[deviceID] else { return .error("This phone is no longer paired.") }
+      let request = try SyncCrypto.open(sealed, key: device.key, as: SyncClientRequest.self)
+      let state = currentLibrary
+      let response: SyncServerResponse
+      switch request {
+      case .snapshot(let cursor):
+        let isUnchanged = state.sequence == cursor
+        lastRequestResult =
+          isUnchanged
+          ? "Refresh library · no new changes; server sequence \(state.sequence)."
+          : "Refresh library · sent \(state.library.projects.count) projects and \(state.library.tasks.count) tasks at sequence \(state.sequence)."
+        response =
+          isUnchanged
+          ? .unchanged(sequence: state.sequence)
+          : .snapshot(
+            SyncSnapshot(
+              libraryID: state.libraryID, sequence: state.sequence, library: state.library))
+      case .command(let envelope):
+        guard envelope.deviceID == deviceID else { return .error("Invalid device identity.") }
+        let result = try await repository.applyRemote(envelope)
+        switch result {
+        case .applied(let sequence, _):
+          lastRequestResult = "Pending change · accepted at sequence \(sequence)."
+          let updated = try await repository.syncStateSnapshot()
+          onLibraryChanged?(updated.library)
+        case .conflict:
+          lastRequestResult = "Pending change · conflict; Mac state returned without applying edit."
+        case .rejected(let message):
+          lastRequestResult = "Pending change · rejected: \(message)"
+        }
+        response = .command(result)
+      }
+      return .authenticated(try SyncCrypto.seal(response, key: device.key))
+    }
+  }
+
+  private var devicesLibraryID: UUID? {
+    try? loadRegistry().libraryID
+  }
+
+  private func loadDevices(for libraryID: UUID) throws {
+    guard let data = try KeychainVault.read(service: Self.keychainService, account: "devices")
+    else {
+      devices = [:]
+      try saveDevices(libraryID: libraryID, devices: [])
+      return
+    }
+    let registry = try JSONDecoder().decode(SavedDeviceRegistry.self, from: data)
+    if registry.libraryID != libraryID {
+      devices = [:]
+      try saveDevices(libraryID: libraryID, devices: [])
+    } else {
+      devices = Dictionary(uniqueKeysWithValues: registry.devices.map { ($0.id, $0) })
+    }
+  }
+
+  private func loadRegistry() throws -> SavedDeviceRegistry {
+    guard let data = try KeychainVault.read(service: Self.keychainService, account: "devices")
+    else {
+      throw BoardError.invalid("The paired phone registry is unavailable.")
+    }
+    return try JSONDecoder().decode(SavedDeviceRegistry.self, from: data)
+  }
+
+  private func saveDevices(libraryID: UUID, devices: [SavedDevice]) throws {
+    let registry = SavedDeviceRegistry(libraryID: libraryID, devices: devices)
+    try KeychainVault.save(
+      JSONEncoder.syncEncoder.encode(registry), service: Self.keychainService,
+      account: "devices")
+  }
+
+  func clearNetworkEvents() {
+    networkEvents = []
+    do {
+      try SyncNetworkEventJournal.save(networkEvents, at: networkEventsURL)
+      eventLogError = nil
+      lastPhoneContactAt = nil
+      lastPhoneAddress = nil
+      lastRequestResult = "No phone request received yet."
+    } catch let caught {
+      eventLogError = "Could not clear the connection log: \(caught.localizedDescription)"
+    }
+  }
+
+  private func recordNetworkEvent(_ event: SyncNetworkEvent) {
+    do {
+      networkEvents = try SyncNetworkEventJournal.append(
+        event, to: networkEvents, at: networkEventsURL)
+      eventLogError = nil
+    } catch let caught {
+      networkEvents.insert(event, at: 0)
+      networkEvents = Array(networkEvents.prefix(SyncNetworkEventJournal.maximumEvents))
+      eventLogError = "Connection event could not be saved: \(caught.localizedDescription)"
+    }
+  }
+
+  private nonisolated static func operationName(for request: SyncWireRequest) -> String {
+    switch request {
+    case .pairStart: "Pair phone"
+    case .pairPoll: "Pairing status"
+    case .authenticated: "Sync request"
+    }
+  }
+
+  nonisolated private static func receiveFrame(
+    _ connection: NWConnection, buffer: Data,
+    completion: @escaping @Sendable (Result<Data, Error>) -> Void
+  ) {
+    connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) {
+      data, _, isComplete, error in
+      var bytes = buffer
+      if let data { bytes.append(data) }
+      if bytes.count >= 4 {
+        let length = bytes.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+        guard length > 0, length <= SyncProtocol.maximumMessageBytes else {
+          completion(.failure(BoardError.invalid("Invalid synchronization frame size.")))
+          return
+        }
+        if bytes.count >= Int(length) + 4 {
+          completion(.success(Data(bytes.prefix(Int(length) + 4))))
+          return
+        }
+      }
+      if let error {
+        completion(.failure(error))
+        return
+      }
+      if isComplete {
+        completion(.failure(BoardError.invalid("Incomplete synchronization frame.")))
+        return
+      }
+      receiveFrame(connection, buffer: bytes, completion: completion)
+    }
+  }
+
+  private static func localAddress() -> String? {
+    var address: String?
+    var fallback: String?
+    var interfaces: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&interfaces) == 0, let first = interfaces else { return nil }
+    defer { freeifaddrs(interfaces) }
+    for item in sequence(first: first, next: { $0.pointee.ifa_next }) {
+      guard let raw = item.pointee.ifa_addr, raw.pointee.sa_family == UInt8(AF_INET),
+        let name = String(validatingCString: item.pointee.ifa_name), name != "lo0"
+      else { continue }
+      var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+      if getnameinfo(
+        raw, socklen_t(raw.pointee.sa_len), &host, socklen_t(host.count), nil, 0,
+        NI_NUMERICHOST) == 0
+      {
+        let bytes = host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        guard let value = String(bytes: bytes, encoding: .utf8) else { continue }
+        if name == "en0" {
+          address = value
+          break
+        }
+        if fallback == nil { fallback = value }
+      }
+    }
+    return address ?? fallback
+  }
+}
+
+extension SyncPairingStatus {
+  fileprivate var isApproved: Bool { if case .approved = self { true } else { false } }
+}
+
+extension UUID {
+  fileprivate static let zero = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+}

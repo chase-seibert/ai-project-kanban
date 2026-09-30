@@ -228,28 +228,31 @@ struct TaskDetail: View {
               )
               .padding(8).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
             }
-            VStack(alignment: .leading, spacing: 8) {
-              Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
-              TextField(
-                "to-do/my-plan.md",
-                text: Binding(
-                  get: { draft?.planPath ?? "" },
-                  set: {
-                    draft?.planPath = $0.isEmpty ? nil : $0
-                    edited = true
-                  })
-              )
-              .textFieldStyle(.roundedBorder)
-              #if os(macOS)
-                if let path = item.planPath,
-                  let project = model.library.projects.first(where: { $0.id == item.projectID })
-                {
-                  Button("Open plan", systemImage: "doc.text") {
-                    NSWorkspace.shared.open(
-                      URL(fileURLWithPath: project.directory).appendingPathComponent(path))
+            if !model.isConnectedPhone {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(
+                  .secondary)
+                TextField(
+                  "to-do/my-plan.md",
+                  text: Binding(
+                    get: { draft?.planPath ?? "" },
+                    set: {
+                      draft?.planPath = $0.isEmpty ? nil : $0
+                      edited = true
+                    })
+                )
+                .textFieldStyle(.roundedBorder)
+                #if os(macOS)
+                  if let path = item.planPath,
+                    let project = model.library.projects.first(where: { $0.id == item.projectID })
+                  {
+                    Button("Open plan", systemImage: "doc.text") {
+                      NSWorkspace.shared.open(
+                        URL(fileURLWithPath: project.directory).appendingPathComponent(path))
+                    }
                   }
-                }
-              #endif
+                #endif
+              }
             }
             if edited {
               Button("Save changes") {
@@ -290,10 +293,12 @@ struct TaskDetail: View {
               Label("Move", systemImage: "arrow.right")
             }
             Spacer()
-            Button(item.completed ? "Reopen" : "Complete", systemImage: "checkmark.circle") {
-              Task {
-                await model.perform(
-                  .complete(item.id, !item.completed, expectedRevision: item.revision))
+            if !model.isConnectedPhone {
+              Button(item.completed ? "Reopen" : "Complete", systemImage: "checkmark.circle") {
+                Task {
+                  await model.perform(
+                    .complete(item.id, !item.completed, expectedRevision: item.revision))
+                }
               }
             }
           }.disabled(edited || model.library.latestRun(for: taskID)?.status.isActive == true)
@@ -304,9 +309,19 @@ struct TaskDetail: View {
               RunDetail(run: run)
             } else {
               Text("No agent has worked on this task.").stageFont(.subheadline, weight: .medium)
-              Text(
-                "With project automation enabled on Mac, moving to Next starts planning. Moving to Implementation starts coding after you confirm."
-              ).stageFont(.callout).foregroundStyle(.secondary)
+              #if os(iOS)
+                Text(
+                  model.isConnectedPhone
+                    ? "Codex runs on Mac. Continue there to confirm an automated move."
+                    : "With project automation enabled on Mac, moving to Next starts planning. Moving to Implementation starts coding after you confirm."
+                )
+                .stageFont(.callout).foregroundStyle(.secondary)
+              #else
+                Text(
+                  "With project automation enabled on Mac, moving to Next starts planning. Moving to Implementation starts coding after you confirm."
+                )
+                .stageFont(.callout).foregroundStyle(.secondary)
+              #endif
             }
           }
           let activity = model.library.activity.filter { $0.taskID == taskID }.suffix(40).reversed()
@@ -316,8 +331,15 @@ struct TaskDetail: View {
               ForEach(Array(activity)) { event in ActivityRow(event: event) }
             }
           }
-          Divider()
-          Button("Delete task", role: .destructive) { deleting = true }.buttonStyle(.borderless)
+          if !model.isConnectedPhone {
+            Divider()
+            Button("Delete task", role: .destructive) { deleting = true }.buttonStyle(.borderless)
+          } else if let run = model.library.latestRun(for: taskID),
+            run.status.isActive || [.needsInput, .interrupted].contains(run.status)
+          {
+            Text("Continue on Mac to manage this Codex run.").stageFont(.callout)
+              .foregroundStyle(.secondary)
+          }
         }.padding(20)
       } else {
         ContentUnavailableView("Task unavailable", systemImage: "doc.questionmark")
@@ -408,7 +430,7 @@ struct RunDetail: View {
         }
       #endif
       HStack {
-        if [.failed, .interrupted, .cancelled].contains(run.status) {
+        if !model.isConnectedPhone && [.failed, .interrupted, .cancelled].contains(run.status) {
           Button(
             run.modelConfiguration == nil ? "Review model and retry" : "Retry in same session",
             systemImage: "arrow.clockwise"
@@ -416,7 +438,7 @@ struct RunDetail: View {
             Task { await model.retry(run.id) }
           }
         }
-        if run.status.isActive {
+        if !model.isConnectedPhone && run.status.isActive {
           Button("Stop run", systemImage: "stop.circle", role: .destructive) {
             Task { await model.stop(run.id) }
           }

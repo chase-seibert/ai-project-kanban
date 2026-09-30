@@ -15,6 +15,29 @@
 - As a user, I want edits to carry revisions, so that a stale iPhone write does
   not silently overwrite a newer Mac transition.
 
+## Experimental local Wi-Fi sync
+
+- As a user, I want to pair my iPhone with the Mac using a temporary code,
+  without separate desktop confirmation, so that the phone shows the same project identities without
+  merging libraries by name.
+- As a user, I want supported phone edits to queue offline and reach the Mac
+  once it is open on the same Wi-Fi network, so that temporary outages do not
+  lose my intent.
+- As a user, I want a pending count, last-sync time, and visible conflicts, so
+  that cached Mac state is not mistaken for a successful refresh.
+- As a user, I want a Connection tab showing in-progress state, last result,
+  editable saved endpoint, and timestamped request/response sizes and outcomes,
+  so that I can diagnose failed reconnects without losing queued changes.
+- As a user, I want to control automatic phone syncing and pull to refresh the
+  board or tap Sync Now, so that I can choose between periodic updates and
+  deliberate manual syncs without losing queued edits.
+- As a user, I want polling and replica updates never to start or manage Codex,
+  so that automation remains a confirmed Mac action.
+
+These requirements are implemented in part and remain unverified on devices.
+Phone confirmation for automated transitions and conflict reapplication remain
+open.
+
 ## Planned automation
 
 - As a user, I want a confirmed move into Next to create one persisted Codex

@@ -48,8 +48,39 @@ Leave the Codex executable override blank for automatic detection. StageChase
 does not store API keys. Open in Codex uses the desktop `codex://threads/<id>`
 route; Copy Session ID is a fallback for versions without that route.
 
-Mac and iPhone libraries remain separate. Phone moves do not start Mac work.
-The global model preference is saved locally on the Mac and is not included in
-library exports. Project/task overrides and run model snapshots are part of
-library records. Retry uses its run's saved model and effort; legacy runs ask
-for a choice before retry.
+## Experimental iPhone pairing
+
+Both devices must be on the same trusted Wi-Fi network. On the Mac, open
+Settings → Connection → **Enable local Wi-Fi sync**. Copy the displayed
+`stagechase://` address and five-minute pairing code to the iPhone Connection tab,
+enter a device name, and request pairing. Entering the temporary code pairs the
+phone automatically; no desktop approval step is required. Anyone who obtains
+the active code can pair, so share it only with the intended phone.
+The Mac app must stay open and awake. After local sync has been explicitly
+enabled once, its listener starts again on future Mac app launches. Foreground
+refresh runs about every three seconds; each sync uses a short TCP connection,
+not an always-open socket. The app does not provide internet, background, or
+always-on delivery.
+
+The listener is local-network TCP with AES-GCM-encrypted application messages;
+it is not TLS and must only be used on a trusted local network. The phone stores
+its pairing key in Keychain, caches the Mac library separately from its local
+library, and retains supported offline edits in a bounded outbox. Paired mode
+hides restore and Mac-only task controls. Automated moves that could start
+Codex, completion, deletion, and retry remain on the Mac.
+
+The Connection tab on both apps shows sync state and a bounded log of timestamped
+exchanges, framed request/response sizes, durations, and results. The phone lets
+you edit the saved Mac address without unpairing; a queued edit stays on the
+phone while you change it. The log stores metadata only and omits task contents
+and credentials.
+
+This implementation has passed package and target builds but has not completed
+visible Mac–iPhone acceptance. Treat pairing and propagation as experimental
+until the verification report is updated.
+
+Unpaired Mac and iPhone libraries remain independent. The global model
+preference is saved locally on the Mac and is not included in library exports.
+Project/task overrides and run model snapshots are part of library records.
+Retry uses its run's saved model and effort; legacy runs ask for a choice before
+retry.

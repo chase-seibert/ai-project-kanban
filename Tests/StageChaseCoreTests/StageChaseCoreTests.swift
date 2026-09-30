@@ -19,6 +19,178 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.projects[1].name == "Renamed")
 }
 
+@Test func syncMessagesAreAuthenticatedEncryptedAndBounded() throws {
+  let key = SyncCrypto.randomSecret()
+  let task = WorkItem(projectID: UUID(), title: "Keep this private")
+  let encoded = try SyncCrypto.seal(task, key: key)
+  #expect(!String(decoding: encoded, as: UTF8.self).contains(task.title))
+  let decoded = try SyncCrypto.open(encoded, key: key, as: WorkItem.self)
+  #expect(decoded.id == task.id)
+  #expect(decoded.projectID == task.projectID)
+  #expect(decoded.title == task.title)
+
+  var tampered = encoded
+  tampered[tampered.index(before: tampered.endIndex)] ^= 0x01
+  #expect(throws: (any Error).self) {
+    try SyncCrypto.open(tampered, key: key, as: WorkItem.self)
+  }
+  #expect(throws: (any Error).self) {
+    try SyncCrypto.open(encoded, key: SyncCrypto.randomSecret(), as: WorkItem.self)
+  }
+}
+
+@Test func syncSnapshotPreservesSharedStateButOmitsMacOnlyConfiguration() throws {
+  var project = Project(name: "Shared", directory: "/Users/test/private-repo")
+  project.automationEnabled = true
+  project.modelOverride = CodexModelConfiguration(selection: .model("private-model"))
+  var task = WorkItem(projectID: project.id, title: "Task", stage: .planned)
+  task.planPath = "/Users/test/private-repo/plan.md"
+  task.notes = "Keep the details"
+  let run = AgentRun(task: task, kind: .planning)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  library.runs = [run]
+  library.activity = [Activity("Wrote /Users/test/private-repo/plan.md")]
+
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 7, library: library)
+  let json = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+  #expect(!json.contains("private-repo"))
+  #expect(!json.contains("private-model"))
+  #expect(!json.contains("planPath"))
+  let replica = try snapshot.replica()
+  #expect(replica.projects[0].id == project.id)
+  #expect(replica.projects[0].automationEnabled)
+  #expect(replica.tasks[0].notes == task.notes)
+  #expect(replica.tasks[0].planPath == nil)
+  #expect(replica.runs[0].status == run.status)
+}
+
+@Test func remoteCommandsAreTransactionalRevisionCheckedAndIdempotent() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Shared")
+  _ = try await repository.apply(.createProject(project))
+  let initial = try await repository.syncStateSnapshot()
+  let deviceID = UUID()
+  let taskID = UUID()
+  let create = SyncEnvelope(
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 1,
+    command: .createTask(
+      id: taskID, projectID: project.id, title: "Phone task", notes: "", stage: .inbox))
+
+  guard
+    case .applied(let firstSequence, let firstSnapshot) = try await repository.applyRemote(create)
+  else {
+    Issue.record("Expected phone task command to be applied")
+    return
+  }
+  #expect(firstSequence == initial.sequence + 1)
+  #expect(firstSnapshot.tasks.map(\.id) == [taskID])
+
+  guard case .applied(let replaySequence, _) = try await repository.applyRemote(create)
+  else {
+    Issue.record("Expected an identical retry to return its original receipt")
+    return
+  }
+  #expect(replaySequence == firstSequence)
+
+  let conflictingReplay = SyncEnvelope(
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 1,
+    operationID: create.operationID,
+    command: .createTask(
+      id: taskID, projectID: project.id, title: "Different content", notes: "", stage: .inbox))
+  guard case .rejected = try await repository.applyRemote(conflictingReplay)
+  else {
+    Issue.record("An operation ID must not be reused with different content")
+    return
+  }
+
+  let edit = SyncEnvelope(
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 2,
+    expectedRevision: 0, command: .editTask(id: taskID, title: "Edited", notes: "saved"))
+  guard case .applied(_, let edited) = try await repository.applyRemote(edit)
+  else {
+    Issue.record("Expected revision-matched edit to be applied")
+    return
+  }
+  #expect(edited.tasks[0].title == "Edited")
+
+  let stale = SyncEnvelope(
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 3,
+    expectedRevision: 0, command: .editTask(id: taskID, title: "Stale", notes: ""))
+  guard case .conflict = try await repository.applyRemote(stale)
+  else {
+    Issue.record("Expected stale revision to report a conflict")
+    return
+  }
+  let persisted = try await repository.syncStateSnapshot()
+  #expect(persisted.library.tasks[0].title == "Edited")
+}
+
+@Test func syncFramesAreLengthBoundedAndRejectMalformedMessages() throws {
+  let request = SyncWireRequest.pairStart(Data([1, 2, 3]))
+  let frame = try SyncFrame.encode(request)
+  #expect(try SyncFrame.decode(frame, as: SyncWireRequest.self) == request)
+  #expect(throws: BoardError.self) {
+    try SyncFrame.decode(Data([0, 0, 0, 8, 1]), as: SyncWireRequest.self)
+  }
+  #expect(throws: BoardError.self) {
+    try SyncFrame.encode(Data(repeating: 0, count: SyncProtocol.maximumMessageBytes + 1))
+  }
+}
+
+@Test func syncNetworkJournalPersistsOnlyBoundedExchangeMetadata() throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChaseSyncLog-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let url = root.appendingPathComponent("events.json")
+  var events: [SyncNetworkEvent] = []
+  for index in 0..<(SyncNetworkEventJournal.maximumEvents + 5) {
+    events = try SyncNetworkEventJournal.append(
+      SyncNetworkEvent(
+        direction: "Phone → Mac", remoteAddress: "192.168.1.2:47928",
+        operation: "Refresh \(index)", requestBytes: 120, responseBytes: 340,
+        outcome: "Response received", detail: "Metadata only", elapsedMilliseconds: 14),
+      to: events, at: url)
+  }
+  let restored = try SyncNetworkEventJournal.load(from: url)
+  #expect(restored.count == SyncNetworkEventJournal.maximumEvents)
+  #expect(restored.first?.operation == "Refresh 204")
+  #expect(restored.first?.detail == "Metadata only")
+}
+
+@Test func remoteCommandReceiptSurvivesRepositoryRestart() async throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChaseSync-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let storeURL = root.appendingPathComponent("Library.sqlite")
+  var repository: LibraryRepository? = try LibraryRepository(url: storeURL)
+  let project = Project(name: "Durable")
+  _ = try await repository!.apply(.createProject(project))
+  let state = try await repository!.syncStateSnapshot()
+  let request = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
+    command: .createTask(
+      id: UUID(), projectID: project.id, title: "Once", notes: "", stage: .inbox))
+  guard case .applied(let originalSequence, _) = try await repository!.applyRemote(request)
+  else {
+    Issue.record("Expected first request to commit")
+    return
+  }
+  repository = nil
+
+  repository = try LibraryRepository(url: storeURL)
+  guard case .applied(let replaySequence, let snapshot) = try await repository!.applyRemote(request)
+  else {
+    Issue.record("Expected durable retry receipt after restart")
+    return
+  }
+  #expect(replaySequence == originalSequence)
+  #expect(snapshot.tasks.count == 1)
+  repository = nil
+}
+
 @Test func taskIsolationAndQuickCaptureInEveryStage() throws {
   let a = Project(name: "A")
   let b = Project(name: "B")

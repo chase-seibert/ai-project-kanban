@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.undoManager) private var undoManager
+  @Environment(\.scenePhase) private var scenePhase
   @State private var phoneBoard = false
   var body: some View {
     @Bindable var model = model
@@ -70,7 +71,9 @@ struct RootView: View {
                 .navigationTitle("Projects")
                 .toolbar {
                   ToolbarItem(placement: .primaryAction) {
-                    Button("New project", systemImage: "plus") { model.sheet = .newProject }
+                    if !model.isConnectedPhone {
+                      Button("New project", systemImage: "plus") { model.sheet = .newProject }
+                    }
                   }
                 }
                 .navigationDestination(isPresented: $phoneBoard) {
@@ -81,7 +84,7 @@ struct RootView: View {
                         Menu {
                           Button("Add task", systemImage: "plus") { model.sheet = .newTask(.inbox) }
                           Toggle("Show completed", isOn: $model.showCompleted)
-                          if let project = model.selectedProject {
+                          if let project = model.selectedProject, !model.isConnectedPhone {
                             Button("Project settings", systemImage: "slider.horizontal.3") {
                               model.sheet = .editProject(project)
                             }
@@ -95,6 +98,9 @@ struct RootView: View {
             }.tabItem { Label("Projects", systemImage: "square.grid.2x2") }
             NavigationStack { ActivityPanel().navigationTitle("Activity") }.tabItem {
               Label("Activity", systemImage: "waveform.path.ecg")
+            }
+            NavigationStack { SyncConnectionView().navigationTitle("Connection") }.tabItem {
+              Label("Connection", systemImage: "network")
             }
             NavigationStack { AppSettings().navigationTitle("Settings") }.tabItem {
               Label("Settings", systemImage: "gearshape")
@@ -171,12 +177,19 @@ struct RootView: View {
         Text("Codex starts only after confirmation.")
       }
     }
-    .task {
+    .task(id: scenePhase) {
       model.undoManager = undoManager
       await model.load()
       if model.isPreview && ProcessInfo.processInfo.arguments.contains("--preview-board") {
         phoneBoard = true
       }
+      #if os(iOS)
+        guard scenePhase == .active else { return }
+        while !Task.isCancelled {
+          await model.refreshFromMac()
+          try? await Task.sleep(for: .seconds(3))
+        }
+      #endif
     }
   }
 }
@@ -216,15 +229,21 @@ struct ProjectSidebar: View {
             .listRowBackground(
               project.id == model.selectedProjectID ? Color.accentColor.opacity(0.1) : .clear
             )
-            .contextMenu { Button("Project settings…") { model.sheet = .editProject(project) } }
+            .contextMenu {
+              if !model.isConnectedPhone {
+                Button("Project settings…") { model.sheet = .editProject(project) }
+              }
+            }
         }
-        Button {
-          model.sheet = .newProject
-        } label: {
-          Label("New project", systemImage: "plus.circle").padding(.vertical, 6)
+        if !model.isConnectedPhone {
+          Button {
+            model.sheet = .newProject
+          } label: {
+            Label("New project", systemImage: "plus.circle").padding(.vertical, 6)
+          }
+          .buttonStyle(.plain).foregroundStyle(Color.accentColor).accessibilityIdentifier(
+            "new-project")
         }
-        .buttonStyle(.plain).foregroundStyle(Color.accentColor).accessibilityIdentifier(
-          "new-project")
       } header: {
         Text("YOUR PROJECTS")
       }
@@ -280,6 +299,20 @@ struct WelcomeView: View {
 }
 
 struct AppSettings: View {
+  var body: some View {
+    #if os(macOS)
+      TabView {
+        GeneralSettingsForm().tabItem { Label("General", systemImage: "gearshape") }
+        SyncConnectionView().tabItem { Label("Connection", systemImage: "network") }
+      }
+      .frame(minWidth: 640, minHeight: 680)
+    #else
+      GeneralSettingsForm()
+    #endif
+  }
+}
+
+private struct GeneralSettingsForm: View {
   @Environment(AppModel.self) private var model
   @AppStorage("textScale") private var textScale = 1.0
   @AppStorage("codexExecutable") private var executable = ""
@@ -291,7 +324,9 @@ struct AppSettings: View {
       Section("StageChase") {
         Text("A home for every project.").stageFont(.headline)
         Text(
-          "Projects and tasks are saved locally in a versioned SQLite library. Codex runs only on Mac, only when enabled for that project, and only after a confirmed action."
+          model.isConnectedPhone
+            ? "This phone is showing a cached copy of the paired Mac library. Changes sync while the Mac app is open on the same Wi-Fi network. Codex still runs only on Mac after confirmation."
+            : "Projects and tasks are saved in a versioned SQLite library on this device. Codex runs only on Mac, only when enabled for that project, and only after a confirmed action."
         ).foregroundStyle(.secondary)
       }
       #if os(macOS)
@@ -330,7 +365,10 @@ struct AppSettings: View {
         }
       #endif
       Section("Backups") {
-        Button("Export library…", systemImage: "square.and.arrow.up") {
+        Button(
+          model.isConnectedPhone ? "Export on-device library…" : "Export library…",
+          systemImage: "square.and.arrow.up"
+        ) {
           Task {
             if let data = await model.exportData() {
               document = LibraryDocument(data: data)
@@ -338,18 +376,16 @@ struct AppSettings: View {
             }
           }
         }
-        Button("Restore into an empty library…", systemImage: "square.and.arrow.down") {
-          importing = true
+        if !model.isConnectedPhone {
+          Button("Restore into an empty library…", systemImage: "square.and.arrow.down") {
+            importing = true
+          }
         }
         Text(
-          "Restore never overwrites existing projects. Original prototype JSON is kept alongside the new library."
+          model.isConnectedPhone
+            ? "Your original on-device library stays separate from the Mac copy. Restore is unavailable while paired."
+            : "Restore never overwrites existing projects. Original prototype JSON is kept alongside the new library."
         ).stageFont(.caption).foregroundStyle(.secondary)
-      }
-      Section("Devices") {
-        Text(
-          "Mac and iPhone libraries are separate. Private pairing and live synchronization are not connected yet."
-        )
-        .stageFont(.callout).foregroundStyle(.secondary)
       }
     }.formStyle(.grouped)
       #if os(macOS)

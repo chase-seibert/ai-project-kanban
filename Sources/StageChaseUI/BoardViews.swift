@@ -111,8 +111,7 @@ struct BoardHeader: View {
         VStack(alignment: .leading, spacing: 2) {
           Text(automationTitle).stageFont(.subheadline, weight: .medium)
           #if os(iOS)
-            Text("On-device library · Mac sync not connected").stageFont(.caption).foregroundStyle(
-              .secondary)
+            Text(currentPhoneSubtitle).stageFont(.caption).foregroundStyle(.secondary)
           #else
             Text(
               model.selectedProject?.automationEnabled == true
@@ -123,11 +122,13 @@ struct BoardHeader: View {
           #endif
         }
         Spacer(minLength: 6)
-        Button {
-          if let project = model.selectedProject { model.sheet = .editProject(project) }
-        } label: {
-          Image(systemName: "slider.horizontal.3")
-        }.buttonStyle(.borderless).help("Project settings")
+        if !model.isConnectedPhone {
+          Button {
+            if let project = model.selectedProject { model.sheet = .editProject(project) }
+          } label: {
+            Image(systemName: "slider.horizontal.3")
+          }.buttonStyle(.borderless).help("Project settings")
+        }
       }.padding(12).background(Palette.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
     }.padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
   }
@@ -141,6 +142,15 @@ struct BoardHeader: View {
         model.selectedProject?.automationEnabled == true
           ? "Codex is ready when you are" : "Manual board · Codex is off"
       }
+    #endif
+  }
+  private var currentPhoneSubtitle: String {
+    #if os(iOS)
+      model.isConnectedPhone
+        ? "Mac library · \(model.syncClient.status)"
+        : "On-device library · Mac sync not connected"
+    #else
+      ""
     #endif
   }
 }
@@ -216,7 +226,11 @@ struct BoardLane: View {
               "Quick add to \(stage.title)")
           }
         }.padding(.bottom, 12)
-      }.scrollIndicators(.hidden)
+      }
+      #if os(iOS)
+        .refreshable { await model.refreshFromMac(manual: true) }
+      #endif
+      .scrollIndicators(.hidden)
     }
     .padding(14)
     .frame(maxHeight: .infinity, alignment: .top)
@@ -312,6 +326,25 @@ struct TaskCard: View {
       return true
     }
     .contextMenu {
+      let ordered = model.library.items(in: item.projectID, stage: item.stage, completed: true)
+      if let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0 {
+        Button("Move up in \(item.stage.title)", systemImage: "arrow.up") {
+          let previous = ordered[index - 1]
+          Task {
+            await model.perform(
+              .reorder(item.id, before: previous.id, expectedRevision: item.revision))
+          }
+        }
+      }
+      if let index = ordered.firstIndex(where: { $0.id == item.id }), index + 1 < ordered.count {
+        Button("Move down in \(item.stage.title)", systemImage: "arrow.down") {
+          let next = ordered[index + 1]
+          Task {
+            await model.perform(.reorder(next.id, before: item.id, expectedRevision: next.revision))
+          }
+        }
+      }
+      if !ordered.isEmpty { Divider() }
       ForEach(WorkflowStage.allCases.filter { $0 != item.stage }) { stage in
         Button {
           model.requestMove(item, to: stage)
@@ -319,10 +352,13 @@ struct TaskCard: View {
           Label("Move to \(stage.title)", systemImage: stage.symbol)
         }
       }
-      Divider()
-      Button(item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle") {
-        Task {
-          await model.perform(.complete(item.id, !item.completed, expectedRevision: item.revision))
+      if !model.isConnectedPhone {
+        Divider()
+        Button(item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle") {
+          Task {
+            await model.perform(
+              .complete(item.id, !item.completed, expectedRevision: item.revision))
+          }
         }
       }
     }

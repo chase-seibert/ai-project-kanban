@@ -11,12 +11,12 @@ GENERIC_SIM_DESTINATION := generic/platform=iOS Simulator
 DEVICE_ID ?= 00008150-000E41422E40401C
 DEVELOPMENT_TEAM ?= 96NAC4VTEN
 
-.PHONY: setup format lint test runner-test codex-check build run clean sim-build sim-launch phone-build phone-install phone-launch phone-deploy
+.PHONY: setup format lint test runner-test sync-test codex-check build run clean sim-build sim-launch phone-build phone-install phone-launch phone-deploy
 
 runner-test:
 	mkdir -p build/verification
 	chmod +x Tests/Integration/fake-codex.py
-	xcrun swiftc -swift-version 6 -parse-as-library Sources/StageChaseCore/*.swift Sources/StageChaseUI/*.swift Apps/StageChaseMac/CodexConnection.swift Apps/StageChaseMac/CodexRunner.swift Tests/Integration/RunnerSmoke.swift -o build/verification/runner-smoke
+	xcrun swiftc -swift-version 6 -parse-as-library Sources/StageChaseCore/*.swift Sources/StageChaseUI/*.swift Apps/StageChaseMac/CodexConnection.swift Apps/StageChaseMac/CodexRunner.swift Apps/StageChaseMac/SyncServer.swift Tests/Integration/RunnerSmoke.swift -o build/verification/runner-smoke
 	build/verification/runner-smoke "$(CURDIR)/Tests/Integration/fake-codex.py"
 
 codex-check:
@@ -37,6 +37,9 @@ lint:
 
 test:
 	swift test
+
+sync-test:
+	swift test --filter 'syncMessagesAreAuthenticatedEncryptedAndBounded|syncSnapshotPreservesSharedStateButOmitsMacOnlyConfiguration|remoteCommandsAreTransactionalRevisionCheckedAndIdempotent|syncFramesAreLengthBoundedAndRejectMalformedMessages|remoteCommandReceiptSurvivesRepositoryRestart|syncNetworkJournalPersistsOnlyBoundedExchangeMetadata'
 
 build:
 	xcodebuild -project $(PROJECT) -scheme $(MAC_SCHEME) -configuration $(CONFIGURATION) -destination 'platform=macOS' -derivedDataPath $(DERIVED_DATA) CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=$(DEVELOPMENT_TEAM) CODE_SIGN_IDENTITY='Apple Development' build

@@ -17,3 +17,15 @@ Custom columns are explicitly outside the first release.
 Use an atomic JSON snapshot behind `JSONSnapshotStore` while the single-user
 data shape is small. Revisit SwiftData when local API, migration, and backup
 requirements are specified.
+
+## 2026-09-29 — Prototype Mac-authoritative sync on trusted local Wi-Fi
+
+For the initial phone sync increment, keep the Mac app open as the authority and
+use a user-enabled local TCP listener. Pair by short-lived code; code entry
+automatically authorizes the phone without desktop confirmation. Treat the
+code as a temporary bearer credential. Protect framed application messages with
+AES-GCM and store device keys in
+Keychain. This transport is not TLS and is restricted to a trusted local Wi-Fi
+network. Tailnet setup is deferred by user direction. Keep phone state in a
+separate replica and durable outbox; leave device-level acceptance open until
+pairing and propagation are visibly exercised on devices.

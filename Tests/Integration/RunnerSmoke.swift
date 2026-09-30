@@ -18,7 +18,9 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: folder) }
     let repo = try LibraryRepository(inMemory: true)
-    let model = AppModel(repository: repo, preview: false)
+    let preferences = UserDefaults(suiteName: "StageChase.RunnerSmoke.\(UUID().uuidString)")!
+    preferences.set(false, forKey: "localSyncEnabled")
+    let model = AppModel(repository: repo, preferences: preferences, preview: false)
     await model.load()
     model.runner = CodexRunner(model: model, executableOverride: fixture)
     var project = Project(name: "Fixture", directory: folder.path)

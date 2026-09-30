@@ -35,5 +35,56 @@ the preview and relaunched the signed production app against the real library.
 No real model-driven planning or implementation turn was started; runner
 behavior was verified with offline fixtures and the read-only Codex handshake.
 Drag gesture and session deep-link navigation were not fully rechecked after
-the Mac locked. Mac–iPhone pairing and synchronization remain unimplemented and
-are called out in Settings and on the iPhone board.
+the Mac locked. The experimental Mac–iPhone sync implementation is documented
+in Settings and on the iPhone board; visible device acceptance remains open.
+
+## Experimental Mac–iPhone local Wi-Fi sync increment
+
+- `make test` passed all 24 core tests, including sync protocol, snapshot
+  sanitization, remote command receipts, revision conflicts, and restart replay.
+- `make sync-test` passed all six focused sync tests, including bounded,
+  persistent exchange-journal metadata.
+- `make runner-test` passed the offline runner integration fixtures; no real
+  agent turns were started.
+- `make lint`, `make build`, and `make sim-build` passed. The Simulator product
+  includes `NSLocalNetworkUsageDescription` for the direct local connection.
+- Follow-up pairing UX shows in-progress status and connection diagnostics;
+  endpoint parsing accepts the plain `IP:port` displayed by the Mac. Pairing is
+  automatically accepted by the temporary code without desktop confirmation.
+- Phone and Mac now have dedicated Connection views, a persistent 200-entry
+  metadata-only exchange log, framed request/response byte counts, and elapsed
+  time. The phone can edit the saved endpoint while retaining its queued edit.
+  Previously enabled Mac sync resumes on app launch; explicit disable stays off.
+- Final focused verification passed: `make test` (24 tests), `make sync-test`
+  (6 tests), `make runner-test`, `make lint`, `make build`, and `make sim-build`.
+  The runner fixture uses isolated preferences so a saved app listener setting
+  cannot start networking during the in-memory test.
+- Live Mac-to-phone pairing was not exercised, so the network path and the
+  phone's displayed connection error still need device-level confirmation.
+- The secret scanner reported generic-secret-assignment matches for credential
+  model/property names; inspection found no literal secret values in source.
+- Pairing, visible project/task propagation, offline recovery, and conflict
+  resolution have not been exercised between a running Mac app and iPhone.
+  Device acceptance remains open. Automated transitions from the phone stay on
+  Mac until explicit phone confirmation context is implemented.
+
+The experimental listener uses encrypted application messages over local TCP;
+it is not TLS and is intended only for a trusted local Wi-Fi network. No device
+deployment or public service was performed during this verification.
+
+## 2026-09-30 follow-up
+
+- The user reported repeated `Network.NWError error 48 - Address already in
+  use` listener failures on Mac. Read-only socket inspection found port 47928
+  held by the StageChaseMac process running from this checkout.
+- Mac listener startup now guards overlapping starts, app loading reuses an
+  existing server object, and address-in-use errors explain that another
+  StageChase listener may own the port.
+- `make lint`, `make build`, and `make runner-test` passed after the fix.
+- The Mac app was relaunched with the fix. Read-only socket inspection showed
+  the new StageChaseMac process listening on port 47928, and the newest journal
+  event was `Listener ready · Listening`; earlier bind failures remain as
+  historical log entries.
+- The iPhone was physically built, installed, and launched with
+  `make phone-deploy` after the user's explicit request. The Mac app has not
+  yet completed live phone-to-Mac sync verification.

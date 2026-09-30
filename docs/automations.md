@@ -1,7 +1,9 @@
 # Automation behavior
 
 The Mac app is the only runner and must stay open. No cron, login item, public
-endpoint, or background daemon is installed. iPhone sync is not connected.
+endpoint, or background daemon is installed. Experimental phone sync is limited
+to the local Wi-Fi listener and encrypted commands; device-level behavior is
+not yet verified.
 
 | Action | Behavior |
 | --- | --- |
@@ -17,6 +19,9 @@ endpoint, or background daemon is installed. iPhone sync is not connected.
 | Stop | Interrupt/close owned server; preserve files already changed |
 | Restart | Mark active/queued runs Interrupted; never automatically replay |
 | Retry | Explicitly resume the saved model, reasoning effort, session, and working folder |
+| Phone snapshot refresh | Read Mac state only; never enqueue or invoke the runner |
+| Phone manual task command | Validate device, revision, sequence, and operation receipt on Mac |
+| Phone move into automated stage | Keep it on Mac until phone confirmation context is implemented |
 
 Workspace-write sandboxing and default network restrictions remain enabled.
 Unknown requests are not silently approved. The agent is instructed not to
@@ -48,4 +53,5 @@ pair, selection policy, and source with the queued run, then sends explicit
 when defaults change. Older runs without a saved choice need a reviewed choice
 before retry. The global preference is Mac-local and is not included in library
 exports; project/task overrides and run records travel with the library. The
-iPhone does not query the catalog or run Codex.
+iPhone does not query the catalog or run Codex. The phone shows safe run status
+summaries but has no remote approval, Stop, or Retry controls.

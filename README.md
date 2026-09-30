@@ -47,10 +47,22 @@ The original `store.json` imports once and is preserved, with an additional
 `store.json.pre-v2-backup`. Errors never silently create an empty replacement.
 Settings offers JSON backup export and restore into an empty library.
 
-**Mac–iPhone pairing and live synchronization are not implemented.** Libraries
-are independent. The phone clearly states that its moves do not start Codex on
-the Mac. No HTTP listener, public hosting, or background service is installed.
-The Mac app must remain open for its runner.
+**Local Wi-Fi synchronization is implemented but has not passed device-level
+acceptance yet.** The Mac remains authoritative. To try the current flow, enable
+local sync in Mac Settings → Connection, enter its displayed address and
+temporary code in iPhone Connection. Entering the short-lived pairing code pairs that phone
+automatically; no desktop approval step is needed. Keep both devices on the
+same Wi-Fi network and the Mac app open with local sync enabled. The phone keeps
+a separate replica and queues supported edits when the Mac is unavailable. Codex runs only on Mac;
+automated transitions still need to be confirmed there. Do not treat sync as
+supported until the end-to-end pairing and edit checks are completed.
+
+Sync uses a bounded local TCP listener with encrypted, authenticated message
+bodies and no public hosting, HTTPS proxy, or background service. It is intended
+for a trusted local Wi-Fi network only. The Mac app must remain open for sync
+and its runner. The Connection tab shows sync state and a bounded timestamped
+log with framed message sizes and results; it does not record task text or
+credentials. The phone can update the saved Mac address without unpairing.
 
 For an isolated UI preview, launch either app with `--preview-library`; on iPhone,
 add `--preview-board` to show the board immediately. Preview data is in memory

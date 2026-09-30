@@ -37,10 +37,12 @@ custom columns, automatic completion, public cloud hosting, or user-facing
 CLI tools without an explicit product decision. Polling/synchronization must
 not start Codex; only confirmed stage transitions may do so.
 
-The implementation includes multi-project local boards and a Mac Codex runner
-behind AgentConnection. Preserve idempotence, revision checks, visible activity,
-explicit approvals, and failed-run retry state. Mac–iPhone pairing/sync is not
-implemented; never imply that local phone actions reach the Mac.
+The implementation includes multi-project boards, a Mac Codex runner behind
+AgentConnection, and an experimental local Wi-Fi sync path. Preserve
+idempotence, revision checks, visible activity, explicit approvals, and
+failed-run retry state. Sync has not passed device-level acceptance; distinguish
+build/test coverage from verified Mac–iPhone behavior. The phone must never
+start, approve, stop, or retry Mac Codex work through polling or replica updates.
 
 ## Documentation index
 

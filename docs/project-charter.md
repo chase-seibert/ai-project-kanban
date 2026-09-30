@@ -29,14 +29,14 @@ required for the foundation.
 
 ## Sources and independent investigation
 
-The source plan is preserved in `docs/initial-brainstorm.md`. Future work can
-inspect the local Xcode project, configured Codex desktop behavior, the chosen
-Tailscale network, and the configured project directories. Public name/store
-and trademark checks remain separate from implementation.
+The source plan is preserved in `docs/initial-brainstorm.md`. Implementation can
+inspect the local Xcode project, configured Codex desktop behavior, the local
+Wi-Fi route, and the configured project directories. Public name/store and
+trademark checks remain separate from implementation.
 
 ## Questions to answer
 
-- What local API and pairing design is appropriate for one-user Tailscale access?
+- How should local Wi-Fi pairing and command validation be verified on devices?
 - Which Codex desktop/session adapter is stable enough for persisted planning?
 - How should dirty checkout detection distinguish unrelated user changes?
 - What backup/export format protects the local task database?
@@ -49,6 +49,6 @@ planning automation, implementation automation, and hardening.
 
 ## Status and next session
 
-Status: foundation implemented and build-verified. Next recommended session:
-add the Mac local API and pairing spike, then introduce a protocol-backed
-automation coordinator without starting Codex during ordinary sync.
+Status: foundation and experimental local Wi-Fi sync implementation are
+build-verified; device-level sync acceptance remains open. The sync path is
+Mac-authoritative and must not start Codex during ordinary refresh.

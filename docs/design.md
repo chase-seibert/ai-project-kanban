@@ -21,7 +21,14 @@ steps, approvals, errors, command output, session links, and working folders.
 
 Automated Next/Implementation actions require confirmation including usage cost.
 Manual mode is labeled prominently. Enabling automation alone never starts work.
-The phone labels its disconnected Mac-sync boundary honestly.
+Paired iPhone mode displays the Mac replica, sync status, pending count, and
+last successful refresh. A separate Connection tab on phone and in Mac Settings
+shows progress, the saved endpoint, and timestamped framed exchange sizes and
+results without recording payloads. It offers supported task edits, stage moves, and
+ordering, while project creation/configuration, completion, delete, restore,
+and Codex controls stay on Mac. Automation-triggering moves show a Continue on
+Mac explanation. Local Wi-Fi pairing is present but still awaiting visible
+device-level verification; the unpaired phone library remains separate.
 
 The Mac's Settings exposes a StageChase-wide Codex model and reasoning pair.
 Project and task forms can inherit or override the pair. A run confirmation

@@ -61,6 +61,58 @@ The runner uses the selected model from the StageChase snapshot. Protocol source
 [OpenAI app-server](https://learn.chatgpt.com/docs/app-server); the installed CLI's
 generated JSON schema was checked for exact request spellings.
 
+## Experimental local Wi-Fi synchronization
+
+`Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
+sanitized snapshots. Phone commands are a small allowlist (create/edit/move/
+reorder) with expected task revisions; clients cannot submit runs, activity,
+plan paths, project folders, rank values, or automation configuration. The Mac
+`LibraryRepository` remains the only authoritative writer. It stores a library
+identity, monotonic sequence, device high-water marks, and operation receipts in
+the existing SwiftData metadata rows, committing accepted edits and receipts in
+one save. A changed snapshot is returned when the phone cursor is stale; an
+unchanged response avoids retransmitting the library every foreground poll.
+
+The Mac app starts `NWListener` on port 47928 only after the user enables local
+sync from Settings → Connection. That explicit choice is remembered, so the
+listener restarts when the Mac app opens; disabling sync clears the choice. The
+iPhone enters the Mac's local address and short-lived
+pairing code; entering the code automatically registers the phone without
+desktop confirmation. The code is a short-lived bearer credential, so anyone
+who obtains it during its validity can pair. Random device keys and pairing
+material are stored in Keychain. The framed TCP payloads use
+AES-GCM authenticated encryption at the application layer. The transport is
+limited to a trusted local Wi-Fi network; it is not HTTPS/TLS and is not
+intended for public or untrusted networks. The phone's direct local-network use
+is declared in its privacy usage string. Pair attempts, connection count, and
+message size are bounded.
+
+Both apps have a Connection view with current request state, last result,
+pending count, saved endpoint, and a persistent, bounded exchange journal. The
+journal records timestamps, direction, framed request/response byte counts,
+elapsed time, endpoint, and outcome; it never records message bodies, task text,
+or credentials. Since transport uses one short TCP connection per request,
+phone status reports the most recent reachability check rather than a permanent
+socket. The phone can update its saved Mac address without unpairing or dropping
+queued changes.
+
+The phone's Mac replica is stored in a separate non-recovering SwiftData store,
+so loading remote runs does not interrupt them. Its independent on-device
+library is preserved. Pending commands are stored in a private, bounded,
+atomic outbox file and overlaid on the cached replica. Automatic foreground
+refresh runs every three seconds by default and can be disabled in the phone's
+Connection tab. Sync Now and board pull-to-refresh always perform an explicit
+sync; with automatic sync disabled, phone edits remain queued until then.
+Polling itself never invokes the runner. The Mac must be awake with StageChase
+open. Phone completion, deletion, undo, project
+configuration, and Codex run controls are hidden while paired. Automated stage
+transitions remain Mac-only until the phone can obtain and submit a
+server-validated confirmation context.
+
+This path is still experimental. Unit and build checks pass, but pairing and
+task propagation have not yet been visibly verified between Mac and iPhone.
+Do not describe it as supported until that acceptance is complete.
+
 ## Migration and recovery
 
 Prototype JSON is decoded/validated before import. Project/task IDs, folders,
@@ -70,9 +122,11 @@ leaves automation off. A metadata record prevents repeated import. Corrupt data
 fails closed. Export/empty-library restore is tested; restore disables automation
 and interrupts imported active runs.
 
-## Not implemented
+## Not implemented or not yet verified
 
-Authenticated Mac API, Tailscale pairing, Keychain pairing credentials, iPhone
-offline outbox, and synchronization remain separate work. Phone actions do not
-reach the Mac. Project archival, multi-process writers, history pagination, and
-rich interactive Codex questions are also outside the implemented surface.
+Visible device-level pairing, add/edit/move/order propagation, outage recovery,
+and conflict resolution remain unverified. Phone-side automation confirmation
+and dependent-command conflict resolution are not implemented. Tailscale,
+HTTPS, public hosting, multi-user sync, multiple Macs, background delivery,
+project archival, multi-process writers, history pagination, and rich
+interactive Codex questions are outside this surface.
