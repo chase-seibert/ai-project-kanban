@@ -8,12 +8,13 @@ not yet verified.
 | Action | Behavior |
 | --- | --- |
 | Open, poll, switch project, enable automation | Does not enqueue or start work |
-| Refresh model catalog or edit model settings | Does not enqueue or start work |
+| Refresh model catalog or edit model or approval settings | Does not enqueue or start work |
 | Confirm adding/moving to Next | Persist one planning run and invoke Codex |
 | Planning success | Require structured success plus a saved nonempty plan; move to Planned |
 | Confirm Implementation | Require plan; prepare checkout/worktree; invoke Codex |
 | Implementation success | Require structured success; move to Review, never Completed |
-| Approval request | Show Allow once / Deny and Needs Approval state |
+| Approval request in Ask me mode | Show Allow once / Deny and Needs Approval state |
+| Approval request in Auto-approve requests mode | One-time accept only for supported command/file requests that do not ask for broader permissions |
 | Unsupported interaction | Fail visibly; retain session link for continuing in Codex |
 | Blocked/failed/disconnected | Keep task in its stage, preserve error and retry state |
 | Stop | Cancel active work; close the owned server and preserve files already changed |
@@ -31,6 +32,27 @@ Workspace-write sandboxing and default network restrictions remain enabled.
 Unknown requests are not silently approved. The agent is instructed not to
 commit, push, publish, deploy, or delete unrelated files. Review approvals and
 results; prompt restrictions are not an absolute enforcement boundary.
+
+## Approval mode
+
+The Mac-only setting defaults to **Approve for me**. It uses Codex's built-in
+`approvalPolicy: never` while keeping `workspaceWrite`, the run's selected
+writable root, and `networkAccess: false`. Codex does not pause for ordinary
+approval prompts; the sandbox still limits file writes and network access.
+
+**Ask me** keeps Codex's `on-request` policy and shows supported command and
+file-change approval requests in Activity for a one-time Allow once / Deny
+decision. **Auto-approve requests** also uses `on-request`, then StageChase
+responds `accept` once for each supported command or file-change request. It
+does not grant session-wide approval, a broader filesystem root, or network
+access. Unknown, overlapping, stale, mismatched, and permission-widening
+requests fail visibly instead of being automatically accepted.
+
+StageChase snapshots the selected mode when a queued run starts. Settings
+changes apply to later runs and explicitly confirmed retries. The preference is
+stored in Mac-local UserDefaults and is excluded from library sync and exports.
+If a saved mode is malformed, Settings shows an error and the runner waits for
+the user to choose a valid mode.
 
 Close Codex session is available for saved sessions. It is disabled while a
 different run owns the shared app-server process. A successful close pauses

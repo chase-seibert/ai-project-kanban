@@ -21,6 +21,8 @@ import UniformTypeIdentifiers
   var runnerMessage = "Codex starts only after a confirmed stage change."
   var globalModelConfiguration = CodexModelConfiguration()
   var modelConfigurationError: String?
+  var approvalMode = CodexApprovalMode.approveForMe
+  var approvalModeError: String?
   var modelCatalog: [CodexModelOption] = []
   var modelCatalogError: String?
   var modelCatalogLoading = false
@@ -52,6 +54,14 @@ import UniformTypeIdentifiers
       } catch {
         modelConfigurationError =
           "Saved model settings could not be read. Reset or replace them before queuing Codex work."
+      }
+    }
+    if let saved = self.preferences.string(forKey: "codexApprovalMode") {
+      if let mode = CodexApprovalMode(rawValue: saved) {
+        approvalMode = mode
+      } else {
+        approvalModeError =
+          "Saved approval mode is invalid. Choose an approval mode before starting Codex work."
       }
     }
   }
@@ -590,6 +600,12 @@ import UniformTypeIdentifiers
     preferences.removeObject(forKey: "codexModelConfiguration")
     globalModelConfiguration = CodexModelConfiguration()
     modelConfigurationError = nil
+  }
+
+  func setApprovalMode(_ mode: CodexApprovalMode) {
+    approvalMode = mode
+    preferences.set(mode.rawValue, forKey: "codexApprovalMode")
+    approvalModeError = nil
   }
 
   func refreshModelCatalog() async throws {

@@ -2,6 +2,9 @@
 
 ## 2026-09-30
 
+- Added Mac-local Codex approval modes: Codex no-prompt policy by default,
+  explicit Ask me decisions, and one-time automatic approval for supported
+  command/file requests without widening workspace or network access.
 - Added Mac task-detail feedback that appends typed or dictated raw text to the
   saved plan under a user-feedback heading, without starting Codex.
 - Added Close Codex session for explicit desktop handoff, preserving saved

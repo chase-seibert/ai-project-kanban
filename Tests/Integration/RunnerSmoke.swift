@@ -21,6 +21,31 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     let preferences = UserDefaults(suiteName: "StageChase.RunnerSmoke.\(UUID().uuidString)")!
     preferences.set(false, forKey: "localSyncEnabled")
     let model = AppModel(repository: repo, preferences: preferences, preview: false)
+    guard model.approvalMode == .approveForMe, model.approvalModeError == nil else {
+      throw BoardError.invalid("Missing approval mode must default to Approve for me")
+    }
+    model.setApprovalMode(.askMe)
+    guard model.library.runs.isEmpty else {
+      throw BoardError.invalid("Changing the approval setting created a Codex run")
+    }
+    let restoredPreferences = AppModel(repository: repo, preferences: preferences, preview: false)
+    guard restoredPreferences.approvalMode == .askMe else {
+      throw BoardError.invalid("Approval mode did not persist across AppModel reconstruction")
+    }
+    let freshPreferences = UserDefaults(suiteName: "StageChase.RunnerSmoke.Fresh.\(UUID())")!
+    guard
+      AppModel(repository: repo, preferences: freshPreferences, preview: false).approvalMode
+        == .approveForMe
+    else {
+      throw BoardError.invalid("A fresh preference suite did not default to Approve for me")
+    }
+    let corruptPreferences = UserDefaults(suiteName: "StageChase.RunnerSmoke.Invalid.\(UUID())")!
+    corruptPreferences.set("unknown-mode", forKey: "codexApprovalMode")
+    let corruptModel = AppModel(repository: repo, preferences: corruptPreferences, preview: false)
+    guard corruptModel.approvalModeError != nil else {
+      throw BoardError.invalid("Invalid saved approval mode was not surfaced")
+    }
+    model.setApprovalMode(.approveForMe)
     await model.load()
     model.runner = CodexRunner(model: model, executableOverride: fixture)
     var project = Project(name: "Fixture", directory: folder.path)
@@ -29,17 +54,31 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       throw BoardError.invalid(model.error ?? "project")
     }
     for title in [
-      "Plan fixture", "BLOCKED_FIXTURE", "APPROVAL_FIXTURE", "STOP_FIXTURE", "CLOSE_FIXTURE",
+      "Plan fixture", "BLOCKED_FIXTURE", "APPROVAL_FIXTURE", "AUTO_APPROVE_FIXTURE",
+      "UNSAFE_FIXTURE", "DENY_FIXTURE", "STOP_FIXTURE", "CLOSE_FIXTURE",
     ] {
       print("START: \(title)")
       fflush(nil)
+      switch title {
+      case "APPROVAL_FIXTURE", "DENY_FIXTURE": model.setApprovalMode(.askMe)
+      case "AUTO_APPROVE_FIXTURE", "UNSAFE_FIXTURE": model.setApprovalMode(.autoApproveRequests)
+      default: model.setApprovalMode(.approveForMe)
+      }
       let item = WorkItem(projectID: project.id, title: title, stage: .next)
       _ = await model.perform(.createTask(item, configuration: fixtureModelConfiguration))
       model.kickRunner()
       if title == "APPROVAL_FIXTURE" {
         try await wait { model.runner?.approval != nil }
         try await wait { model.library.latestRun(for: item.id)?.status == .needsInput }
+        model.setApprovalMode(.autoApproveRequests)
+        guard model.runner?.approvalModeForActiveRun == .askMe else {
+          throw BoardError.invalid("Changing Settings changed the in-flight approval mode")
+        }
         await model.runner?.answerApproval(allow: true)
+      }
+      if title == "DENY_FIXTURE" {
+        try await wait { model.runner?.approval != nil }
+        await model.runner?.answerApproval(allow: false)
       }
       if title == "STOP_FIXTURE" {
         try await wait { model.library.latestRun(for: item.id)?.turnID != nil }
@@ -89,6 +128,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       let expected: RunStatus
       switch title {
       case "BLOCKED_FIXTURE": expected = .failed
+      case "UNSAFE_FIXTURE": expected = .failed
+      case "DENY_FIXTURE": expected = .failed
       case "STOP_FIXTURE": expected = .cancelled
       case "CLOSE_FIXTURE": expected = .interrupted
       default: expected = .succeeded
@@ -104,6 +145,34 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         throw BoardError.invalid("Missing logs")
       }
       print("PASS: \(title) → \(run.status.rawValue), task in \(expectedStage.rawValue)")
+      if title == "APPROVAL_FIXTURE" {
+        guard
+          model.library.activity.contains(where: {
+            $0.runID == run.id && $0.message.contains("Permission approved")
+          })
+        else { throw BoardError.invalid("Ask me approval was not recorded") }
+      }
+      if title == "DENY_FIXTURE" {
+        guard
+          model.library.activity.contains(where: {
+            $0.runID == run.id && $0.message.contains("Permission denied once")
+          })
+        else { throw BoardError.invalid("Ask me decline was not recorded") }
+      }
+      if title == "AUTO_APPROVE_FIXTURE" {
+        let messages = model.library.activity.filter { $0.runID == run.id }.map(\.message)
+        guard messages.filter({ $0.contains("Automatically approved a supported") }).count == 2,
+          messages.contains(where: { $0.contains("command request once") }),
+          messages.contains(where: { $0.contains("file-change request once") })
+        else {
+          throw BoardError.invalid("Automatic command and file approvals were not both recorded")
+        }
+      }
+      if title == "UNSAFE_FIXTURE" {
+        guard run.error?.contains("broader access") == true else {
+          throw BoardError.invalid("Unsafe request did not fail visibly")
+        }
+      }
       if title == "CLOSE_FIXTURE" {
         guard
           run.threadID != nil, run.turnID != nil, run.workDirectory == folder.path,

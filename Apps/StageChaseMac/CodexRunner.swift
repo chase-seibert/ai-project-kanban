@@ -11,6 +11,7 @@ struct AgentApproval {
   private weak var model: AppModel?
   private let connection: any AgentConnection
   private var activeID: UUID?
+  private(set) var approvalModeForActiveRun: CodexApprovalMode?
   private var draining = false
   private var queuePausedForHandoff = false
   private var closingRunID: UUID?
@@ -139,17 +140,25 @@ struct AgentApproval {
 
   func drain() {
     guard !queuePausedForHandoff, closingRunID == nil, !draining, activeID == nil,
-      let model, !model.isPreview,
+      let model, !model.isPreview
+    else { return }
+    guard model.approvalModeError == nil else {
+      model.runnerMessage = model.approvalModeError!
+      return
+    }
+    guard
       let run = model.library.runs.filter({ $0.status == .queued }).sorted(by: {
         $0.createdAt < $1.createdAt
       }).first
     else { return }
+    let approvalMode = model.approvalMode
     draining = true
     activeID = run.id
+    approvalModeForActiveRun = approvalMode
     finalOutcome = nil
     fileChangeDetails.removeAll()
     Task {
-      await start(run)
+      await start(run, approvalMode: approvalMode)
       draining = false
       if activeID == nil, model.library.runs.first(where: { $0.id == run.id })?.status == .succeeded
       {
@@ -230,7 +239,7 @@ struct AgentApproval {
     }
   }
 
-  private func start(_ initial: AgentRun) async {
+  private func start(_ initial: AgentRun, approvalMode: CodexApprovalMode) async {
     guard let model,
       let item = model.library.tasks.first(where: { $0.id == initial.taskID }),
       let project = model.library.projects.first(where: { $0.id == initial.projectID }),
@@ -288,14 +297,16 @@ struct AgentApproval {
         result = try await connection.call(
           "thread/resume",
           [
-            "threadId": thread, "cwd": directory.path, "approvalPolicy": "on-request",
+            "threadId": thread, "cwd": directory.path,
+            "approvalPolicy": approvalMode.approvalPolicy,
             "sandbox": "workspace-write", "model": configuration.modelID,
           ])
       } else {
         result = try await connection.call(
           "thread/start",
           [
-            "cwd": directory.path, "approvalPolicy": "on-request", "sandbox": "workspace-write",
+            "cwd": directory.path, "approvalPolicy": approvalMode.approvalPolicy,
+            "sandbox": "workspace-write",
             "model": configuration.modelID,
           ])
       }
@@ -318,7 +329,7 @@ struct AgentApproval {
           "threadId": threadID,
           "input": [["type": "text", "text": prompt(item: item, run: run), "text_elements": []]],
           "cwd": directory.path,
-          "approvalPolicy": "on-request",
+          "approvalPolicy": approvalMode.approvalPolicy,
           "model": configuration.modelID,
           "effort": configuration.effort,
           "sandboxPolicy": [
@@ -593,7 +604,9 @@ struct AgentApproval {
       try? connection.reject(id: id, message: "No active StageChase run")
       return
     }
-    guard approval == nil, params["threadId"] as? String == run.threadID else {
+    guard approval == nil, params["threadId"] as? String == run.threadID,
+      params["turnId"] as? String == run.turnID
+    else {
       try? connection.reject(id: id, message: "Mismatched or concurrent approval request")
       await fail("Codex sent overlapping approval requests. Continue in the saved Codex session.")
       return
@@ -604,15 +617,49 @@ struct AgentApproval {
       let fileRequest = method == "item/fileChange/requestApproval"
       let diff = (params["itemId"] as? String).flatMap { fileChangeDetails[$0] }
       let needsBroaderGrant = params["grantRoot"] as? String != nil
+      let needsAdditionalPermissions = params["additionalPermissions"] != nil
+      let needsNetworkApproval = params["networkApprovalContext"] != nil
+      let needsCommandPolicyChange = params["proposedExecpolicyAmendment"] != nil
+      let commandWorkingDirectory = params["cwd"] as? String
       let unsupportedCommand =
         !fileRequest
         && ((params["command"] as? String)?.isEmpty != false
-          || (params["kind"] as? String ?? "command") != "command")
-      guard !(fileRequest && (diff?.isEmpty != false || needsBroaderGrant)), !unsupportedCommand
+          || (params["kind"] as? String ?? "command") != "command"
+          || !isWithinWorkingDirectory(commandWorkingDirectory, run: run))
+      guard !(fileRequest && (diff?.isEmpty != false || needsBroaderGrant)),
+        !unsupportedCommand, !needsAdditionalPermissions, !needsNetworkApproval,
+        !needsCommandPolicyChange
       else {
         try? connection.respond(id: id, result: ["decision": "cancel"])
         await fail(
           "This permission request needs more context or broader access than StageChase can safely present. Review it in the saved Codex session."
+        )
+        return
+      }
+      guard let approvalMode = approvalModeForActiveRun else {
+        try? connection.respond(id: id, result: ["decision": "cancel"])
+        await fail("The approval mode for this run is unavailable. Review the saved Codex session.")
+        return
+      }
+      switch approvalMode {
+      case .autoApproveRequests:
+        do {
+          try connection.respond(id: id, result: ["decision": "accept"])
+          if var latest = currentRun() {
+            latest.status = .running
+            latest.summary = "Automatically approved this request once. Codex is continuing."
+            await model?.perform(.updateRun(latest))
+          }
+          let requestKind = fileRequest ? "file-change" : "command"
+          await log("Automatically approved a supported \(requestKind) request once.")
+        } catch { await fail(error.localizedDescription) }
+        return
+      case .askMe:
+        break
+      case .approveForMe:
+        try? connection.respond(id: id, result: ["decision": "cancel"])
+        await fail(
+          "Codex requested approval while its no-prompt policy was active. Review the saved Codex session."
         )
         return
       }
@@ -649,6 +696,7 @@ struct AgentApproval {
           : "Permission denied. Codex is continuing within its permissions."
         await model?.perform(.updateRun(run))
       }
+      await log(allow ? "Permission approved once." : "Permission denied once.")
       try connection.respond(id: approval.id, result: ["decision": allow ? "accept" : "decline"])
       self.approval = nil
     } catch { await fail(error.localizedDescription) }
@@ -734,4 +782,11 @@ private func runGit(_ arguments: [String], at directory: URL) async throws -> St
     }
     return output
   }.value
+}
+
+private func isWithinWorkingDirectory(_ path: String?, run: AgentRun) -> Bool {
+  guard let path, let root = run.workDirectory else { return false }
+  let requested = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
+  let workspace = URL(fileURLWithPath: root).standardizedFileURL.resolvingSymlinksInPath().path
+  return requested == workspace || requested.hasPrefix(workspace + "/")
 }

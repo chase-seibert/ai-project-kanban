@@ -51,6 +51,27 @@ public enum CodexModelScope: String, Codable, Hashable, Sendable {
   public var title: String { rawValue.capitalized }
 }
 
+public enum CodexApprovalMode: String, Codable, CaseIterable, Identifiable, Sendable {
+  case approveForMe
+  case askMe
+  case autoApproveRequests
+
+  public var id: String { rawValue }
+  public var title: String {
+    switch self {
+    case .approveForMe: "Approve for me"
+    case .askMe: "Ask me"
+    case .autoApproveRequests: "Auto-approve requests"
+    }
+  }
+  public var approvalPolicy: String {
+    switch self {
+    case .approveForMe: "never"
+    case .askMe, .autoApproveRequests: "on-request"
+    }
+  }
+}
+
 public struct ResolvedCodexConfiguration: Codable, Hashable, Sendable {
   public var selection: CodexModelSelection
   public var modelID: String
