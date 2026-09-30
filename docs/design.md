@@ -16,8 +16,13 @@ configuration enables the full display rather than iOS compatibility framing.
 
 Mac task detail is an inspector; iPhone uses a sheet. Title, notes, saved plan,
 move, and manual completion share the model. Dirty drafts require Save; stale
-revisions produce an error. Activity includes statuses, public progress, plan
-steps, approvals, errors, command output, session links, and working folders.
+revisions produce an error. Task detail and the Activity screen show compact
+Codex run status and progress instead of a long chronological event timeline.
+The Activity screen lists active runs; task detail keeps the latest run. Full
+event records remain stored; open a run in Codex on Mac to inspect its session.
+On iPhone, StageChase tries the Codex thread URL and, if no app can open it,
+directs the user to continue on Mac and lets them copy the session ID. The phone
+cannot manage the Mac runner.
 For an incomplete Planned task with a saved plan, Mac task detail also accepts
 typed or system-dictated plan feedback. Append feedback explicitly; StageChase
 adds a `User feedback on the plan` heading and preserves the user's wording.

@@ -120,11 +120,6 @@ import UniformTypeIdentifiers
   private(set) var planFeedbackDrafts: [UUID: String] = [:]
   private(set) var planFeedbackMessages: [UUID: PlanFeedbackMessage] = [:]
   private(set) var planFeedbackInFlight: Set<UUID> = []
-  var projectRuns: [AgentRun] {
-    library.runs.filter { selectedProjectID == nil || $0.projectID == selectedProjectID }.sorted {
-      $0.createdAt > $1.createdAt
-    }
-  }
   func load() async {
     guard !ready else { return }
     do {

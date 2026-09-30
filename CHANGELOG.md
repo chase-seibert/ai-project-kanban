@@ -16,6 +16,8 @@
   Port conflicts now explain how to release the port before retrying.
 - Added a saved phone automatic-sync toggle plus board pull-to-refresh and an
   explicit Sync Now action that work even when automatic syncing is off.
+- Replaced long Mac and iPhone activity timelines with compact run details and
+  Codex session handoff, retaining full event history in storage.
 
 ## 2026-09-29
 

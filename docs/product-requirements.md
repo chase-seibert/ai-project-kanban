@@ -12,6 +12,12 @@
   current intent.
 - As a user, I want transitions and activity to be recorded, so that I can see
   what changed and why.
+- As a user, I want Mac and iPhone to show concise run status and progress
+  instead of a long event timeline, so task detail and Activity stay readable
+  and I can open the associated Codex session for its full history.
+- As a user, I want the iPhone to offer a truthful Codex handoff, so it opens a
+  supported thread URL or explains that I need to continue on Mac and can copy
+  the session ID.
 - As a user, I want edits to carry revisions, so that a stale iPhone write does
   not silently overwrite a newer Mac transition.
 

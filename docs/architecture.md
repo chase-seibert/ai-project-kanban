@@ -13,7 +13,11 @@
   are transactional. The UI reads an in-memory library. Initial load currently
   loads all history; pagination remains a future scaling improvement.
 - `Sources/StageChaseUI/`: observable app model, board, task detail, project forms,
-  activity, and settings. New Project and Edit Project are distinct routes.
+  activity, and settings. Task detail shows the latest run; Activity lists only
+  active runs. Neither surface renders chronological event feeds, while activity
+  records remain persisted. Mac opens saved Codex thread links directly. iPhone
+  tries the same URL and offers a Mac continuation message plus session-ID copy
+  when no handler accepts it. New Project and Edit Project are distinct routes.
   Model configuration is a global Mac preference with optional project/task
   overrides; queued runs save the resolved model, effort, policy, and source.
 - `Apps/StageChaseMac/`: native scene/commands, `AgentConnection` protocol,

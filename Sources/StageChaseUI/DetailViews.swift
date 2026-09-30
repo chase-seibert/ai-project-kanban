@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if os(iOS)
+  import UIKit
+#endif
+
 #if os(macOS)
   struct CodexModelFields: View {
     @Environment(AppModel.self) private var model
@@ -379,13 +383,6 @@ struct TaskDetail: View {
               #endif
             }
           }
-          let activity = model.library.activity.filter { $0.taskID == taskID }.suffix(40).reversed()
-          if !activity.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-              Text("TIMELINE").stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
-              ForEach(Array(activity)) { event in ActivityRow(event: event) }
-            }
-          }
           if !model.isConnectedPhone {
             Divider()
             Button("Delete task", role: .destructive) { deleting = true }
@@ -441,7 +438,12 @@ struct TaskDetail: View {
 
 struct RunDetail: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.openURL) private var openURL
   let run: AgentRun
+  #if os(iOS)
+    @State private var codexOpenFailed = false
+    @State private var sessionIDCopied = false
+  #endif
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {
@@ -503,6 +505,29 @@ struct RunDetail: View {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
           }
         }
+      #else
+        if let thread = run.threadID {
+          Button("Open in Codex", systemImage: "arrow.up.right.square") {
+            guard let url = URL(string: "codex://threads/\(thread)") else {
+              codexOpenFailed = true
+              return
+            }
+            openURL(url) { accepted in
+              if !accepted { codexOpenFailed = true }
+            }
+          }
+          if codexOpenFailed {
+            HStack(alignment: .firstTextBaseline) {
+              Text("Continue in Codex on your Mac.")
+                .stageFont(.caption).foregroundStyle(.secondary)
+              Spacer(minLength: 8)
+              Button(sessionIDCopied ? "Copied" : "Copy session ID", systemImage: "doc.on.doc") {
+                UIPasteboard.general.string = thread
+                sessionIDCopied = true
+              }
+            }
+          }
+        }
       #endif
       HStack {
         if !model.isConnectedPhone && [.failed, .interrupted, .cancelled].contains(run.status) {
@@ -522,55 +547,44 @@ struct RunDetail: View {
       Text(run.updatedAt, format: .dateTime.month().day().hour().minute()).stageFont(.caption2)
         .foregroundStyle(.tertiary)
     }
-  }
-}
-
-struct ActivityRow: View {
-  let event: Activity
-  var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(event.message).stageFont(.callout).textSelection(.enabled)
-      Text(event.date, format: .dateTime.month().day().hour().minute()).stageFont(.caption2)
-        .foregroundStyle(.secondary)
-    }.frame(maxWidth: .infinity, alignment: .leading)
+    #if os(iOS)
+      .onChange(of: run.threadID) { _, _ in
+        codexOpenFailed = false
+        sessionIDCopied = false
+      }
+    #endif
   }
 }
 
 struct ActivityPanel: View {
   @Environment(AppModel.self) private var model
+  private var visibleRuns: [AgentRun] {
+    model.activeRuns.filter {
+      model.selectedProjectID == nil || $0.projectID == model.selectedProjectID
+    }.sorted { $0.createdAt > $1.createdAt }
+  }
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
         HStack {
           Text("Activity").stageFont(.title2, weight: .bold)
           Spacer()
-          Text("\(model.activeRuns.count) active").stageFont(.caption).foregroundStyle(.secondary)
+          Text("\(visibleRuns.count) active").stageFont(.caption).foregroundStyle(.secondary)
         }
         Text(model.runnerMessage).stageFont(.callout).foregroundStyle(.secondary)
-        if model.projectRuns.isEmpty {
+        if visibleRuns.isEmpty {
           ContentUnavailableView(
             "Nothing running", systemImage: "sparkles",
             description: Text(
-              "Agent progress, approvals, and session links will appear here. Enabling automation alone never starts work."
+              "Active run progress and approvals appear here. Open saved sessions from a task. Enabling automation alone never starts work."
             ))
         }
-        ForEach(model.projectRuns) { run in
+        ForEach(visibleRuns) { run in
           VStack(alignment: .leading, spacing: 12) {
             Text(model.library.tasks.first { $0.id == run.taskID }?.title ?? "Task").stageFont(
               .headline)
             RunDetail(run: run)
           }.padding(14).background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
-        }
-        Text("RECENT EVENTS").stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
-        ForEach(
-          Array(
-            model.library.activity.filter {
-              model.selectedProjectID == nil || $0.projectID == model.selectedProjectID
-                || $0.projectID == nil
-            }.suffix(100).reversed())
-        ) { event in
-          ActivityRow(event: event)
-          Divider()
         }
       }.padding(20)
     }.background(Palette.canvas)
