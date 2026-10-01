@@ -6,6 +6,7 @@ import re
 import sys
 
 thread_id = None
+thread_names = {}
 thread_counter = 0
 turn_counter = 0
 turn_id = None
@@ -22,6 +23,8 @@ def event(method, **params):
 def complete(params):
     prompt = params["input"][0]["text"]
     blocked = "BLOCKED_FIXTURE" in prompt
+    if not prompt.startswith("Task: "):
+        blocked = True
     if "Task: Plan fixture" in prompt:
         expected_sections = [
             "## User requirements",
@@ -37,8 +40,8 @@ def complete(params):
     if "Task: Implement fixture" in prompt and "PLAN_FORMAT_SENTINEL" in prompt:
         blocked = True
     if "Plan only" in prompt and not blocked:
-        reserved = re.search(r"Reserved plan path: (to-do/[a-f0-9-]+\.md)", prompt)
-        destinations = re.findall(r"to-do/[a-f0-9-]+\.md", prompt)
+        reserved = re.search(r"Reserved plan path: (to-do/[^\s`]+\.md)", prompt)
+        destinations = re.findall(r"to-do/[^\s`]+\.md", prompt)
         if reserved is None or destinations.count(reserved.group(1)) < 2:
             blocked = True
         path = reserved.group(1) if reserved else ""
@@ -98,6 +101,12 @@ for line in sys.stdin:
         turn_counter += 1
         turn_id = f"fixture-turn-{turn_counter}"
         prompt = params["input"][0]["text"]
+        if not prompt.startswith("Task: "):
+            send({"id": request_id, "error": {"code": -32602, "message": "task title is not first in prompt"}})
+            continue
+        if thread_names.get(params["threadId"]) != prompt.splitlines()[0][len("Task: "):]:
+            send({"id": request_id, "error": {"code": -32602, "message": "thread name does not match task title"}})
+            continue
         if "APPROVAL_FIXTURE" in prompt or "AUTO_APPROVE_FIXTURE" in prompt or "UNSAFE_FIXTURE" in prompt or "DENY_FIXTURE" in prompt:
             expected_policy = "on-request"
         else:
@@ -126,6 +135,9 @@ for line in sys.stdin:
             complete(params)
         continue
     elif method == "turn/interrupt":
+        result = {}
+    elif method == "thread/name/set":
+        thread_names[params["threadId"]] = params["name"]
         result = {}
     elif request_id in ("approval-command", "approval-file"):
         decision = message.get("result", {}).get("decision")

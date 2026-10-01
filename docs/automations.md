@@ -11,13 +11,13 @@ not yet verified.
 | Refresh model catalog or edit model or approval settings | Does not enqueue or start work |
 | Change a project's header settings | Saves that project's worktree preference or model override; does not enqueue or start work |
 | Edit or reset the plan format prompt | Saves a Mac-local preference; does not enqueue work |
-| Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
+| Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<normalized task-title>-<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
 | Planning success | Require structured success plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
 | Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Use the project folder, or create a managed worktree for a dirty repository when that project's worktree setting is on; then invoke Codex. A plan is optional context |
 | Implementation success | Require structured success; update the run only. The user chooses the task column and completion state |
 | Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers manual prompt copy and launch actions |
-| Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, including stable IDs and a readable project-relative plan path when available |
-| Launch Codex from task detail | Open `codex://threads/new` with the repository path and same MCP prompt; the user starts the turn in Desktop |
+| Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, starting with the exact task title and including stable IDs and a readable project-relative plan path when available |
+| Launch Codex from task detail | Open `codex://threads/new` with the repository path and same MCP prompt; name the session with the task title alone and let the user start the turn in Desktop |
 | Successful task-prompt work | After `finish_task` succeeds, set that task complete through MCP using its latest revision; leave its stage unchanged |
 | Failed or blocked task-prompt work | Report the outcome through MCP and leave the task incomplete |
 | Use the optional Codex Desktop MCP connection | Read/create tasks and explicitly move/complete them through the Mac library; MCP task calls never start or control a Codex turn |
@@ -105,7 +105,8 @@ Screenshot preview mode never invokes Codex.
 
 A planning path is reserved on the task in the same confirmed reducer update
 that queues its run. An existing user-selected relative Markdown path is
-preserved; otherwise StageChase uses the lowercase task UUID path above. A
+preserved; otherwise StageChase uses the readable task-title slug and full task
+UUID path above. A
 reservation by itself is not a saved plan: the run succeeds only after Codex
 reports completion and StageChase verifies readable, non-whitespace Markdown at
 that exact path. The task stays in its current column. Open plan and Mac

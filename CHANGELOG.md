@@ -2,6 +2,9 @@
 
 ## 2026-10-01
 
+- Generated plan filenames now use readable normalized task-title slugs with
+  full task-ID suffixes; planning, implementation, and manual prompts start
+  with the task title, and Codex sessions use the task title alone.
 - Added Mac Git status in project headers and task details, including the
   current branch and commit hash, plus a task action that stages all project
   changes and commits with the task title as its message. Added an optional

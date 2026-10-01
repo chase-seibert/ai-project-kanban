@@ -19,6 +19,8 @@
       }
       let notes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
       return """
+        Task: \(task.title)
+
         Execute this existing task in the repository opened in this Codex Desktop session. Follow this repository's AGENTS.md instructions. Use the StageChase MCP server (`stagechase`) to read and update the task; do not start or manage another Codex session.
 
         First call `read_task` with the exact project and task IDs below and verify the returned IDs match. Then inspect the task context and work on it.

@@ -15,8 +15,10 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
 
   let prompt = PlanHandoffPrompt.make(for: notedTask, project: project, formatPrompt: format)
 
-  #expect(PlanHandoffPrompt.planPath(for: notedTask) == WorkItem.canonicalPlanPath(for: task.id))
-  #expect(prompt.contains("to-do/\(task.id.uuidString.lowercased()).md"))
+  let expectedPlanPath = WorkItem.canonicalPlanPath(for: task.id, title: task.title)
+  #expect(PlanHandoffPrompt.planPath(for: notedTask) == expectedPlanPath)
+  #expect(prompt.hasPrefix("Task: \(task.title)\n\n"))
+  #expect(prompt.contains(expectedPlanPath))
   #expect(prompt.contains("Project ID (`project_id`): \(project.id.uuidString.lowercased())"))
   #expect(prompt.contains("Task ID (`task_id`): \(task.id.uuidString.lowercased())"))
   #expect(prompt.contains("Start with user stories, then risks."))
@@ -26,6 +28,23 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(!prompt.contains("set_task_completed"))
   #expect(!prompt.contains("Execute this existing task"))
   #expect(!prompt.contains("implementation work"))
+}
+
+@Test func canonicalPlanPathUsesReadableSafeUniqueTaskSlugs() {
+  let id = UUID(uuidString: "12345678-1234-1234-1234-123456789abc")!
+  let path = WorkItem.canonicalPlanPath(for: id, title: "Add Export: CSV & JSON")
+  #expect(path == "to-do/add-export-csv-json-12345678-1234-1234-1234-123456789abc.md")
+  #expect(WorkItem.canonicalPlanPath(for: id, title: "Résumé / 東京 🚀").hasPrefix("to-do/resume-東京-"))
+  #expect(
+    WorkItem.canonicalPlanPath(for: id, title: "!!!")
+      == "to-do/task-12345678-1234-1234-1234-123456789abc.md")
+  let longTitle = String(repeating: "A", count: 200)
+  #expect(WorkItem.canonicalPlanPath(for: id, title: longTitle).count < 120)
+
+  let otherID = UUID(uuidString: "87654321-4321-4321-4321-cba987654321")!
+  #expect(
+    WorkItem.canonicalPlanPath(for: id, title: "Same title")
+      != WorkItem.canonicalPlanPath(for: otherID, title: "Same title"))
 }
 
 @Test func planHandoffPromptPreservesReadableAndUnreadableAttachedPaths() throws {
@@ -495,7 +514,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let created = WorkItem(projectID: project.id, title: "Created in Next", stage: .next)
   library = try BoardReducer.apply(
     .createTask(created, configuration: fixtureModelConfiguration), to: library)
-  #expect(library.tasks[0].planPath == WorkItem.canonicalPlanPath(for: created.id))
+  #expect(
+    library.tasks[0].planPath == WorkItem.canonicalPlanPath(for: created.id, title: created.title))
   #expect(library.runs.count == 1)
   #expect(library.runs[0].taskID == created.id)
   #expect(library.runs[0].kind == .planning)
@@ -508,7 +528,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       moved.id, .next, expectedRevision: moved.revision,
       configuration: fixtureModelConfiguration), to: library)
   #expect(
-    library.tasks.first { $0.id == moved.id }?.planPath == WorkItem.canonicalPlanPath(for: moved.id)
+    library.tasks.first { $0.id == moved.id }?.planPath
+      == WorkItem.canonicalPlanPath(for: moved.id, title: moved.title)
   )
   #expect(library.runs.last?.taskID == moved.id)
 
@@ -523,7 +544,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   var project = Project(name: "Automated", directory: "/tmp/fixture")
   project.automationEnabled = true
   let task = WorkItem(projectID: project.id, title: "Task", stage: .next)
-  let reserved = WorkItem.canonicalPlanPath(for: task.id)
+  let reserved = WorkItem.canonicalPlanPath(for: task.id, title: task.title)
   var run = AgentRun(task: task, kind: .planning, modelConfiguration: fixtureModelConfiguration)
   run.status = .running
   var library = Library()

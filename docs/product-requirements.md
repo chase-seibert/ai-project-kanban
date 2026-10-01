@@ -74,8 +74,9 @@ open.
 - As a user, I want a confirmed move into Next to create one persisted Codex
   planning run when automatic invocation is enabled globally and for that
   project, so that planning is explicit and idempotent.
-- As a user, I want the Markdown plan to live in lowercase `to-do/`, so that it
-  remains an ordinary project file I can inspect and version.
+- As a user, I want the Markdown plan to use a readable normalized task-title
+  filename with a stable task-ID suffix under lowercase `to-do/`, so I can
+  recognize it while keeping duplicate titles distinct.
 - As a user, I want plan and Codex links on the task, so that both devices can
   reopen the relevant context.
 - As a user, I want a Mac-wide StageChase model and reasoning default, with
@@ -121,6 +122,9 @@ open.
 - As a user, I want task-level Copy prompt and Launch Codex actions to use the
   same StageChase MCP prompt, so I can either paste it or open a new Codex
   Desktop thread with the repository path and prompt.
+- As a user, I want generated task prompts to start with the exact task title
+  and Codex sessions to use that title alone, so the task stays clear in both
+  the prompt and Desktop session list.
 - As a user, I want the prompt to identify the project and task by stable IDs,
   include a readable project-relative plan path when one exists, and otherwise
   include the task title and notes.
@@ -141,9 +145,9 @@ open.
   stable project/task IDs, the current Mac plan-format preference, and the
   intended project-relative path, so copying and launching produce the same
   plan workflow.
-- As a user, I want a new plan to use the canonical `to-do/<lowercase task
-  UUID>.md` path and a revision to preserve its attached path, so plans remain
-  predictable while honoring an existing location.
+- As a user, I want a new plan to use a normalized task-title slug plus its full
+  task UUID under `to-do/` and a revision to preserve its attached path, so
+  plans are recognizable, collision-safe, and honor an existing location.
 - As a user, I want Codex to attach the saved readable Markdown plan through
   revision-checked MCP operations and move successful planning to Planned,
   while leaving the task incomplete and never starting another Codex session.

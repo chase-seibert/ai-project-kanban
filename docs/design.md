@@ -39,8 +39,9 @@ When the Mac-wide automatic invocation setting and the project automation
 setting are both enabled, Next/Implementation actions require confirmation
 including usage cost. The Mac setting can turn off automatic turns globally;
 task detail then offers Copy prompt and Launch Codex using the same StageChase
-MCP prompt. It contains stable project/task IDs and a readable project-relative
-plan path when available. Launch opens a new Codex Desktop thread without
+MCP prompt. It starts with the exact task title and contains stable project/task IDs and a readable project-relative
+plan path when available. The new session is named with the task title alone.
+Launch opens a new Codex Desktop thread without
 submitting a turn. After success, that prompt directs Codex to complete the
 task through MCP while leaving its column unchanged. Enabling automation alone
 never starts work.
@@ -48,8 +49,9 @@ Mac task detail also offers separate **Copy plan prompt** and **Plan in Codex**
 actions. Both use the same plan-only prompt, include the Mac plan-format
 preference, and open a new thread without submitting a turn. The labels identify
 whether Codex will create a first plan or revise a readable attached plan. New
-plans use the lowercase task UUID path under `to-do/`; revisions retain the
-attached path. Codex attaches the saved Markdown plan through MCP and moves a
+plans use a normalized task-title slug plus the full lowercase task UUID under
+`to-do/`; revisions retain the attached path. Plan prompts also start with the
+exact task title. Codex attaches the saved Markdown plan through MCP and moves a
 successful plan to Planned while leaving the task incomplete. These actions are
 Mac-only and do not change task state when copied or opened.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and

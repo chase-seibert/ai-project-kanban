@@ -270,8 +270,29 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     self.stage = stage
   }
 
-  public static func canonicalPlanPath(for id: UUID) -> String {
-    "to-do/\(id.uuidString.lowercased()).md"
+  public static func canonicalPlanPath(for id: UUID, title: String) -> String {
+    let foldedTitle =
+      title
+      .folding(
+        options: [.diacriticInsensitive, .widthInsensitive],
+        locale: Locale(identifier: "en_US_POSIX")
+      )
+      .lowercased()
+    var slug = ""
+    var previousWasSeparator = false
+    for character in foldedTitle {
+      if character.isLetter || character.isNumber {
+        slug.append(character)
+        previousWasSeparator = false
+      } else if !previousWasSeparator, !slug.isEmpty {
+        slug.append("-")
+        previousWasSeparator = true
+      }
+      if slug.count >= 64 { break }
+    }
+    while slug.last == "-" { slug.removeLast() }
+    if slug.isEmpty { slug = "task" }
+    return "to-do/\(slug)-\(id.uuidString.lowercased()).md"
   }
 }
 
@@ -471,7 +492,7 @@ public enum BoardReducer {
         throw BoardError.invalid("Choose a project folder before enabling Codex.")
       }
       if item.stage == .next, item.planPath == nil {
-        item.planPath = WorkItem.canonicalPlanPath(for: item.id)
+        item.planPath = WorkItem.canonicalPlanPath(for: item.id, title: item.title)
       }
       let run = AgentRun(
         task: item, kind: item.stage == .next ? .planning : .implementation,
@@ -695,7 +716,7 @@ public enum BoardReducer {
         throw BoardError.missing
       }
       if run.kind == .planning, task.planPath == nil {
-        task.planPath = WorkItem.canonicalPlanPath(for: task.id)
+        task.planPath = WorkItem.canonicalPlanPath(for: task.id, title: task.title)
         task.revision += 1
         task.updatedAt = .now
         state.tasks[taskIndex] = task

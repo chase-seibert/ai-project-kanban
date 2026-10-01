@@ -13,6 +13,12 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   }
   @MainActor static func main() async throws {
     try await testGitService()
+    let promptProject = Project(name: "Prompt fixture", directory: "/tmp/prompt-fixture")
+    let promptTask = WorkItem(projectID: promptProject.id, title: "Readable prompt title")
+    guard
+      TaskHandoffPrompt.make(for: promptTask, project: promptProject)
+        .hasPrefix("Task: Readable prompt title\n\n")
+    else { throw BoardError.invalid("Manual task prompt does not start with its exact title") }
     let fixture = CommandLine.arguments[1]
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
       "stagechase-smoke-\(UUID())")
@@ -106,7 +112,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       }
       let item = WorkItem(projectID: project.id, title: title, stage: .next)
       _ = await model.perform(.createTask(item, configuration: fixtureModelConfiguration))
-      let reservedPath = WorkItem.canonicalPlanPath(for: item.id)
+      let reservedPath = WorkItem.canonicalPlanPath(for: item.id, title: item.title)
       guard model.library.tasks.first(where: { $0.id == item.id })?.planPath == reservedPath,
         let queuedRun = model.library.latestRun(for: item.id), queuedRun.taskID == item.id,
         queuedRun.kind == .planning, queuedRun.status == .queued
@@ -188,7 +194,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       let expectedStage: WorkflowStage = .next
       guard let finishedTask = model.library.tasks.first(where: { $0.id == item.id }),
         finishedTask.stage == expectedStage,
-        finishedTask.planPath == WorkItem.canonicalPlanPath(for: item.id)
+        finishedTask.planPath == WorkItem.canonicalPlanPath(for: item.id, title: item.title)
       else {
         throw BoardError.invalid("Unexpected stage or changed reserved plan path")
       }

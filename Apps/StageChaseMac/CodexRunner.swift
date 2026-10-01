@@ -160,7 +160,7 @@ struct AgentApproval {
       let threadID = thread["id"] as? String, !threadID.isEmpty
     else { throw BoardError.invalid("Codex returned no Desktop session ID.") }
     _ = try? await connection.call(
-      "thread/name/set", ["threadId": threadID, "name": "StageChase · \(task.title)"])
+      "thread/name/set", ["threadId": threadID, "name": task.title])
     run.threadID = threadID
     run.workDirectory = root.path
     run.updatedAt = .now
@@ -394,7 +394,7 @@ struct AgentApproval {
         throw BoardError.invalid("Could not save the Codex session ID. The turn was not started.")
       }
       _ = try? await connection.call(
-        "thread/name/set", ["threadId": threadID, "name": "StageChase · \(item.title)"])
+        "thread/name/set", ["threadId": threadID, "name": item.title])
       guard activeID == initial.id, closingRunID != initial.id else { return }
       let resultTurn = try await connection.call(
         "turn/start",
@@ -435,8 +435,9 @@ struct AgentApproval {
 
   private func prompt(item: WorkItem, run: AgentRun) throws -> String {
     let common = """
-      You are working on a StageChase task in this project. Follow its AGENTS.md instructions.
       Task: \(item.title)
+
+      You are working on a StageChase task in this project. Follow its AGENTS.md instructions.
       Details: \(item.notes)
       Do not commit, push, publish, deploy, send messages, or delete unrelated files. Do not mark the task complete.
       Keep progress updates concise and use the plan tool so StageChase can display progress. Ask for approval when required; never bypass sandbox restrictions.
@@ -464,9 +465,10 @@ struct AgentApproval {
     }
     if run.kind == .task {
       return run.handoffContext ?? """
+        Task: \(item.title)
+
         Continue the StageChase task below in this project.
 
-        Task: \(item.title)
         Current column: \(item.stage.title)
         Details: \(item.notes)
         Existing plan path: \(item.planPath ?? "None")

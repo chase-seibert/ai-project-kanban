@@ -49,7 +49,8 @@ never start, stop, retry, or approve Codex work.
 ### Finish planning
 
 - Save the plan as a readable, nonempty project-relative Markdown file at
-  `to-do/<lowercase-task-UUID>.md`, unless the user specified another path.
+  `to-do/<normalized-task-title>-<lowercase-task-UUID>.md`, unless the user
+  specified another path.
 - Creating a new plan or revising an attached plan is successful planning once
   the readable plan has been saved and attached. After either operation,
   explicitly move the task to `planned` and leave its completion flag false,

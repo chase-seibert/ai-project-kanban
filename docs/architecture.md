@@ -40,7 +40,8 @@ produce a verified run outcome; the task column never changes automatically.
 Automatic runs do not mark tasks complete. With automatic invocation off,
 task detail offers Copy prompt and Launch Codex actions using one prompt with
 stable project/task IDs and a readable project-relative plan path when
-available. Launch opens `codex://threads/new` with the project folder and
+available. Prompts start with the exact task title; manual and runner-created
+Codex sessions use the task title alone. Launch opens `codex://threads/new` with the project folder and
 prompt without submitting a turn. That prompt authorizes Codex to mark the task
 complete through MCP after successful work, using the latest revision, while
 leaving its stage unchanged. Failed or blocked work stays incomplete. Legacy
@@ -50,8 +51,9 @@ Mac task detail also has a separate plan handoff. `PlanHandoffPrompt` builds
 plan-only instructions for both Copy plan prompt and Plan in Codex, so both
 actions deliver identical text while keeping implementation completion clauses
 out of this flow. It includes the current Mac-local plan-format preference.
-New plans target `WorkItem.canonicalPlanPath(for:)`; an explicit saved path is
-preserved for revisions and for reporting an unreadable attachment. The UI
+New plans target a normalized task-title slug with the full stable task UUID as
+a collision-safe suffix under `to-do/`; an explicit saved path is preserved for
+revisions and for reporting an unreadable attachment. The UI
 labels revision actions only when that attached Markdown file is readable and
 nonempty. Launch opens a new `codex://threads/new` URL and never submits a turn.
 After saving a readable nonempty plan, the external Codex session finishes its
@@ -99,8 +101,8 @@ boundary.
 
 When a confirmed Mac action queues planning, the task stores its plan destination
 in that same transaction. StageChase preserves an existing user-selected path;
-otherwise it reserves `to-do/<lowercase task UUID>.md`. The planning prompt uses
-that saved path, and retries reuse it. A path reservation does not mean the plan
+otherwise it reserves `to-do/<task-title-slug>-<lowercase task UUID>.md`. The
+planning prompt uses that saved path, and retries reuse it. A path reservation does not mean the plan
 exists: the planning run succeeds only after structured success and a readable,
 non-whitespace file at the reserved destination. The task stays in its current
 column. Mac Open plan and feedback controls require a readable file and are
