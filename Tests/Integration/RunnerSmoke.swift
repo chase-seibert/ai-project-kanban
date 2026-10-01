@@ -91,7 +91,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       throw BoardError.invalid(model.error ?? "project")
     }
     for title in [
-      "Plan fixture", "BLOCKED_FIXTURE", "APPROVAL_FIXTURE", "AUTO_APPROVE_FIXTURE",
+      "Plan fixture", "MISSING_PLAN_FIXTURE", "EMPTY_PLAN_FIXTURE", "BLOCKED_FIXTURE",
+      "APPROVAL_FIXTURE", "AUTO_APPROVE_FIXTURE",
       "UNSAFE_FIXTURE", "DENY_FIXTURE", "STOP_FIXTURE", "CLOSE_FIXTURE",
     ] {
       print("START: \(title)")
@@ -103,6 +104,14 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       }
       let item = WorkItem(projectID: project.id, title: title, stage: .next)
       _ = await model.perform(.createTask(item, configuration: fixtureModelConfiguration))
+      let reservedPath = WorkItem.canonicalPlanPath(for: item.id)
+      guard model.library.tasks.first(where: { $0.id == item.id })?.planPath == reservedPath,
+        let queuedRun = model.library.latestRun(for: item.id), queuedRun.taskID == item.id,
+        queuedRun.kind == .planning, queuedRun.status == .queued
+      else {
+        throw BoardError.invalid(
+          "Planning path and queued run were not persisted together before start")
+      }
       model.kickRunner()
       if title == "APPROVAL_FIXTURE" {
         try await wait { model.runner?.approval != nil }
@@ -164,7 +173,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       let run = model.library.latestRun(for: item.id)!
       let expected: RunStatus
       switch title {
-      case "BLOCKED_FIXTURE": expected = .failed
+      case "BLOCKED_FIXTURE", "MISSING_PLAN_FIXTURE", "EMPTY_PLAN_FIXTURE": expected = .failed
       case "UNSAFE_FIXTURE": expected = .failed
       case "DENY_FIXTURE": expected = .failed
       case "STOP_FIXTURE": expected = .cancelled
@@ -174,9 +183,12 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       guard run.status == expected else {
         throw BoardError.invalid("\(title): \(run.status) / \(run.error ?? model.error ?? "")")
       }
-      let expectedStage: WorkflowStage = expected == .succeeded ? .planned : .next
-      guard model.library.tasks.first(where: { $0.id == item.id })?.stage == expectedStage else {
-        throw BoardError.invalid("Unexpected stage")
+      let expectedStage: WorkflowStage = .next
+      guard let finishedTask = model.library.tasks.first(where: { $0.id == item.id }),
+        finishedTask.stage == expectedStage,
+        finishedTask.planPath == WorkItem.canonicalPlanPath(for: item.id)
+      else {
+        throw BoardError.invalid("Unexpected stage or changed reserved plan path")
       }
       guard !model.library.activity.filter({ $0.runID == run.id }).isEmpty else {
         throw BoardError.invalid("Missing logs")
@@ -261,7 +273,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         await model.closeCodexSession(run.id)
         guard let saved = model.library.runs.first(where: { $0.id == run.id }),
           saved.status == .succeeded, saved.summary == summary,
-          model.library.tasks.first(where: { $0.id == item.id })?.stage == .planned,
+          model.library.tasks.first(where: { $0.id == item.id })?.stage == .next,
           model.library.tasks.first(where: { $0.id == item.id })?.planPath == savedPlanPath
         else { throw BoardError.invalid("Closing a successful run changed its result") }
         print("PASS: successful close preserves outcome, stage, summary, and plan")
@@ -341,10 +353,10 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     guard original == "Uncommitted user work\n", isolated == "Committed base\n",
       FileManager.default.fileExists(
         atPath: URL(fileURLWithPath: path).appendingPathComponent("to-do/fixture.md").path),
-      model.library.tasks.first(where: { $0.id == implementation.id })?.stage == .review
+      model.library.tasks.first(where: { $0.id == implementation.id })?.stage == .implementation
     else {
       throw BoardError.invalid("Dirty checkout isolation failed")
     }
-    print("PASS: dirty checkout isolated, original edits preserved, plan copied, task → Review")
+    print("PASS: dirty checkout isolated, original edits preserved, plan copied, task column unchanged")
   }
 }

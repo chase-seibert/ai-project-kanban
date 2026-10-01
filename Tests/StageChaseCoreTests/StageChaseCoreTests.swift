@@ -219,11 +219,11 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.runs[0].status == .queued)
   let same = try BoardReducer.apply(.move(task.id, .next, expectedRevision: 1), to: library)
   #expect(same == library)
+  library = try BoardReducer.apply(.move(task.id, .review, expectedRevision: 1), to: library)
+  #expect(library.tasks[0].stage == .review)
+  #expect(library.runs.count == 1)
   #expect(throws: BoardError.self) {
-    try BoardReducer.apply(.move(task.id, .review, expectedRevision: 0), to: library)
-  }
-  #expect(throws: BoardError.self) {
-    try BoardReducer.apply(.move(task.id, .review, expectedRevision: 1), to: library)
+    try BoardReducer.apply(.move(task.id, .inbox, expectedRevision: 1), to: library)
   }
 }
 
@@ -237,24 +237,26 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.runs.isEmpty)
 }
 
-@Test func implementationRequiresPlanAndRollbackIsAtomic() throws {
+@Test func implementationCanBeQueuedWithoutAPlanAndMoveDoesNotRequireIdleCodex() throws {
   var project = Project(name: "A", directory: "/tmp/fixture")
   project.automationEnabled = true
   let task = WorkItem(projectID: project.id, title: "Build it")
   var library = Library()
   library.projects = [project]
   library.tasks = [task]
-  #expect(throws: BoardError.self) {
-    try BoardReducer.apply(
-      .move(
-        task.id, .implementation, expectedRevision: 0, configuration: fixtureModelConfiguration),
-      to: library)
-  }
-  #expect(library.tasks[0].stage == .inbox)
-  #expect(library.runs.isEmpty)
+  library = try BoardReducer.apply(
+    .move(
+      task.id, .implementation, expectedRevision: 0, configuration: fixtureModelConfiguration),
+    to: library)
+  #expect(library.tasks[0].stage == .implementation)
+  #expect(library.runs.count == 1)
+  #expect(library.tasks[0].planPath == nil)
+  library = try BoardReducer.apply(.move(task.id, .review, expectedRevision: 1), to: library)
+  #expect(library.tasks[0].stage == .review)
+  #expect(library.runs.count == 1)
 }
 
-@Test func completionMovesStageButNeverCompletesTask() throws {
+@Test func codexCompletionLeavesTaskColumnAndCompletionStateAlone() throws {
   let project = Project(name: "A")
   let task = WorkItem(projectID: project.id, title: "Task", stage: .next)
   var run = AgentRun(task: task, kind: .planning, modelConfiguration: fixtureModelConfiguration)
@@ -264,7 +266,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   library.tasks = [task]
   library.runs = [run]
   library = try BoardReducer.apply(.finishRun(run.id, planPath: "to-do/plan.md"), to: library)
-  #expect(library.tasks[0].stage == .planned)
+  #expect(library.tasks[0].stage == .next)
   #expect(!library.tasks[0].completed)
   #expect(library.runs[0].status == .succeeded)
 }
@@ -311,9 +313,74 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let task = WorkItem(projectID: project.id, title: "Task", stage: .next)
   var library = Library()
   library.projects = [project]
-  #expect(throws: BoardError.self) { try BoardReducer.apply(.createTask(task), to: library) }
-  #expect(library.tasks.isEmpty)
+  library = try BoardReducer.apply(.createTask(task), to: library)
+  #expect(library.tasks.count == 1)
   #expect(library.runs.isEmpty)
+}
+
+@Test func confirmedPlanningReservesDeterministicPathBeforeRunAndPreservesManualPaths() throws {
+  var project = Project(name: "Automated", directory: "/tmp/fixture")
+  project.automationEnabled = true
+  var library = Library()
+  library.projects = [project]
+
+  let created = WorkItem(projectID: project.id, title: "Created in Next", stage: .next)
+  library = try BoardReducer.apply(
+    .createTask(created, configuration: fixtureModelConfiguration), to: library)
+  #expect(library.tasks[0].planPath == WorkItem.canonicalPlanPath(for: created.id))
+  #expect(library.runs.count == 1)
+  #expect(library.runs[0].taskID == created.id)
+  #expect(library.runs[0].kind == .planning)
+
+  var moved = WorkItem(projectID: project.id, title: "Moved task")
+  library = try BoardReducer.apply(.createTask(moved), to: library)
+  moved = library.tasks.first { $0.id == moved.id }!
+  library = try BoardReducer.apply(
+    .move(
+      moved.id, .next, expectedRevision: moved.revision,
+      configuration: fixtureModelConfiguration), to: library)
+  #expect(
+    library.tasks.first { $0.id == moved.id }?.planPath == WorkItem.canonicalPlanPath(for: moved.id)
+  )
+  #expect(library.runs.last?.taskID == moved.id)
+
+  var manual = WorkItem(projectID: project.id, title: "Manual path", stage: .next)
+  manual.planPath = "to-do/chosen-by-user.md"
+  library = try BoardReducer.apply(
+    .createTask(manual, configuration: fixtureModelConfiguration), to: library)
+  #expect(library.tasks.first { $0.id == manual.id }?.planPath == manual.planPath)
+}
+
+@Test func planningCompletionMustMatchReservedPathAndLegacyRetryReservesOne() throws {
+  var project = Project(name: "Automated", directory: "/tmp/fixture")
+  project.automationEnabled = true
+  let task = WorkItem(projectID: project.id, title: "Task", stage: .next)
+  let reserved = WorkItem.canonicalPlanPath(for: task.id)
+  var run = AgentRun(task: task, kind: .planning, modelConfiguration: fixtureModelConfiguration)
+  run.status = .running
+  var library = Library()
+  library.projects = [project]
+  var reservedTask = task
+  reservedTask.planPath = reserved
+  library.tasks = [reservedTask]
+  library.runs = [run]
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.finishRun(run.id, planPath: "to-do/wrong.md"), to: library)
+  }
+  library = try BoardReducer.apply(.finishRun(run.id, planPath: reserved), to: library)
+  #expect(library.tasks[0].planPath == reserved)
+  #expect(library.tasks[0].stage == .next)
+
+  var legacyRun = AgentRun(
+    task: task, kind: .planning, modelConfiguration: fixtureModelConfiguration)
+  legacyRun.status = .failed
+  var legacy = Library()
+  legacy.projects = [project]
+  legacy.tasks = [task]
+  legacy.runs = [legacyRun]
+  legacy = try BoardReducer.apply(.retry(legacyRun.id), to: legacy)
+  #expect(legacy.tasks[0].planPath == reserved)
+  #expect(legacy.runs[0].status == .queued)
 }
 
 @Test func modelConfigurationResolvesTaskThenProjectThenGlobal() {

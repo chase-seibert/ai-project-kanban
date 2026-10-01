@@ -37,10 +37,16 @@ def complete(params):
     if "Task: Implement fixture" in prompt and "PLAN_FORMAT_SENTINEL" in prompt:
         blocked = True
     if "Plan only" in prompt and not blocked:
-        path = re.search(r"to-do/[a-f0-9-]+\.md", prompt).group()
+        reserved = re.search(r"Reserved plan path: (to-do/[a-f0-9-]+\.md)", prompt)
+        destinations = re.findall(r"to-do/[a-f0-9-]+\.md", prompt)
+        if reserved is None or destinations.count(reserved.group(1)) < 2:
+            blocked = True
+        path = reserved.group(1) if reserved else ""
         destination = pathlib.Path(params["cwd"]) / path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text("# Fixture plan\n\nImplement and verify the fixture.\n")
+        if "MISSING_PLAN_FIXTURE" not in prompt:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            content = "   \n\t" if "EMPTY_PLAN_FIXTURE" in prompt else "# Fixture plan\n\nImplement and verify the fixture.\n"
+            destination.write_text(content)
     event("turn/plan/updated", plan=[{"step": "Verify the fixture", "status": "completed"}])
     text = json.dumps({"outcome": "blocked" if blocked else "completed", "summary": "Fixture is blocked" if blocked else "Fixture verified"})
     event("item/completed", item={"type": "agentMessage", "text": text, "phase": "final_answer"})

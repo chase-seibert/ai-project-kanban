@@ -10,10 +10,14 @@ not yet verified.
 | Open, poll, switch project, enable automation | Does not enqueue or start work |
 | Refresh model catalog or edit model or approval settings | Does not enqueue or start work |
 | Edit or reset the plan format prompt | Saves a Mac-local preference; does not enqueue work |
-| Confirm adding/moving to Next | Persist one planning run and invoke Codex |
-| Planning success | Require structured success plus a saved nonempty plan; move to Planned |
-| Confirm Implementation | Require plan; prepare checkout/worktree; invoke Codex |
-| Implementation success | Require structured success; move to Review, never Completed |
+| Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
+| Planning success | Require structured success plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
+| Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Prepare a checkout/worktree and invoke Codex; a plan is optional context |
+| Implementation success | Require structured success; update the run only. The user chooses the task column and completion state |
+| Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers a manual Desktop handoff |
+| Run in Codex from task detail | Persist task context, create an empty Codex Desktop session, copy the context, and open that session; the user starts the turn in Desktop |
+| Refresh manual Codex status | Read the linked session only after the user presses Refresh status; update its run record without changing the task |
+| Retry/rerun a manual task | Reuse the saved context in a fresh Desktop session and copy it again; the user starts the new turn |
 | Approval request in Ask me mode | Show Allow once / Deny and Needs Approval state |
 | Approval request in Auto-approve requests mode | One-time accept only for supported command/file requests that do not ask for broader permissions |
 | Unsupported interaction | Fail visibly; retain session link for continuing in Codex |
@@ -22,10 +26,10 @@ not yet verified.
 | Close Codex session | Interrupt active work as Interrupted, then confirm shutdown of the owned server; preserve finished outcomes, conversation history, working folder, and files |
 | Open in Codex | Open the saved thread link only; does not release or continue the StageChase connection |
 | Restart | Mark active/queued runs Interrupted; never automatically replay |
-| Retry | Explicitly resume the saved model, reasoning effort, session, and working folder |
+| Retry an automatic run | Explicitly resume the saved model, reasoning effort, session, working folder, and reserved plan path when automatic invocation is enabled |
 | Phone snapshot refresh | Read Mac state only; never enqueue or invoke the runner |
 | Phone manual task command | Validate device, revision, sequence, and operation receipt on Mac |
-| Phone move into automated stage | Keep it on Mac until phone confirmation context is implemented |
+| Phone move between stages | Apply the move without starting Codex; phone polling and replica updates never enqueue or invoke work |
 | Append plan feedback on Mac | Coordinate an explicit raw-text append to the saved Markdown plan; never enqueue or invoke the runner |
 | Phone plan feedback | Direct the user to the Mac, where project plan files are stored |
 
@@ -79,6 +83,27 @@ reasoning events are not collected. Treat generated plans/output as untrusted.
 checks the installed server/sign-in without starting a turn. Real model work
 requires an intentional confirmed action and uses the account's allowance.
 Screenshot preview mode never invokes Codex.
+
+A planning path is reserved on the task in the same confirmed reducer update
+that queues its run. An existing user-selected relative Markdown path is
+preserved; otherwise StageChase uses the lowercase task UUID path above. A
+reservation by itself is not a saved plan: the run succeeds only after Codex
+reports completion and StageChase verifies readable, non-whitespace Markdown at
+that exact path. The task stays in its current column. Open plan and Mac
+feedback actions require a readable file and are available regardless of the
+task's column. Failed and interrupted runs retain the path for retry. Legacy
+failed planning runs without a path receive the canonical path when explicitly
+retried.
+
+The Mac-wide **Automatically invoke Codex** preference gates automatic turns;
+the existing project switch must also be enabled for stage-triggered automation.
+With automatic invocation off, users can choose **Run in Codex** on any task.
+StageChase stores the task context and linked session, copies the context for
+the user, and opens the session in Codex Desktop without submitting a turn.
+Task detail keeps the context available to copy later. Refresh status is an
+explicit `thread/read` action and never polls in the background or changes task
+placement. Automatic run settings do not restrict stage placement based on a
+plan, completion state, or Codex run status.
 
 Reference: [official app-server docs](https://learn.chatgpt.com/docs/app-server).
 

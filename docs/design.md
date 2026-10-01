@@ -15,8 +15,9 @@ a hint of its neighbor, not five squeezed desktop columns. Generated launch
 configuration enables the full display rather than iOS compatibility framing.
 
 Mac task detail is an inspector; iPhone uses a sheet. Title, notes, saved plan,
-move, and manual completion share the model. Dirty drafts require Save; stale
-revisions produce an error. Task detail and the Activity screen show compact
+move, and manual completion share the model. Plans and Codex run state do not
+restrict task placement. Dirty drafts require Save; stale revisions produce an
+error. Task detail and the Activity screen show compact
 Codex run status and progress instead of a long chronological event timeline.
 The Activity screen lists active runs; task detail keeps the latest run. Full
 event records remain stored; open a run in Codex on Mac to inspect its session.
@@ -28,8 +29,12 @@ typed or system-dictated plan feedback. Append feedback explicitly; StageChase
 adds a `User feedback on the plan` heading and preserves the user's wording.
 The phone directs the user to the Mac because project plan files are not synced.
 
-Automated Next/Implementation actions require confirmation including usage cost.
-Manual mode is labeled prominently. Enabling automation alone never starts work.
+When the Mac-wide automatic invocation setting and the project automation
+setting are both enabled, Next/Implementation actions require confirmation
+including usage cost. The Mac setting can turn off automatic turns globally;
+task detail then prepares a manual Codex Desktop session, copies its persisted
+task context, and offers an explicit status refresh and rerun. Codex results do
+not move tasks between columns. Enabling automation alone never starts work.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings
 shows progress, the saved endpoint, and timestamped framed exchange sizes and

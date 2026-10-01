@@ -35,7 +35,9 @@ Prefer Makefile targets over ad hoc commands:
 Keep the five stages fixed in `WorkflowStage`. Do not add Apple Reminders,
 custom columns, automatic completion, public cloud hosting, or user-facing
 CLI tools without an explicit product decision. Polling/synchronization must
-not start Codex; only confirmed stage transitions may do so.
+not start or manage Codex. Automatic turns require a confirmed stage transition
+with both automatic-invocation settings enabled; a manual turn starts only when
+the user opens a task handoff in Codex Desktop and starts work there.
 
 The implementation includes multi-project boards, a Mac Codex runner behind
 AgentConnection, and an experimental local Wi-Fi sync path. Preserve
@@ -43,6 +45,9 @@ idempotence, revision checks, visible activity, explicit approvals, and
 failed-run retry state. Sync has not passed device-level acceptance; distinguish
 build/test coverage from verified Mac–iPhone behavior. The phone must never
 start, approve, stop, or retry Mac Codex work through polling or replica updates.
+
+## Instructions
+- When finishing a prompt session, rebuild and relaunch either the mac app or ios app or both depeneding on the change.
 
 ## Documentation index
 

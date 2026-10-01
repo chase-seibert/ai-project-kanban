@@ -217,13 +217,18 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     self.title = title
     self.stage = stage
   }
+
+  public static func canonicalPlanPath(for id: UUID) -> String {
+    "to-do/\(id.uuidString.lowercased()).md"
+  }
 }
 
 public enum RunStatus: String, Codable, CaseIterable, Sendable {
-  case queued, running, needsInput, succeeded, failed, interrupted, cancelled
+  case queued, readyForHandoff, running, needsInput, succeeded, failed, interrupted, cancelled
   public var title: String {
     switch self {
     case .needsInput: "Needs your approval"
+    case .readyForHandoff: "Ready for Codex Desktop"
     case .succeeded: "Finished"
     default: rawValue.capitalized
     }
@@ -231,7 +236,7 @@ public enum RunStatus: String, Codable, CaseIterable, Sendable {
   public var isActive: Bool { [.queued, .running, .needsInput].contains(self) }
 }
 
-public enum RunKind: String, Codable, Sendable { case planning, implementation }
+public enum RunKind: String, Codable, Sendable { case planning, implementation, task }
 
 public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var id = UUID()
@@ -246,6 +251,7 @@ public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var error: String?
   public var steps: [ProgressStep] = []
   public var modelConfiguration: ResolvedCodexConfiguration?
+  public var handoffContext: String?
   public var createdAt = Date()
   public var updatedAt = Date()
   public init(task: WorkItem, kind: RunKind, modelConfiguration: ResolvedCodexConfiguration? = nil)
@@ -335,6 +341,7 @@ public enum Mutation: Sendable {
   case createProject(Project)
   case editProject(Project)
   case createTask(WorkItem, configuration: ResolvedCodexConfiguration? = nil)
+  case createManualRun(AgentRun)
   case editTask(WorkItem, expectedRevision: Int)
   case move(
     UUID, WorkflowStage, expectedRevision: Int, configuration: ResolvedCodexConfiguration? = nil)
@@ -365,22 +372,21 @@ public enum BoardReducer {
         throw BoardError.busy
       }
     }
-    func enqueue(_ item: WorkItem, configuration: ResolvedCodexConfiguration?) throws {
+    func enqueue(_ item: inout WorkItem, configuration: ResolvedCodexConfiguration?) throws {
       guard let project = state.projects.first(where: { $0.id == item.projectID }) else {
         throw BoardError.missing
       }
-      guard project.automationEnabled, item.stage == .next || item.stage == .implementation else {
+      guard project.automationEnabled, [.next, .implementation].contains(item.stage),
+        let configuration,
+        !state.runs.contains(where: { $0.taskID == item.id && $0.status.isActive })
+      else {
         return
-      }
-      guard let configuration else {
-        throw BoardError.invalid("Choose and confirm a Codex model before queuing automated work.")
       }
       guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw BoardError.invalid("Choose a project folder before enabling Codex.")
       }
-      if item.stage == .implementation && item.planPath == nil {
-        throw BoardError.invalid(
-          "Add a saved plan path before asking Codex to implement this task.")
+      if item.stage == .next, item.planPath == nil {
+        item.planPath = WorkItem.canonicalPlanPath(for: item.id)
       }
       let run = AgentRun(
         task: item, kind: item.stage == .next ? .planning : .implementation,
@@ -423,12 +429,22 @@ public enum BoardReducer {
       item.rank =
         (state.tasks.filter { $0.projectID == item.projectID && $0.stage == item.stage }.map(\.rank)
           .max() ?? -1) + 1
+      try enqueue(&item, configuration: configuration)
       state.tasks.append(item)
-      try enqueue(item, configuration: configuration)
       state.activity.append(
         Activity(
           "Added “\(item.title)” to \(item.stage.title).", projectID: item.projectID,
           taskID: item.id))
+    case .createManualRun(let run):
+      guard run.kind == .task, run.status == .readyForHandoff,
+        state.tasks.contains(where: { $0.id == run.taskID && $0.projectID == run.projectID }),
+        !state.runs.contains(where: { $0.id == run.id })
+      else { throw BoardError.invalid("The Codex Desktop handoff is invalid.") }
+      state.runs.append(run)
+      state.activity.append(
+        Activity(
+          "Prepared a Codex Desktop handoff.", projectID: run.projectID, taskID: run.taskID,
+          runID: run.id))
     case .editTask(var item, let expectedRevision):
       let index = try taskIndex(item.id, expectedRevision)
       try ensureIdle(item.id)
@@ -442,17 +458,15 @@ public enum BoardReducer {
     case .move(let id, let stage, let revision, let configuration):
       let index = try taskIndex(id, revision)
       if state.tasks[index].stage == stage { return state }
-      try ensureIdle(id)
-      guard !state.tasks[index].completed else {
-        throw BoardError.invalid("Reopen this task before moving it.")
-      }
-      state.tasks[index].stage = stage
-      state.tasks[index].rank =
-        (state.tasks.filter { $0.projectID == state.tasks[index].projectID && $0.stage == stage }
+      var item = state.tasks[index]
+      item.stage = stage
+      item.rank =
+        (state.tasks.filter { $0.projectID == item.projectID && $0.stage == stage }
           .map(\.rank).max() ?? -1) + 1
-      state.tasks[index].revision += 1
-      state.tasks[index].updatedAt = .now
-      try enqueue(state.tasks[index], configuration: configuration)
+      item.revision += 1
+      item.updatedAt = .now
+      try enqueue(&item, configuration: configuration)
+      state.tasks[index] = item
       state.activity.append(
         Activity(
           "Moved “\(state.tasks[index].title)” to \(stage.title).",
@@ -518,16 +532,22 @@ public enum BoardReducer {
         throw BoardError.missing
       }
       let run = state.runs[index]
+      guard run.kind != .task else {
+        throw BoardError.invalid("Manual Codex Desktop handoffs must be rerun from the task.")
+      }
       guard [.failed, .interrupted, .cancelled].contains(run.status) else {
         throw BoardError.invalid("Only stopped runs can be retried.")
       }
-      try ensureIdle(run.taskID)
-      let task = state.tasks[try taskIndex(run.taskID)]
-      guard task.stage == (run.kind == .planning ? .next : .implementation), !task.completed,
-        state.projects.first(where: { $0.id == task.projectID })?.automationEnabled == true
-      else {
-        throw BoardError.invalid(
-          "Return this task to the run’s stage and enable automation before retrying.")
+      let taskIndex = try taskIndex(run.taskID)
+      var task = state.tasks[taskIndex]
+      guard state.projects.contains(where: { $0.id == task.projectID }) else {
+        throw BoardError.missing
+      }
+      if run.kind == .planning, task.planPath == nil {
+        task.planPath = WorkItem.canonicalPlanPath(for: task.id)
+        task.revision += 1
+        task.updatedAt = .now
+        state.tasks[taskIndex] = task
       }
       if state.runs[index].modelConfiguration == nil {
         guard let configuration else {
@@ -570,24 +590,28 @@ public enum BoardReducer {
       guard run.status == .running else {
         throw BoardError.invalid("Only an active run can finish.")
       }
-      guard state.tasks[taskIndex].stage == (run.kind == .planning ? .next : .implementation) else {
-        throw BoardError.conflict
-      }
       if run.kind == .planning {
         guard let planPath, !planPath.isEmpty else {
           throw BoardError.invalid("Codex finished without a saved plan.")
         }
-        state.tasks[taskIndex].planPath = planPath
+        if let reservedPath = state.tasks[taskIndex].planPath {
+          guard reservedPath == planPath else {
+            throw BoardError.conflict
+          }
+        } else {
+          // Older persisted runs did not reserve their destination when queued.
+          state.tasks[taskIndex].planPath = planPath
+          state.tasks[taskIndex].revision += 1
+          state.tasks[taskIndex].updatedAt = .now
+        }
       }
-      state.tasks[taskIndex].stage = run.kind == .planning ? .planned : .review
-      state.tasks[taskIndex].revision += 1
-      state.tasks[taskIndex].updatedAt = .now
       state.runs[index].status = .succeeded
       state.runs[index].updatedAt = .now
       state.runs[index].summary =
-        run.kind == .planning
+      run.kind == .planning
         ? "Plan saved. Ready for your go-ahead."
-        : "Implementation finished. Review and verify the changes."
+        : run.kind == .implementation ? "Implementation finished. Review the changes."
+        : "Codex Desktop task finished. Review the changes."
       state.activity.append(
         Activity(
           state.runs[index].summary, projectID: run.projectID, taskID: run.taskID, runID: run.id))

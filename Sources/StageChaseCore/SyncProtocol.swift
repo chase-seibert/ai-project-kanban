@@ -63,12 +63,6 @@ public enum SyncCommandValidator {
       guard envelope.expectedRevision == nil,
         library.projects.contains(where: { $0.id == projectID })
       else { throw BoardError.invalid("The selected project is no longer available.") }
-      guard
-        library.projects.first(where: { $0.id == projectID })?.automationEnabled != true
-          || ![.next, .implementation].contains(stage)
-      else {
-        throw BoardError.invalid("Confirm automated moves on the Mac before starting Codex.")
-      }
       var item = WorkItem(projectID: projectID, title: title, stage: stage)
       item.id = id
       item.notes = notes
@@ -86,14 +80,8 @@ public enum SyncCommandValidator {
       return .editTask(item, expectedRevision: revision)
     case .moveTask(let id, let stage):
       guard let revision = envelope.expectedRevision,
-        let item = library.tasks.first(where: { $0.id == id })
+        library.tasks.contains(where: { $0.id == id })
       else { throw BoardError.missing }
-      guard
-        library.projects.first(where: { $0.id == item.projectID })?.automationEnabled != true
-          || ![.next, .implementation].contains(stage)
-      else {
-        throw BoardError.invalid("Confirm automated moves on the Mac before starting Codex.")
-      }
       return .move(id, stage, expectedRevision: revision)
     case .reorderTask(let id, let beforeID, let digest):
       guard let revision = envelope.expectedRevision,

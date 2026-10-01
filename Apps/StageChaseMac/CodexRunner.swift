@@ -138,9 +138,82 @@ struct AgentApproval {
     } catch { model?.runnerMessage = error.localizedDescription }
   }
 
+  func prepareDesktopHandoff(runID: UUID) async throws {
+    guard let model, var run = model.library.runs.first(where: { $0.id == runID }),
+      run.kind == .task, let task = model.library.tasks.first(where: { $0.id == run.taskID }),
+      let project = model.library.projects.first(where: { $0.id == run.projectID })
+    else { throw BoardError.missing }
+    guard activeID == nil else {
+      throw BoardError.invalid(
+        "Wait for the active StageChase Codex run before preparing a Desktop handoff.")
+    }
+    let root = URL(fileURLWithPath: project.directory).standardizedFileURL
+      .resolvingSymlinksInPath()
+    var isDirectory: ObjCBool = false
+    guard project.directory.hasPrefix("/"), root.path != "/",
+      FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
+      isDirectory.boolValue
+    else { throw BoardError.invalid("Choose an existing project folder before running in Codex.") }
+    try await connect(executable: executable())
+    let result = try await connection.call("thread/start", ["cwd": root.path])
+    guard let thread = result["thread"] as? [String: Any],
+      let threadID = thread["id"] as? String, !threadID.isEmpty
+    else { throw BoardError.invalid("Codex returned no Desktop session ID.") }
+    _ = try? await connection.call(
+      "thread/name/set", ["threadId": threadID, "name": "StageChase · \(task.title)"])
+    run.threadID = threadID
+    run.workDirectory = root.path
+    run.updatedAt = .now
+    guard await model.perform(.updateRun(run)) else {
+      throw BoardError.invalid("Could not save the Codex Desktop session ID.")
+    }
+  }
+
+  func refreshDesktopStatus(runID: UUID) async throws {
+    guard let model, var run = model.library.runs.first(where: { $0.id == runID }),
+      run.kind == .task, let threadID = run.threadID
+    else { throw BoardError.invalid("This task has no linked Codex Desktop session.") }
+    try await connect(executable: executable())
+    let response = try await connection.call(
+      "thread/read", ["threadId": threadID, "includeTurns": true])
+    guard let thread = response["thread"] as? [String: Any] else {
+      throw BoardError.invalid("Codex returned no session status.")
+    }
+    let threadStatus = (thread["status"] as? [String: Any])?["type"] as? String
+    let turns = thread["turns"] as? [[String: Any]] ?? []
+    let latestTurnStatus = turns.last?["status"] as? String
+    if threadStatus == "active" || latestTurnStatus == "inProgress" {
+      run.status = .running
+      run.summary = "Codex Desktop is running this task."
+      run.error = nil
+    } else {
+      switch latestTurnStatus {
+      case "completed":
+        run.status = .succeeded
+        run.summary = "Codex Desktop finished. Review the changes."
+        run.error = nil
+      case "failed":
+        run.status = .failed
+        run.summary = "Codex Desktop reported a failed run."
+      case "interrupted":
+        run.status = .interrupted
+        run.summary = "Codex Desktop run was interrupted."
+      default:
+        run.status = .readyForHandoff
+        run.summary = "No completed Codex Desktop turn was found."
+        run.error = nil
+      }
+    }
+    run.turnID = turns.last?["id"] as? String
+    run.updatedAt = .now
+    guard await model.perform(.updateRun(run)) else {
+      throw BoardError.invalid("Could not save the refreshed Codex status.")
+    }
+  }
+
   func drain() {
     guard !queuePausedForHandoff, closingRunID == nil, !draining, activeID == nil,
-      let model, !model.isPreview
+      let model, !model.isPreview, model.autoInvokeCodex
     else { return }
     guard model.approvalModeError == nil else {
       model.runnerMessage = model.approvalModeError!
@@ -327,7 +400,9 @@ struct AgentApproval {
         "turn/start",
         [
           "threadId": threadID,
-          "input": [["type": "text", "text": prompt(item: item, run: run), "text_elements": []]],
+          "input": [
+            ["type": "text", "text": try prompt(item: item, run: run), "text_elements": []]
+          ],
           "cwd": directory.path,
           "approvalPolicy": approvalMode.approvalPolicy,
           "model": configuration.modelID,
@@ -358,7 +433,7 @@ struct AgentApproval {
     }
   }
 
-  private func prompt(item: WorkItem, run: AgentRun) -> String {
+  private func prompt(item: WorkItem, run: AgentRun) throws -> String {
     let common = """
       You are working on a StageChase task in this project. Follow its AGENTS.md instructions.
       Task: \(item.title)
@@ -368,10 +443,15 @@ struct AgentApproval {
       Your final structured response must use outcome=completed only when the requested work and verification are finished; otherwise use outcome=blocked and explain what remains in summary.
       """
     if run.kind == .planning {
+      guard let planPath = item.planPath, !planPath.isEmpty else {
+        throw BoardError.invalid(
+          "This planning run has no reserved plan path. Retry it to reserve one.")
+      }
       let formatPrompt = model?.resolvedPlanFormatPrompt ?? AppModel.defaultPlanFormatPrompt
       return common + """
 
-        Plan only; do not implement application code. Inspect the relevant project, then write a concrete implementation plan to to-do/\(item.id.uuidString.lowercased()).md.
+        Plan only; do not implement application code. Inspect the relevant project, then write a concrete implementation plan to \(planPath).
+        Reserved plan path: \(planPath)
         Include the problem, scope, steps, risks, and verification. This is the only file you may create or modify for this planning turn.
         If this is a retry, inspect the existing plan and session progress before doing more work. End by stating the saved plan path.
 
@@ -382,9 +462,24 @@ struct AgentApproval {
         </plan-format-guidance>
         """
     }
+    if run.kind == .task {
+      return run.handoffContext ?? """
+        Continue the StageChase task below in this project.
+
+        Task: \(item.title)
+        Current column: \(item.stage.title)
+        Details: \(item.notes)
+        Existing plan path: \(item.planPath ?? "None")
+
+        Do not commit, push, publish, deploy, send messages, or delete unrelated files. Report changed files and verification results.
+        """
+    }
+    let planInstruction = item.planPath.map {
+      "If a plan exists at \($0), read it and use it as context. If it is missing, continue from the task details."
+    } ?? "No plan is attached. Continue from the task details."
     return common + """
 
-      Implement the approved plan at \(item.planPath ?? ""). Read that file first. Preserve all unrelated work.
+      \(planInstruction) Preserve all unrelated work.
       If this is a retry, inspect changes already made and continue; do not repeat completed operations.
       Run focused tests and summarize verification, changed files, and any remaining limitations. If blocked or incomplete, clearly report failure rather than claiming completion.
       """
@@ -408,13 +503,25 @@ struct AgentApproval {
       }
       return directory
     }
-    if run.kind == .planning { return projectRoot }
-    guard let relative = item.planPath else {
-      throw BoardError.invalid("Implementation needs a saved plan.")
+    if run.kind == .planning {
+      guard let relative = item.planPath, !relative.isEmpty else {
+        throw BoardError.invalid(
+          "This planning run has no reserved plan path. Retry it to reserve one.")
+      }
+      _ = try safePlan(relative, root: projectRoot)
+      return projectRoot
     }
-    let plan = try safePlan(relative, root: projectRoot)
-    let data = try Data(contentsOf: plan)
-    guard !data.isEmpty else { throw BoardError.invalid("The saved plan is empty.") }
+    let planData: Data?
+    let planRelativePath: String?
+    if let relative = item.planPath {
+      let plan = try safePlan(relative, root: projectRoot)
+      planRelativePath = relative
+      planData = FileManager.default.fileExists(atPath: plan.path)
+        ? try Data(contentsOf: plan) : nil
+    } else {
+      planRelativePath = nil
+      planData = nil
+    }
     let topLevel = try await runGit(["rev-parse", "--show-toplevel"], at: projectRoot)
       .trimmingCharacters(in: .whitespacesAndNewlines)
     guard
@@ -445,10 +552,12 @@ struct AgentApproval {
           "Worktree created but its record could not be saved: \(worktree.path)")
       }
     }
-    let destination = try safePlan(relative, root: worktree)
-    try FileManager.default.createDirectory(
-      at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try data.write(to: destination, options: .atomic)
+    if let relative = planRelativePath, let planData {
+      let destination = try safePlan(relative, root: worktree)
+      try FileManager.default.createDirectory(
+        at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try planData.write(to: destination, options: .atomic)
+    }
     await log(
       "Original checkout has local changes. Using an isolated HEAD worktree at \(worktree.path). Only the approved plan was copied; other uncommitted changes remain in the original checkout."
     )
@@ -568,7 +677,11 @@ struct AgentApproval {
           }
           var planPath: String?
           if run.kind == .planning {
-            let relative = "to-do/\(run.taskID.uuidString.lowercased()).md"
+            guard let item = model.library.tasks.first(where: { $0.id == run.taskID }),
+              let relative = item.planPath, !relative.isEmpty
+            else {
+              throw BoardError.invalid("The planning run has no reserved plan path. Retry it.")
+            }
             let root = URL(fileURLWithPath: run.workDirectory ?? "")
             let path = try safePlan(relative, root: root)
             guard let text = try? String(contentsOf: path, encoding: .utf8),

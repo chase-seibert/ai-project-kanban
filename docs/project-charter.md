@@ -2,15 +2,16 @@
 
 ## Goal
 
-Build StageChase as a private native macOS/iOS project board that moves ideas
-from Inbox to Review while keeping project plans, local code, and Codex context
-together.
+Build StageChase as a private native macOS/iOS project board that organizes
+ideas across five stages while keeping project plans, local code, and Codex
+context together.
 
 ## Context
 
 The supplied plan defines a Mac-authoritative architecture with a SwiftUI Mac
 app, an iPhone companion, a five-stage workflow, local project configuration,
-and explicit Codex automation triggered only by confirmed stage transitions.
+and explicit Codex work: automatic turns follow confirmed stage transitions
+when enabled, while manual Desktop handoffs are started by the user.
 
 ## Constraints and non-goals
 

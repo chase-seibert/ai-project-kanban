@@ -4,7 +4,7 @@ A native, local-first workspace for **multiple projects**, with five fixed stage
 Inbox → Next → Planned → Implementation → Review.
 
 The September 29 rewrite replaces the prototype. Each project has its own board,
-folder, and automation setting. Both apps offer project creation, full-height
+folder, and project automation setting. Both apps offer project creation, full-height
 top-aligned lanes, per-column quick capture, drag-and-drop, task details, and
 explicit completion. The Mac adds search, a task inspector, agent activity,
 native undo/redo for manual task edits, keyboard shortcuts, and text-size settings.
@@ -24,12 +24,18 @@ make phone-deploy # signed build, install, and launch on the configured iPhone
 
 ## Codex automation
 
-On Mac, open **Project settings**, choose a project folder, and enable Codex.
-Moving or adding a task to **Next** asks for confirmation before a planning run.
-Moving to **Implementation** requires a saved Markdown plan and confirmation.
-Activity shows queued/running/approval/failed/finished states, plan steps, public
-messages, bounded command output, the working folder, and a Codex session link.
-Runs can be stopped or explicitly retried in their saved session.
+On Mac, open **Settings → General** to choose whether StageChase automatically
+invokes Codex. Automatic stage-triggered runs also require project automation to
+be enabled and a user-confirmed move or task creation in **Next** or
+**Implementation**. Implementation can use a saved Markdown plan when present.
+Task columns stay under user control regardless of plan or run state.
+
+With automatic invocation off, task detail's **Run in Codex** prepares and opens
+a linked Codex Desktop session, saves the task context, and copies it to the
+clipboard; start the turn in Desktop. Copy that context later, refresh status
+manually, or rerun from the task. Activity shows queued/running/approval/failed/
+finished states, plan steps, public messages, bounded command output, the
+working folder, and Codex session links.
 
 The adapter uses the installed Codex app-server, the existing sign-in, and the
 user's configured model. Workspace-write sandboxing remains enabled; supported

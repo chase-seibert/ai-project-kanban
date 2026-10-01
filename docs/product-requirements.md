@@ -10,6 +10,8 @@
   planning begins.
 - As a user, I want to move tasks between stages, so that the board reflects my
   current intent.
+- As a user, I want task placement to remain independent of plan availability,
+  Codex run state, and run outcome, so the columns reflect my intent.
 - As a user, I want transitions and activity to be recorded, so that I can see
   what changed and why.
 - As a user, I want Mac and iPhone to show concise run status and progress
@@ -47,7 +49,8 @@ open.
 ## Planned automation
 
 - As a user, I want a confirmed move into Next to create one persisted Codex
-  planning session, so that planning is explicit and idempotent.
+  planning run when automatic invocation is enabled globally and for that
+  project, so that planning is explicit and idempotent.
 - As a user, I want the Markdown plan to live in lowercase `to-do/`, so that it
   remains an ordinary project file I can inspect and version.
 - As a user, I want plan and Codex links on the task, so that both devices can
@@ -73,14 +76,26 @@ open.
 
 ## Implementation automation
 
-- As a user, I want Implementation to require a plan, so that Codex does not
-  act on an unplanned idea.
+- As a user, I want Implementation runs to use a plan when one is available,
+  while allowing implementation without a plan.
 - As a user, I want dirty project state to select a managed worktree, so that
   unrelated local changes are protected.
 - As a user, I want failed automation to remain visible and retryable, so that
   a transient failure does not lose the plan or hide the work.
-- As a user, I want Review to remain manual, so that I decide when work is
-  complete.
+- As a user, I want Codex outcomes to leave the task in its current stage, so I
+  decide where it belongs and when it is complete.
+
+## Manual Codex Desktop handoff
+
+- As a user, I want a Mac-wide setting to turn automatic Codex invocation on or
+  off, so that confirmed stage moves can be separated from starting a turn.
+- As a user, I want a task-level Run in Codex action that saves task context,
+  opens a linked Codex Desktop session, and copies the context for me to start
+  manually.
+- As a user, I want to copy the saved context later, refresh the linked session
+  status on demand, and retry or rerun from the task.
+- Manual handoffs, status refreshes, and Codex outcomes do not move a task or
+  start work from phone polling or replica updates.
 
 ## Plan feedback
 

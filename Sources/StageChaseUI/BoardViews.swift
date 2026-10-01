@@ -105,20 +105,15 @@ struct BoardHeader: View {
       #endif
       HStack(spacing: 8) {
         Image(
-          systemName: model.selectedProject?.automationEnabled == true ? "sparkles" : "pause.circle"
+          systemName: automaticInvocationEnabled ? "sparkles" : "pause.circle"
         )
-        .foregroundStyle(model.selectedProject?.automationEnabled == true ? .purple : .secondary)
+        .foregroundStyle(automaticInvocationEnabled ? .purple : .secondary)
         VStack(alignment: .leading, spacing: 2) {
           Text(automationTitle).stageFont(.subheadline, weight: .medium)
           #if os(iOS)
             Text(currentPhoneSubtitle).stageFont(.caption).foregroundStyle(.secondary)
           #else
-            Text(
-              model.selectedProject?.automationEnabled == true
-                ? "Next → plan · Implementation → code · You approve the moves"
-                : "Move cards freely. Enable Codex in project settings when you’re ready."
-            )
-            .stageFont(.caption).foregroundStyle(.secondary)
+            Text(boardSubtitle).stageFont(.caption).foregroundStyle(.secondary)
           #endif
         }
         Spacer(minLength: 6)
@@ -139,10 +134,20 @@ struct BoardHeader: View {
       if !model.activeRuns.isEmpty {
         "\(model.activeRuns.count) agent run\(model.activeRuns.count == 1 ? "" : "s") active"
       } else {
-        model.selectedProject?.automationEnabled == true
+        automaticInvocationEnabled
           ? "Codex is ready when you are" : "Manual board · Codex is off"
       }
     #endif
+  }
+  private var boardSubtitle: String {
+    if model.autoInvokeCodex && model.selectedProject?.automationEnabled == true {
+      "Confirmed moves to Next or Implementation can invoke Codex. Columns stay independent."
+    } else {
+      "Move tasks freely. Use Run in Codex for a manual Desktop handoff."
+    }
+  }
+  private var automaticInvocationEnabled: Bool {
+    model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
   }
   private var currentPhoneSubtitle: String {
     #if os(iOS)
@@ -376,6 +381,7 @@ struct RunBadge: View {
   var symbol: String {
     switch run.status {
     case .queued: "clock"
+    case .readyForHandoff: "arrow.up.right.square"
     case .running: "sparkles"
     case .needsInput: "hand.raised"
     case .succeeded: "checkmark.circle"

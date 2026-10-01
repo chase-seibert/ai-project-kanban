@@ -2,6 +2,14 @@
 
 ## 2026-09-30
 
+- Added a Mac-wide automatic-invocation setting and task-level Codex Desktop
+  handoffs that save/copy context, open a linked session, support manual status
+  refresh, and allow retry/rerun from task detail.
+- Made task columns independent of plans and Codex state; stage moves remain
+  available during runs, and Codex outcomes no longer move tasks automatically.
+- Reserve each confirmed planning run's task-relative plan path before the run
+  starts, reuse it on retry, and require a readable nonempty file at that path
+  before reporting planning success.
 - Added an editable Mac-local plan format prompt with user requirements,
   architecture/data model, basic test cases, and high-level implementation
   sections, applied only to future planning turns.

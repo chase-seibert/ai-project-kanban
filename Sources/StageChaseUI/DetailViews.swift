@@ -91,9 +91,9 @@ struct ProjectEditor: View {
         }
         Section {
           #if os(macOS)
-            Toggle("Let Codex work on this project", isOn: $project.automationEnabled)
+            Toggle("Allow automatic Codex runs for this project", isOn: $project.automationEnabled)
             Text(
-              "Every move into Next or Implementation asks for confirmation before starting Codex. Planning writes to to-do/. Implementation requires a saved plan. Commands needing approval appear in the activity panel."
+              "This project switch works with the Mac-wide automatic invocation setting. Task details can always prepare a manual handoff to Codex Desktop. Plans and Codex status do not restrict task columns."
             )
             .stageFont(.callout).foregroundStyle(.secondary)
             Text(
@@ -221,6 +221,18 @@ struct TaskDetail: View {
               Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
             }.buttonStyle(.plain).accessibilityLabel("Close task")
           }
+          #if os(macOS)
+            if !model.isConnectedPhone {
+              HStack {
+                Button("Run in Codex", systemImage: "arrow.up.right.square") {
+                  Task { await model.runTaskInCodex(taskID) }
+                }
+                .disabled(
+                  edited || model.planFeedbackInFlight.contains(taskID)
+                    || model.library.latestRun(for: taskID)?.status.isActive == true)
+              }
+            }
+          #endif
           if draft != nil {
             TextField("Title", text: draftBinding(\.title), axis: .vertical).stageFont(
               .title2, weight: .bold
@@ -251,7 +263,8 @@ struct TaskDetail: View {
                 .disabled(model.planFeedbackInFlight.contains(taskID))
                 #if os(macOS)
                   if let path = item.planPath,
-                    let project = model.library.projects.first(where: { $0.id == item.projectID })
+                    let project = model.library.projects.first(where: { $0.id == item.projectID }),
+                    hasReadablePlan(path: path, project: project)
                   {
                     Button("Open plan", systemImage: "doc.text") {
                       NSWorkspace.shared.open(
@@ -262,7 +275,10 @@ struct TaskDetail: View {
               }
             }
             #if os(macOS)
-              if item.stage == .planned, !item.completed, item.planPath != nil {
+              if let path = item.planPath,
+                let project = model.library.projects.first(where: { $0.id == item.projectID }),
+                hasReadablePlan(path: path, project: project)
+              {
                 VStack(alignment: .leading, spacing: 8) {
                   Text("PLAN FEEDBACK").stageFont(.caption, weight: .semibold)
                     .foregroundStyle(.secondary)
@@ -304,7 +320,7 @@ struct TaskDetail: View {
                 }
               }
             #elseif os(iOS)
-              if item.stage == .planned, !item.completed {
+              if item.planPath != nil {
                 Text(
                   "Append feedback to the saved plan on the Mac where its project file is stored."
                 )
@@ -358,9 +374,7 @@ struct TaskDetail: View {
                 }
               }
             }
-          }.disabled(
-            edited || model.library.latestRun(for: taskID)?.status.isActive == true
-              || model.planFeedbackInFlight.contains(taskID))
+          }.disabled(edited || model.planFeedbackInFlight.contains(taskID))
           Divider()
           VStack(alignment: .leading, spacing: 12) {
             Label("Codex activity", systemImage: "sparkles").stageFont(.headline)
@@ -371,13 +385,17 @@ struct TaskDetail: View {
               #if os(iOS)
                 Text(
                   model.isConnectedPhone
-                    ? "Codex runs on Mac. Continue there to confirm an automated move."
-                    : "With project automation enabled on Mac, moving to Next starts planning. Moving to Implementation starts coding after you confirm."
+                    ? "Codex runs on Mac. Stage changes do not start or manage Codex work."
+                    : model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
+                    ? "Confirmed moves can start Codex. Task placement stays under your control."
+                    : "Use Run in Codex to prepare a manual Desktop handoff. Task placement stays under your control."
                 )
                 .stageFont(.callout).foregroundStyle(.secondary)
               #else
                 Text(
-                  "With project automation enabled on Mac, moving to Next starts planning. Moving to Implementation starts coding after you confirm."
+                  model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
+                    ? "Confirmed moves can start Codex. Task placement stays under your control."
+                    : "Use Run in Codex to prepare a manual Desktop handoff. Task placement stays under your control."
                 )
                 .stageFont(.callout).foregroundStyle(.secondary)
               #endif
@@ -434,6 +452,15 @@ struct TaskDetail: View {
         set: { model.setPlanFeedbackDraft($0, for: taskID) })
     }
   #endif
+
+  private func hasReadablePlan(path: String, project: Project) -> Bool {
+    guard
+      let url = try? PlanFileStore.resolve(
+        projectDirectory: project.directory, relativePath: path),
+      let contents = try? String(contentsOf: url, encoding: .utf8)
+    else { return false }
+    return !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
 }
 
 struct RunDetail: View {
@@ -452,8 +479,10 @@ struct RunDetail: View {
         Text(run.kind.rawValue.capitalized).stageFont(.caption).foregroundStyle(.secondary)
       }
       Text(run.summary).stageFont(.callout).textSelection(.enabled)
-      Text(run.modelConfiguration?.summary ?? "Model not recorded")
-        .stageFont(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+      if run.kind != .task {
+        Text(run.modelConfiguration?.summary ?? "Model not recorded")
+          .stageFont(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+      }
       if let error = run.error {
         Text(error).stageFont(.callout).foregroundStyle(.red).textSelection(.enabled)
       }
@@ -467,6 +496,12 @@ struct RunDetail: View {
         .stageFont(.callout).foregroundStyle(step.status == "completed" ? .secondary : .primary)
       }
       #if os(macOS)
+        if let context = run.handoffContext {
+          Button("Copy task context", systemImage: "doc.on.doc") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(context, forType: .string)
+          }
+        }
         if let approval = model.runner?.approval, approval.runID == run.id {
           VStack(alignment: .leading, spacing: 10) {
             Label("Your approval is needed", systemImage: "hand.raised.fill").stageFont(.headline)
@@ -490,14 +525,21 @@ struct RunDetail: View {
               NSPasteboard.general.clearContents()
               NSPasteboard.general.setString(thread, forType: .string)
             }.labelStyle(.iconOnly).help("Copy session ID")
-            Button(closing ? "Closing…" : "Close Codex session", systemImage: "xmark.circle") {
-              Task { await model.closeCodexSession(run.id) }
+            if run.kind != .task {
+              Button(closing ? "Closing…" : "Close Codex session", systemImage: "xmark.circle") {
+                Task { await model.closeCodexSession(run.id) }
+              }
+              .disabled(closeReason != nil)
+              .help(
+                closeReason
+                  ?? "Release this session from StageChase so you can continue in the Codex desktop app. Files and conversation history are kept."
+              )
             }
-            .disabled(closeReason != nil)
-            .help(
-              closeReason
-                ?? "Release this session from StageChase so you can continue in the Codex desktop app. Files and conversation history are kept."
-            )
+          }
+        }
+        if run.kind == .task, run.threadID != nil {
+          Button("Refresh status", systemImage: "arrow.clockwise") {
+            Task { await model.refreshCodexStatus(run.id) }
           }
         }
         if let path = run.workDirectory {
@@ -530,7 +572,16 @@ struct RunDetail: View {
         }
       #endif
       HStack {
-        if !model.isConnectedPhone && [.failed, .interrupted, .cancelled].contains(run.status) {
+        if !model.isConnectedPhone, run.kind == .task,
+          [.failed, .interrupted, .cancelled, .succeeded].contains(run.status)
+        {
+          Button("Retry in Codex", systemImage: "arrow.clockwise") {
+            Task { await model.rerunInCodex(run.id) }
+          }
+        } else if !model.isConnectedPhone, model.autoInvokeCodex,
+          model.library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true,
+          [.failed, .interrupted, .cancelled].contains(run.status)
+        {
           Button(
             run.modelConfiguration == nil ? "Review model and retry" : "Retry in same session",
             systemImage: "arrow.clockwise"

@@ -37,7 +37,8 @@ import UniformTypeIdentifiers
   var showActivity = false
   var pendingMove: PendingMove?
   private var moveAfterSheet: PendingMove?
-  var runnerMessage = "Codex starts only after a confirmed stage change."
+  var runnerMessage = "Task runs open in Codex Desktop when automatic invocation is off."
+  var autoInvokeCodex = true
   var globalModelConfiguration = CodexModelConfiguration()
   var modelConfigurationError: String?
   #if os(macOS)
@@ -74,6 +75,8 @@ import UniformTypeIdentifiers
       preview
       ? UserDefaults(suiteName: "StageChase.Preview.\(UUID().uuidString)")!
       : preferences
+    autoInvokeCodex = self.preferences.object(forKey: Self.autoInvokeCodexPreferenceKey) as? Bool
+      ?? true
     #if os(macOS)
       if let saved = self.preferences.string(forKey: Self.planFormatPromptPreferenceKey) {
         planFormatPrompt = String(saved.prefix(Self.maximumPlanFormatPromptCharacters))
@@ -101,6 +104,7 @@ import UniformTypeIdentifiers
       }
     }
   }
+  static let autoInvokeCodexPreferenceKey = "autoInvokeCodex"
   #if os(macOS)
     var runner: CodexRunner?
     var syncServer: SyncServer?
@@ -494,7 +498,7 @@ import UniformTypeIdentifiers
       defer { planFeedbackInFlight.remove(taskID) }
       guard let item = library.tasks.first(where: { $0.id == taskID }),
         let planPath = item.planPath,
-        item.revision == expectedRevision, item.stage == .planned, !item.completed,
+        item.revision == expectedRevision,
         library.latestRun(for: taskID)?.status.isActive != true,
         let project = library.projects.first(where: { $0.id == item.projectID })
       else {
@@ -540,19 +544,9 @@ import UniformTypeIdentifiers
     guard let selectedProjectID else { return false }
     var item = WorkItem(projectID: selectedProjectID, title: title, stage: stage)
     item.modelOverride = modelOverride
-    if selectedProject?.automationEnabled == true && [.next, .implementation].contains(stage) {
-      #if os(iOS)
-        if isConnectedPhone {
-          error =
-            "This project starts Codex in that stage. Add the task on Mac to review and confirm the run."
-          return false
-        }
-      #endif
-      if stage == .implementation {
-        error =
-          "Capture this task in Planned first, attach its Markdown plan in task details, then move it to Implementation."
-        return false
-      }
+    if !isConnectedPhone, autoInvokeCodex, selectedProject?.automationEnabled == true,
+      [.next, .implementation].contains(stage)
+    {
       let move = PendingMove(
         item: item, stage: stage, isNew: true, configuration: nil, loading: true)
       if sheet != nil { moveAfterSheet = move } else { pendingMove = move }
@@ -573,14 +567,9 @@ import UniformTypeIdentifiers
   func requestMove(_ item: WorkItem, to stage: WorkflowStage) {
     guard item.stage != stage else { return }
     let automation = library.projects.first { $0.id == item.projectID }?.automationEnabled == true
-    if automation && [.next, .implementation].contains(stage) {
-      #if os(iOS)
-        if isConnectedPhone {
-          error =
-            "This stage starts Codex on the Mac. Continue on Mac to review and confirm the run."
-          return
-        }
-      #endif
+    if !isConnectedPhone, autoInvokeCodex && automation,
+      [.next, .implementation].contains(stage)
+    {
       let move = PendingMove(
         item: item, stage: stage, isNew: false, configuration: nil, loading: true)
       pendingMove = move
@@ -591,7 +580,7 @@ import UniformTypeIdentifiers
   }
 
   func confirmMove(_ move: PendingMove) async {
-    guard !move.loading, let reviewed = move.configuration else { return }
+    guard autoInvokeCodex, !move.loading, let reviewed = move.configuration else { return }
     do {
       try await refreshModelCatalog()
       let current = try resolvedConfiguration(for: move.item)
@@ -625,6 +614,12 @@ import UniformTypeIdentifiers
       preferences.set(try JSONEncoder().encode(configuration), forKey: "codexModelConfiguration")
       modelConfigurationError = nil
     } catch { modelConfigurationError = error.localizedDescription }
+  }
+
+  func setAutoInvokeCodex(_ enabled: Bool) {
+    autoInvokeCodex = enabled
+    preferences.set(enabled, forKey: Self.autoInvokeCodexPreferenceKey)
+    if enabled { kickRunner() }
   }
 
   func resetGlobalModelConfiguration() {
@@ -710,6 +705,18 @@ import UniformTypeIdentifiers
 
   func retry(_ id: UUID) async {
     guard let run = library.runs.first(where: { $0.id == id }) else { return }
+    guard run.kind != .task else {
+      error = "Use Run in Codex to prepare a fresh Desktop handoff."
+      return
+    }
+    guard autoInvokeCodex else {
+      error = "Automatic invocation is off. Use Run in Codex on the task for a manual handoff."
+      return
+    }
+    guard library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true else {
+      error = "Automatic runs are disabled for this project. Use Run in Codex for a manual handoff."
+      return
+    }
     if run.modelConfiguration != nil {
       if await perform(.retry(id)) { kickRunner() }
       return
@@ -782,6 +789,80 @@ import UniformTypeIdentifiers
     #endif
   }
   #if os(macOS)
+    func runTaskInCodex(_ taskID: UUID) async {
+      guard !isPreview, let task = library.tasks.first(where: { $0.id == taskID }),
+        library.projects.contains(where: { $0.id == task.projectID })
+      else { return }
+      var run = AgentRun(task: task, kind: .task)
+      run.status = .readyForHandoff
+      run.summary = "Preparing a manual handoff to Codex Desktop."
+      run.handoffContext = """
+        Continue the StageChase task below in this project. Follow the repository's AGENTS.md instructions.
+
+        Task: \(task.title)
+        Current column: \(task.stage.title)
+        Details: \(task.notes)
+        Existing plan path: \(task.planPath ?? "None")
+
+        Work on the requested task. StageChase keeps task columns independent from Codex state, so do not change the column. Do not commit, push, publish, deploy, send messages, or delete unrelated files. Run appropriate verification and report changed files, results, and limitations.
+        """
+      guard await perform(.createManualRun(run)) else { return }
+      do {
+        guard let runner else { throw BoardError.invalid("The Mac Codex runner is unavailable.") }
+        try await runner.prepareDesktopHandoff(runID: run.id)
+        guard var savedRun = library.runs.first(where: { $0.id == run.id }),
+          let threadID = savedRun.threadID
+        else { throw BoardError.invalid("StageChase could not save the Codex Desktop session.") }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(savedRun.handoffContext ?? "", forType: .string)
+        savedRun.summary = "Context copied. Run it in Codex Desktop, then refresh status here."
+        guard await perform(.updateRun(savedRun)) else { return }
+        openCodexSession(threadID)
+      } catch {
+        guard var failedRun = library.runs.first(where: { $0.id == run.id }) else { return }
+        failedRun.status = .failed
+        failedRun.error = error.localizedDescription
+        failedRun.summary = "Codex Desktop handoff could not be prepared."
+        _ = await perform(.updateRun(failedRun))
+      }
+    }
+
+    func rerunInCodex(_ runID: UUID) async {
+      guard var run = library.runs.first(where: { $0.id == runID }), run.kind == .task,
+        let context = run.handoffContext
+      else { return }
+      run.status = .readyForHandoff
+      run.error = nil
+      run.threadID = nil
+      run.turnID = nil
+      run.summary = "Preparing a fresh Codex Desktop session for this context."
+      guard await perform(.updateRun(run)), let runner else { return }
+      do {
+        try await runner.prepareDesktopHandoff(runID: runID)
+        guard let refreshed = library.runs.first(where: { $0.id == runID }),
+          let threadID = refreshed.threadID
+        else { throw BoardError.invalid("StageChase could not save the Codex Desktop session.") }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(context, forType: .string)
+        var readyRun = refreshed
+        readyRun.summary = "Context copied. Rerun it in Codex Desktop, then refresh status here."
+        if await perform(.updateRun(readyRun)) { openCodexSession(threadID) }
+      } catch {
+        guard var failedRun = library.runs.first(where: { $0.id == runID }) else { return }
+        failedRun.status = .failed
+        failedRun.error = error.localizedDescription
+        failedRun.summary = "Codex Desktop rerun could not be prepared."
+        _ = await perform(.updateRun(failedRun))
+      }
+    }
+
+    func refreshCodexStatus(_ runID: UUID) async {
+      do {
+        guard let runner else { throw BoardError.invalid("The Mac Codex runner is unavailable.") }
+        try await runner.refreshDesktopStatus(runID: runID)
+      } catch { self.error = error.localizedDescription }
+    }
+
     func closeCodexSession(_ id: UUID) async {
       await runner?.closeSession(runID: id)
     }

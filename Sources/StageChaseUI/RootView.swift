@@ -326,7 +326,7 @@ private struct GeneralSettingsForm: View {
         Text(
           model.isConnectedPhone
             ? "This phone is showing a cached copy of the paired Mac library. Changes sync while the Mac app is open on the same Wi-Fi network. Codex still runs only on Mac after confirmation."
-            : "Projects and tasks are saved in a versioned SQLite library on this device. Codex runs only on Mac, only when enabled for that project, and only after a confirmed action."
+            : "Projects and tasks are saved in a versioned SQLite library on this device. Task columns stay independent from plans and Codex runs."
         ).foregroundStyle(.secondary)
       }
       #if os(macOS)
@@ -337,6 +337,17 @@ private struct GeneralSettingsForm: View {
             .secondary)
         }
         Section("Codex runner") {
+          Toggle(
+            "Automatically invoke Codex",
+            isOn: Binding(
+              get: { model.autoInvokeCodex },
+              set: { model.setAutoInvokeCodex($0) })
+          )
+          Text(
+            model.autoInvokeCodex
+              ? "Confirmed moves into Next or Implementation can start Codex automatically when project automation is also enabled. Task columns stay independent; task details also offer a manual Desktop handoff."
+              : "Stage changes never start Codex. Use Run in Codex on a task to open Codex Desktop with its context copied to the clipboard."
+          ).stageFont(.caption).foregroundStyle(.secondary)
           TextField("Codex executable (automatic if empty)", text: $executable)
           Text(model.runnerMessage).stageFont(.callout).foregroundStyle(.secondary)
           Button("Check Codex connection") { Task { await model.runner?.checkConnection() } }

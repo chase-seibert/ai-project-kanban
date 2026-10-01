@@ -5,8 +5,8 @@
 - `Sources/StageChaseCore/Domain.swift`: Sendable models and a pure command
   reducer. Independent project UUIDs, optimistic task revisions, durable runs.
   Confirmed automated moves create one run in the same transaction; moving to
-  the current stage is a no-op. Reads never start agents. Active tasks cannot be
-  edited/deleted/moved until stopped.
+  the current stage is a no-op. Reads never start agents. Tasks can move between
+  columns while Codex runs; stage placement and completion are user-controlled.
 - `Sources/StageChaseCore/Repository.swift`: actor-owned SwiftData/SQLite.
   Versioned schema V1 stores independently addressable project/task/run/event
   records. Only changed entities are encoded and looked up by unique key; saves
@@ -31,11 +31,15 @@ SwiftPM exposes StageChaseCore for tests. App targets do not import it separatel
 
 ## Runner lifecycle
 
-Confirmed user action → catalog refresh and model resolution → atomic task/run
-write including the exact model and reasoning effort → serial runner → persisted
-session ID → Codex turn with explicit model/effort → serialized public
-events/approvals → verified outcome → Planned or Review. Tasks are never
-automatically marked complete.
+With automatic invocation enabled globally and for the project, a confirmed
+move to Next or Implementation resolves model settings, atomically writes the
+task/run state, then starts a serial Codex turn. Public events and approvals
+produce a verified run outcome; the task column never changes automatically.
+Tasks are never automatically marked complete. With automatic invocation off,
+task detail can prepare a manual Desktop handoff: StageChase saves task context,
+opens a linked empty session, and copies the context without submitting a turn.
+The user starts work in Codex Desktop. A user-initiated Refresh status reads the
+linked session and updates only its run record.
 
 Model precedence is task override, project override, then the Mac's global
 StageChase preference. The built-in default is Latest Luna with High reasoning.
@@ -56,7 +60,16 @@ structured-result requirements. It does not alter implementation prompts,
 existing plan files, or an already-submitted turn; it is not an enforcement
 boundary.
 
-Planning writes `to-do/<task UUID>.md`. Implementation verifies the plan, then
+When a confirmed Mac action queues planning, the task stores its plan destination
+in that same transaction. StageChase preserves an existing user-selected path;
+otherwise it reserves `to-do/<lowercase task UUID>.md`. The planning prompt uses
+that saved path, and retries reuse it. A path reservation does not mean the plan
+exists: the planning run succeeds only after structured success and a readable,
+non-whitespace file at the reserved destination. The task stays in its current
+column. Mac Open plan and feedback controls require a readable file and are
+available in any column. Phone stage moves do not reserve paths or enqueue work.
+
+Implementation verifies the plan, then
 uses a clean checkout or a detached HEAD worktree under Application Support/
 StageChase/Worktrees when the checkout is dirty. Only the approved plan is copied;
 other uncommitted changes stay in the original checkout. The working folder is
@@ -64,8 +77,8 @@ recorded and shown. Worktrees are retained, never auto-deleted.
 
 ## Plan feedback
 
-Mac task detail appends typed or system-dictated feedback to the saved plan for
-an incomplete task in Planned. `PlanFileStore` resolves the Markdown target
+Mac task detail appends typed or system-dictated feedback to a saved plan in any
+task column. `PlanFileStore` resolves the Markdown target
 inside its project folder, coordinates and serializes the append, retains the
 original file bytes, and verifies the resulting file before reporting success.
 Each append adds a `User feedback on the plan` heading followed by the raw text.
@@ -135,10 +148,10 @@ refresh runs every three seconds by default and can be disabled in the phone's
 Connection tab. Sync Now and board pull-to-refresh always perform an explicit
 sync; with automatic sync disabled, phone edits remain queued until then.
 Polling itself never invokes the runner. The Mac must be awake with StageChase
-open. Phone completion, deletion, undo, project
-configuration, and Codex run controls are hidden while paired. Automated stage
-transitions remain Mac-only until the phone can obtain and submit a
-server-validated confirmation context.
+open. Phone completion, deletion, undo, project configuration, and Codex run
+controls are hidden while paired. Phone stage moves do not include automation
+configuration and never enqueue or invoke Codex. Automatic Codex confirmation
+and manual Desktop handoff remain Mac-only.
 
 This path is still experimental. Unit and build checks pass, but pairing and
 task propagation have not yet been visibly verified between Mac and iPhone.
