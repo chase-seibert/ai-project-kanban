@@ -40,6 +40,9 @@
   same prompt with stable project/task IDs and a readable project-relative
   plan path when available; successful MCP-reported work marks that task
   complete without changing its stage.
+- Added a task-detail Refresh action that rereads saved task state and plan
+  availability, updates linked Codex status and latest turn activity, and
+  preserves unsaved edits without changing task stage or completion.
 
 ## 2026-10-01
 

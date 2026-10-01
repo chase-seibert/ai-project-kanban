@@ -133,6 +133,11 @@ open.
   stage; failed or blocked work remains incomplete.
 - As a user, I want legacy linked-session status refresh and rerun controls to
   remain available for existing handoffs.
+- As a user, I want a task-level Refresh action to reread saved task fields,
+  discover or recheck its attached plan, and update linked Codex status/activity
+  without changing task placement or completion.
+- As a user, I want Refresh to preserve unsaved edits, prevent overlapping
+  requests, and explain when a plan or linked session is unavailable.
 - Manual handoffs, status refreshes, and Codex outcomes do not move a task or
   start work from phone polling or replica updates.
 

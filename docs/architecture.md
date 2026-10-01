@@ -46,6 +46,15 @@ prompt without submitting a turn. That prompt authorizes Codex to mark the task
 complete through MCP after successful work, using the latest revision, while
 leaving its stage unchanged. Failed or blocked work stays incomplete. Legacy
 linked sessions can still be refreshed explicitly to update their run record.
+Mac task detail also has a task-scoped Refresh action. It rereads the authoritative
+SwiftData library without crash recovery or writes, then rechecks the attached
+project-relative plan and explicitly reads an existing linked Codex thread when
+available. The latest turn summary is stored on the run record; refresh does not
+append duplicate activity events or change task stage/completion. Unsaved task
+edits remain in the detail draft and are flagged as potentially stale. Missing
+sessions, unreadable plans, and thread-read failures are reported while preserving
+the last saved run/error state. Refresh is user-triggered and never starts,
+retries, stops, or approves a Codex turn.
 
 Mac task detail also has a separate plan handoff. `PlanHandoffPrompt` builds
 plan-only instructions for both Copy plan prompt and Plan in Codex, so both

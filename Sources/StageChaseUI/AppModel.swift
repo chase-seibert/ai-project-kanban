@@ -140,6 +140,8 @@ import UniformTypeIdentifiers
   private(set) var planFeedbackDrafts: [UUID: String] = [:]
   private(set) var planFeedbackMessages: [UUID: PlanFeedbackMessage] = [:]
   private(set) var planFeedbackInFlight: Set<UUID> = []
+  private(set) var taskRefreshInFlight: Set<UUID> = []
+  private(set) var taskRefreshMessages: [UUID: String] = [:]
   func load() async {
     guard !ready else { return }
     do {
@@ -1010,6 +1012,53 @@ import UniformTypeIdentifiers
     #endif
   }
   #if os(macOS)
+    var runStatusRefreshInFlight: Set<UUID> = []
+
+    func refreshTask(_ taskID: UUID, preservingEdits: Bool = false) async {
+      guard taskRefreshInFlight.insert(taskID).inserted else { return }
+      defer { taskRefreshInFlight.remove(taskID) }
+      taskRefreshMessages[taskID] = nil
+      guard !isPreview, let repository else {
+        taskRefreshMessages[taskID] = "Task refresh is unavailable in preview mode."
+        return
+      }
+      do {
+        let refreshed = try await repository.refresh()
+        guard let task = refreshed.tasks.first(where: { $0.id == taskID }) else {
+          library = refreshed
+          taskRefreshMessages[taskID] = "This task no longer exists in the StageChase library."
+          return
+        }
+        library = refreshed
+        let project = refreshed.projects.first { $0.id == task.projectID }
+        let planResult: String
+        if task.planPath == nil {
+          planResult = "No saved plan is attached."
+        } else if let project, PlanHandoffPrompt.hasReadablePlan(for: task, project: project) {
+          planResult = "Saved plan is available."
+        } else {
+          planResult = "The attached plan is unavailable or outside the project folder."
+        }
+        var sessionResult = "No linked Codex session is attached."
+        if let run = refreshed.latestRun(for: taskID), run.kind == .task,
+          run.threadID != nil
+        {
+          sessionResult =
+            await refreshCodexStatus(run.id)
+            ? "Linked Codex status and latest activity refreshed."
+            : "Task and plan refreshed; linked Codex status could not be read. The saved run state was preserved."
+        }
+        let editResult =
+          preservingEdits
+          ? " Your unsaved edits are preserved; the saved task changed, so saving may require resolving a revision conflict."
+          : ""
+        taskRefreshMessages[taskID] =
+          "Task refreshed (revision \(task.revision)). \(planResult) \(sessionResult)\(editResult)"
+      } catch {
+        taskRefreshMessages[taskID] = "Task refresh failed: \(error.localizedDescription)"
+      }
+    }
+
     func rerunInCodex(_ runID: UUID) async {
       guard var run = library.runs.first(where: { $0.id == runID }), run.kind == .task,
         let context = run.handoffContext
@@ -1039,11 +1088,17 @@ import UniformTypeIdentifiers
       }
     }
 
-    func refreshCodexStatus(_ runID: UUID) async {
+    @discardableResult func refreshCodexStatus(_ runID: UUID) async -> Bool {
+      guard runStatusRefreshInFlight.insert(runID).inserted else { return false }
+      defer { runStatusRefreshInFlight.remove(runID) }
       do {
         guard let runner else { throw BoardError.invalid("The Mac Codex runner is unavailable.") }
         try await runner.refreshDesktopStatus(runID: runID)
-      } catch { self.error = error.localizedDescription }
+        return true
+      } catch {
+        self.error = error.localizedDescription
+        return false
+      }
     }
 
     func closeCodexSession(_ id: UUID) async {

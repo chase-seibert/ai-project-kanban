@@ -524,6 +524,20 @@ struct TaskDetail: View {
                     handoffProject?.directory.isEmpty == false
                       ? "Open this project in Codex Desktop with the task prompt."
                       : "Choose a repository folder in Project settings before launching Codex.")
+                  Button(
+                    model.taskRefreshInFlight.contains(taskID) ? "Refreshing…" : "Refresh",
+                    systemImage: "arrow.clockwise"
+                  ) {
+                    Task { await model.refreshTask(taskID, preservingEdits: edited) }
+                  }
+                  .disabled(model.taskRefreshInFlight.contains(taskID))
+                  .help("Refresh the saved task, plan, and linked Codex activity.")
+                }
+                if let refreshMessage = model.taskRefreshMessages[taskID] {
+                  Text(refreshMessage)
+                    .stageFont(.caption)
+                    .foregroundStyle(refreshMessage.contains("failed") ? .orange : .secondary)
+                    .textSelection(.enabled)
                 }
                 HStack {
                   Button(
@@ -997,9 +1011,13 @@ struct RunDetail: View {
           }
         }
         if run.kind == .task, run.threadID != nil {
-          Button("Refresh status", systemImage: "arrow.clockwise") {
+          Button(
+            model.runStatusRefreshInFlight.contains(run.id) ? "Refreshing…" : "Refresh status",
+            systemImage: "arrow.clockwise"
+          ) {
             Task { await model.refreshCodexStatus(run.id) }
           }
+          .disabled(model.runStatusRefreshInFlight.contains(run.id))
         }
         if let path = run.workDirectory {
           Button("Reveal working folder", systemImage: "folder") {

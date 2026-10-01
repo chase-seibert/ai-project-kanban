@@ -4,6 +4,7 @@ import json
 import pathlib
 import re
 import sys
+import time
 
 thread_id = None
 thread_names = {}
@@ -13,6 +14,8 @@ turn_id = None
 pending = None
 pending_kind = None
 thread_policies = {}
+thread_turns = {}
+thread_status = {}
 
 def send(value):
     print(json.dumps(value), flush=True)
@@ -21,6 +24,7 @@ def event(method, **params):
     send({"method": method, "params": {"threadId": thread_id, **params}})
 
 def complete(params):
+    global thread_turns, thread_status
     prompt = params["input"][0]["text"]
     blocked = "BLOCKED_FIXTURE" in prompt
     if not prompt.startswith("Task: "):
@@ -54,6 +58,12 @@ def complete(params):
     text = json.dumps({"outcome": "blocked" if blocked else "completed", "summary": "Fixture is blocked" if blocked else "Fixture verified"})
     event("item/completed", item={"type": "agentMessage", "text": text, "phase": "final_answer"})
     event("turn/completed", turn={"id": turn_id, "status": "completed"})
+    thread_status[params["threadId"]] = "idle"
+    thread_turns[params["threadId"]] = [{
+        "id": turn_id,
+        "status": "completed",
+        "items": [{"type": "agentMessage", "text": "Fixture verified"}],
+    }]
 
 for line in sys.stdin:
     message = json.loads(line)
@@ -90,10 +100,23 @@ for line in sys.stdin:
         if method == "thread/start":
             thread_counter += 1
             thread_id = f"fixture-thread-{thread_counter}"
+            thread_turns[thread_id] = []
+            thread_status[thread_id] = "idle"
         else:
             thread_id = params["threadId"]
         thread_policies[thread_id] = params.get("approvalPolicy")
         result = {"thread": {"id": thread_id}}
+    elif method == "thread/read":
+        if params.get("threadId") == "fixture-read-failure":
+            send({"id": request_id, "error": {"code": -32000, "message": "fixture read failure"}})
+            continue
+        if params.get("threadId") == "fixture-slow-read":
+            time.sleep(0.2)
+        result = {"thread": {
+            "id": params["threadId"],
+            "status": {"type": thread_status.get(params["threadId"], "idle")},
+            "turns": thread_turns.get(params["threadId"], []),
+        }}
     elif method == "turn/start":
         if params.get("model") != "gpt-6.10-luna" or params.get("effort") != "high":
             send({"id": request_id, "error": {"code": -32602, "message": "missing or wrong turn model/effort"}})

@@ -181,20 +181,28 @@ struct AgentApproval {
     }
     let threadStatus = (thread["status"] as? [String: Any])?["type"] as? String
     let turns = thread["turns"] as? [[String: Any]] ?? []
-    let latestTurnStatus = turns.last?["status"] as? String
+    let latestTurn = turns.last
+    let latestTurnStatus = latestTurn?["status"] as? String
+    let activitySummary = latestTurn.flatMap(Self.activitySummary(for:))
     if threadStatus == "active" || latestTurnStatus == "inProgress" {
       run.status = .running
-      run.summary = "Codex Desktop is running this task."
+      run.summary =
+        activitySummary.map { "Codex Desktop is running this task. \($0)" }
+        ?? "Codex Desktop is running this task."
       run.error = nil
     } else {
       switch latestTurnStatus {
       case "completed":
         run.status = .succeeded
-        run.summary = "Codex Desktop finished. Review the changes."
+        run.summary =
+          activitySummary.map { "Codex Desktop finished. \($0)" }
+          ?? "Codex Desktop finished. Review the changes."
         run.error = nil
       case "failed":
         run.status = .failed
-        run.summary = "Codex Desktop reported a failed run."
+        run.summary =
+          activitySummary.map { "Codex Desktop reported a failed run. \($0)" }
+          ?? "Codex Desktop reported a failed run."
       case "interrupted":
         run.status = .interrupted
         run.summary = "Codex Desktop run was interrupted."
@@ -209,6 +217,30 @@ struct AgentApproval {
     guard await model.perform(.updateRun(run)) else {
       throw BoardError.invalid("Could not save the refreshed Codex status.")
     }
+  }
+
+  private static func activitySummary(for turn: [String: Any]) -> String? {
+    for key in ["summary", "lastMessage", "message", "title"] {
+      if let value = turn[key] as? String,
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      {
+        return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
+      }
+    }
+    guard let items = turn["items"] as? [[String: Any]] else { return nil }
+    for item in items.reversed()
+    where
+      ["agentMessage", "assistantMessage", "message"].contains(item["type"] as? String ?? "")
+    {
+      for key in ["text", "message", "content"] {
+        if let value = item[key] as? String,
+          !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+          return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
+        }
+      }
+    }
+    return nil
   }
 
   func drain() {

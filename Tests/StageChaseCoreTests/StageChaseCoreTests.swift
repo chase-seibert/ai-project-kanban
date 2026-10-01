@@ -293,6 +293,33 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   repository = nil
 }
 
+@Test func repositoryRefreshReadsCurrentStateFromAnotherRepositoryClient() async throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChaseRefresh-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let storeURL = root.appendingPathComponent("Library.sqlite")
+  let boardRepository = try LibraryRepository(url: storeURL)
+  let externalRepository = try LibraryRepository(url: storeURL)
+  let project = Project(name: "Refresh fixture")
+  _ = try await boardRepository.apply(.createProject(project))
+  let task = WorkItem(projectID: project.id, title: "Before refresh")
+  _ = try await boardRepository.apply(.createTask(task))
+  #expect(try await externalRepository.load().tasks.first?.title == "Before refresh")
+
+  var updated = task
+  updated.title = "After refresh"
+  _ = try await boardRepository.apply(.editTask(updated, expectedRevision: task.revision))
+  #expect(try await externalRepository.load().tasks.first?.title == "Before refresh")
+
+  let refreshed = try await externalRepository.refresh()
+  #expect(refreshed.tasks.first?.title == "After refresh")
+  #expect(refreshed.tasks.first?.revision == task.revision + 1)
+  #expect(refreshed.tasks.first?.stage == task.stage)
+  #expect(refreshed.tasks.first?.completed == task.completed)
+  #expect(refreshed.runs.isEmpty)
+}
+
 @Test func mcpMutationReceiptIsAtomicDurableAndRejectsOperationReuse() async throws {
   let root = FileManager.default.temporaryDirectory
     .appendingPathComponent("StageChaseMCP-\(UUID().uuidString)", isDirectory: true)

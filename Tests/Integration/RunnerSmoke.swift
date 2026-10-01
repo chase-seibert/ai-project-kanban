@@ -201,6 +201,29 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       guard !model.library.activity.filter({ $0.runID == run.id }).isEmpty else {
         throw BoardError.invalid("Missing logs")
       }
+      if title == "Plan fixture" {
+        var linkedRun = AgentRun(task: finishedTask, kind: .task)
+        linkedRun.status = .readyForHandoff
+        linkedRun.threadID = run.threadID
+        _ = await model.perform(.createManualRun(linkedRun))
+        guard let trackedRun = model.library.latestRun(for: item.id) else {
+          throw BoardError.invalid("Manual session fixture was not saved")
+        }
+        let activityCount = model.library.activity.filter { $0.runID == trackedRun.id }.count
+        guard await model.refreshCodexStatus(trackedRun.id),
+          let refreshedRun = model.library.runs.first(where: { $0.id == trackedRun.id }),
+          refreshedRun.status == .succeeded,
+          refreshedRun.summary.contains("Fixture verified"),
+          model.library.activity.filter({ $0.runID == trackedRun.id }).count == activityCount,
+          let refreshedTask = model.library.tasks.first(where: { $0.id == item.id }),
+          refreshedTask.stage == .next, !refreshedTask.completed
+        else {
+          throw BoardError.invalid("Explicit session refresh lost status, activity, or task state")
+        }
+        print(
+          "PASS: linked status refresh updates latest activity without duplicate events or task changes"
+        )
+      }
       print("PASS: \(title) → \(run.status.rawValue), task in \(expectedStage.rawValue)")
       if title == "APPROVAL_FIXTURE" {
         guard
@@ -287,6 +310,75 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         print("PASS: successful close preserves outcome, stage, summary, and plan")
       }
     }
+    let arrivingPlanTask = WorkItem(projectID: project.id, title: "Arriving plan fixture")
+    _ = await model.perform(.createTask(arrivingPlanTask))
+    var attachedTask = model.library.tasks.first(where: { $0.id == arrivingPlanTask.id })!
+    attachedTask.planPath = "to-do/arrived.md"
+    let arrivedPlanURL = folder.appendingPathComponent("to-do/arrived.md")
+    try FileManager.default.createDirectory(
+      at: arrivedPlanURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "# New plan\n\nRead after refresh.\n".write(
+      to: arrivedPlanURL, atomically: true, encoding: .utf8)
+    _ = try await repo.apply(.editTask(attachedTask, expectedRevision: attachedTask.revision))
+    await model.refreshTask(arrivingPlanTask.id)
+    guard
+      model.library.tasks.first(where: { $0.id == arrivingPlanTask.id })?.planPath
+        == "to-do/arrived.md",
+      model.taskRefreshMessages[arrivingPlanTask.id]?.contains("Saved plan is available") == true,
+      PlanHandoffPrompt.hasReadablePlan(
+        for: model.library.tasks.first(where: { $0.id == arrivingPlanTask.id })!, project: project)
+    else {
+      throw BoardError.invalid("Task refresh did not discover a newly attached readable plan")
+    }
+    try "# Changed plan\n\nRead the current contents.\n".write(
+      to: arrivedPlanURL, atomically: true, encoding: .utf8)
+    await model.refreshTask(arrivingPlanTask.id)
+    guard try String(contentsOf: arrivedPlanURL, encoding: .utf8).contains("Changed plan") else {
+      throw BoardError.invalid("Task refresh did not reread the changed plan file")
+    }
+    print("PASS: task refresh discovers new plan attachments and rechecks changed files")
+
+    var unlinked = WorkItem(projectID: project.id, title: "Unlinked refresh fixture")
+    unlinked.planPath = "to-do/missing-plan.md"
+    _ = await model.perform(.createTask(unlinked))
+    await model.refreshTask(unlinked.id, preservingEdits: true)
+    guard model.taskRefreshMessages[unlinked.id]?.contains("No linked Codex session") == true,
+      model.taskRefreshMessages[unlinked.id]?.contains("plan is unavailable") == true,
+      model.taskRefreshMessages[unlinked.id]?.contains("unsaved edits are preserved") == true,
+      model.library.tasks.first(where: { $0.id == unlinked.id })?.stage == .inbox,
+      model.library.tasks.first(where: { $0.id == unlinked.id })?.completed == false,
+      model.library.latestRun(for: unlinked.id) == nil
+    else { throw BoardError.invalid("Unlinked refresh changed task state or missed its result") }
+
+    var readFailureRun = AgentRun(task: unlinked, kind: .task)
+    readFailureRun.status = .readyForHandoff
+    readFailureRun.threadID = "fixture-read-failure"
+    readFailureRun.error = "Existing error state"
+    _ = await model.perform(.createManualRun(readFailureRun))
+    guard !(await model.refreshCodexStatus(readFailureRun.id)),
+      let preservedRun = model.library.runs.first(where: { $0.id == readFailureRun.id }),
+      preservedRun.status == .readyForHandoff,
+      preservedRun.error == "Existing error state",
+      model.error?.contains("fixture read failure") == true
+    else { throw BoardError.invalid("Failed session read did not preserve the saved run state") }
+
+    var slowReadRun = AgentRun(task: unlinked, kind: .task)
+    slowReadRun.status = .readyForHandoff
+    slowReadRun.threadID = "fixture-slow-read"
+    _ = await model.perform(.createManualRun(slowReadRun))
+    guard let savedSlowRun = model.library.latestRun(for: unlinked.id) else {
+      throw BoardError.invalid("Repeated-refresh fixture was not saved")
+    }
+    let runActivityCount = model.library.activity.filter { $0.runID == savedSlowRun.id }.count
+    let firstStatusRefresh = Task { @MainActor in
+      await model.refreshCodexStatus(savedSlowRun.id)
+    }
+    try await wait { model.runStatusRefreshInFlight.contains(savedSlowRun.id) }
+    guard !(await model.refreshCodexStatus(savedSlowRun.id)), await firstStatusRefresh.value,
+      !model.runStatusRefreshInFlight.contains(savedSlowRun.id),
+      model.library.activity.filter({ $0.runID == savedSlowRun.id }).count == runActivityCount
+    else { throw BoardError.invalid("Overlapping status refreshes were not safely coalesced") }
+    print("PASS: unlinked and failed session refreshes preserve task and retry state")
     print("Offline runner integration checks passed; no real agent turns were started.")
     var blocked = model.library.tasks.first { $0.title == "BLOCKED_FIXTURE" }!
     let previousRun = model.library.latestRun(for: blocked.id)!

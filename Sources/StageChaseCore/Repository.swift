@@ -141,6 +141,42 @@ public actor LibraryRepository {
     return library
   }
 
+  /// Explicitly rereads the current persisted library without crash recovery or writes.
+  /// This is used by user-triggered refresh actions when another repository client may
+  /// have changed the shared SwiftData store since this actor last loaded it.
+  public func refresh() throws -> Library {
+    let context = ModelContext(container)
+    let entries = try context.fetch(FetchDescriptor<StageSchemaV1.Entry>())
+    var library = Library()
+    let decoder = JSONDecoder()
+    var refreshedSyncState: StoredSyncState?
+    var refreshedMCPState: StoredMCPState?
+    for entry in entries {
+      switch entry.kind {
+      case "project": library.projects.append(try decoder.decode(Project.self, from: entry.payload))
+      case "task": library.tasks.append(try decoder.decode(WorkItem.self, from: entry.payload))
+      case "run": library.runs.append(try decoder.decode(AgentRun.self, from: entry.payload))
+      case "activity":
+        library.activity.append(try decoder.decode(Activity.self, from: entry.payload))
+      case "metadata":
+        if entry.key == "sync-state" {
+          refreshedSyncState = try decoder.decode(StoredSyncState.self, from: entry.payload)
+        } else if entry.key == "mcp-state" {
+          refreshedMCPState = try decoder.decode(StoredMCPState.self, from: entry.payload)
+        }
+      default:
+        throw BoardError.invalid("Unknown record in the library. Your data has not been changed.")
+      }
+    }
+    library.projects.sort { $0.createdAt < $1.createdAt }
+    library.activity.sort { $0.date < $1.date }
+    try library.validate()
+    cached = library
+    syncState = refreshedSyncState
+    mcpState = refreshedMCPState
+    return library
+  }
+
   public func apply(_ command: Mutation) throws -> Library {
     let library = try BoardReducer.apply(command, to: load())
     var nextSyncState = syncState ?? StoredSyncState()
