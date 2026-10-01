@@ -2,6 +2,8 @@
 
 ## 2026-10-01
 
+- Corrected generated manual task prompts to move successful implementation work
+  to Review and leave it incomplete for user review.
 - Generated plan filenames now use readable normalized task-title slugs with
   full task-ID suffixes; planning, implementation, and manual prompts start
   with the task title, and Codex sessions use the task title alone.

@@ -101,7 +101,7 @@ struct ProjectEditor: View {
             )
             .stageFont(.callout).foregroundStyle(.secondary)
             Text(
-              "Uses StageChase’s selected model and reasoning effort. Usage may count toward your subscription or API billing. Automatic runs never commit, push, or mark tasks complete. A manually started task prompt can mark its task complete through MCP after success."
+              "Uses StageChase’s selected model and reasoning effort. Usage may count toward your subscription or API billing. Automatic runs do not change task placement or completion. Successful manual task prompts move the task to Review and leave it incomplete for your review."
             )
             .stageFont(.caption).foregroundStyle(.secondary)
           #else
