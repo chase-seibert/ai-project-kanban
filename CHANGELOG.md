@@ -2,6 +2,9 @@
 
 ## 2026-10-01
 
+- Lane quick capture now turns pasted Apple Notes unchecked checklist entries
+  into separate tasks, while preserving explicit Codex confirmation for later
+  moves into automated stages.
 - Start the loopback-only Codex Desktop MCP listener automatically on app launch
   by default, with a persistent Stop/Start choice in Connection settings.
 - Added Mac project-header controls for a per-project managed-worktree toggle
@@ -12,6 +15,10 @@
   revision-checked stage and completion changes through the local library.
 - Persisted bounded MCP operation receipts in the same save as task changes so
   retried writes are idempotent and visible to normal board/phone sync refresh.
+- Added revision-checked MCP plan attachment for readable, nonempty Markdown
+  files inside the project folder. Synchronized local and reusable agent
+  instructions to attach plans and move successful planning tasks to Planned,
+  and to complete tasks after successful implementation.
 - Added a Connection settings control and Codex CLI setup command. MCP task
   operations never start StageChase's Codex runner. Added explicit external
   session bookkeeping and a bounded latest update visible in task detail.

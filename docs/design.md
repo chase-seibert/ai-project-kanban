@@ -9,6 +9,12 @@ all five when possible, otherwise scrolls horizontally. Lanes scroll vertically,
 have named + buttons, and offer inline multiline capture. Cards drag between
 stages or onto another card to reorder within a stage. Context menus and detail
 move menus provide an accessible alternative.
+Lane capture accepts a pasted Apple Notes checklist when every nonblank line is
+an unchecked `- [ ] item` entry (also `* [ ]`, `+ [ ]`, `☐`, and `□`). It creates
+one task per checklist entry and strips the checkbox marker; ordinary text still
+creates one task. When automatic invocation is enabled for Next or Implementation,
+bulk capture is directed to Inbox so each later move retains its explicit run
+confirmation.
 
 iPhone uses a horizontally paged board and stage strip: one readable lane plus
 a hint of its neighbor, not five squeezed desktop columns. Generated launch

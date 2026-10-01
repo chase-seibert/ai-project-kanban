@@ -172,6 +172,7 @@ struct BoardLane: View {
   @State private var adding = false
   @State private var targeted = false
   @State private var saving = false
+  @State private var captureError: String?
   @FocusState private var captureFocused: Bool
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -213,14 +214,20 @@ struct BoardLane: View {
               TextField("What needs doing?", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain).lineLimit(2...5).focused($captureFocused)
                 .onSubmit { save() }
+                .onChange(of: draft) { _, _ in captureError = nil }
+              if let captureError {
+                Text(captureError).stageFont(.caption).foregroundStyle(.orange)
+              }
               HStack {
                 Button("Cancel") {
                   adding = false
                   draft = ""
                 }.buttonStyle(.borderless)
                 Spacer()
-                Button("Add task") { save() }.buttonStyle(.borderedProminent).controlSize(.small)
-                  .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
+                Button(addButtonTitle) { save() }.buttonStyle(.borderedProminent).controlSize(
+                  .small
+                )
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
               }
             }.padding(12).background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
               .overlay(RoundedRectangle(cornerRadius: 12).stroke(stage.color.opacity(0.5)))
@@ -265,13 +272,62 @@ struct BoardLane: View {
       targeted = $0
     }
   }
+  private var checklistTitles: [String]? {
+    let lines = draft.split(whereSeparator: \.isNewline).map {
+      String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+    }.filter { !$0.isEmpty }
+    guard !lines.isEmpty else { return nil }
+    let titles = lines.compactMap { Self.checklistTitle(from: $0) }
+    return titles.count == lines.count ? titles : nil
+  }
+  private var addButtonTitle: String {
+    guard let count = checklistTitles?.count, count > 1 else { return "Add task" }
+    return "Add \(count) tasks"
+  }
+  private static func checklistTitle(from line: String) -> String? {
+    let patterns = [
+      #"^[-*+]\s+\[\s\]\s*(.+)$"#,
+      #"^☐\s*(.+)$"#,
+      #"^□\s*(.+)$"#,
+    ]
+    for pattern in patterns {
+      guard let expression = try? NSRegularExpression(pattern: pattern),
+        let match = expression.firstMatch(
+          in: line, range: NSRange(line.startIndex..., in: line)),
+        let titleRange = Range(match.range(at: 1), in: line)
+      else { continue }
+      let title = line[titleRange].trimmingCharacters(in: .whitespacesAndNewlines)
+      if !title.isEmpty { return title }
+    }
+    return nil
+  }
   private func save() {
     guard !saving, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    let titles = checklistTitles ?? [draft]
+    let requiresConfirmation =
+      model.autoInvokeCodex
+      && model.selectedProject?.automationEnabled == true
+      && [.next, .implementation].contains(stage)
+    guard !(titles.count > 1 && requiresConfirmation) else {
+      captureError =
+        "Add this checklist in Inbox first. Moving tasks into \(stage.title) will ask before starting Codex."
+      return
+    }
     saving = true
+    captureError = nil
     Task {
-      if await model.addTask(draft, stage: stage) {
+      var savedCount = 0
+      for title in titles {
+        guard await model.addTask(title, stage: stage) else { break }
+        savedCount += 1
+      }
+      if savedCount == titles.count {
         draft = ""
         captureFocused = true
+      } else if titles.count > 1 && savedCount > 0 {
+        draft = titles.dropFirst(savedCount).map { "- [ ] \($0)" }.joined(separator: "\n")
+        captureError =
+          model.error ?? "Some tasks could not be added. The remaining items are still here."
       }
       saving = false
     }

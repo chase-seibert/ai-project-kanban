@@ -47,9 +47,12 @@ linked sessions can still be refreshed explicitly to update their run record.
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same
 `LibraryRepository` as the board; no second process opens the SQLite library.
-Project/task reads are scoped by stable IDs. Create/move/complete writes use the
-normal reducer, persist bounded operation receipts and advance the phone-sync
-sequence in the same save. Existing-task updates require the current revision.
+Project/task reads are scoped by stable IDs. Create/move/complete and plan
+attachment writes use the normal reducer, persist bounded operation receipts
+and advance the phone-sync sequence in the same save. Existing-task updates
+require the current revision. `attach_task_plan` accepts only a readable,
+nonempty Markdown file resolved inside the project's folder; it does not move or
+complete the task or invoke Codex.
 External session records have a distinct source; `begin_task`,
 `report_task_update`, and `finish_task` only track work that Codex Desktop
 already started. They store one bounded latest message on the task/run, never a

@@ -239,6 +239,31 @@ import Network
         .move(taskID, stage, expectedRevision: revision), operationID: operationID,
         arguments: arguments)
       return taskJSON(try requiredTask(taskID, in: result))
+    case "attach_task_plan":
+      let projectID = try uuid("project_id", arguments)
+      let taskID = try uuid("task_id", arguments)
+      guard let project = library.projects.first(where: { $0.id == projectID }),
+        let task = library.tasks.first(where: { $0.id == taskID && $0.projectID == projectID })
+      else { throw BoardError.missing }
+      let revision = try integer("expected_revision", arguments)
+      let relativePath = try string("plan_path", arguments, max: 2_000)
+      let operationID = try uuid("operation_id", arguments)
+      let url = try PlanFileStore.resolve(
+        projectDirectory: project.directory, relativePath: relativePath)
+      let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+      guard attributes[.type] as? FileAttributeType == .typeRegular,
+        let contents = try? Data(contentsOf: url),
+        let text = String(data: contents, encoding: .utf8),
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else {
+        throw BoardError.invalid("plan_path must identify a readable, nonempty Markdown file.")
+      }
+      var updated = task
+      updated.planPath = relativePath
+      let result = try await commit(
+        .editTask(updated, expectedRevision: revision), operationID: operationID,
+        arguments: arguments)
+      return taskJSON(try requiredTask(taskID, in: result), detailed: true)
     case "set_task_completed":
       let projectID = try uuid("project_id", arguments)
       let taskID = try uuid("task_id", arguments)
@@ -450,6 +475,19 @@ extension MCPServer {
           "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
           "expected_revision": ["type": "integer"], "stage": stageSchema,
         ], "required": ["project_id", "task_id", "operation_id", "expected_revision", "stage"],
+        "additionalProperties": false,
+      ]),
+    tool(
+      "attach_task_plan",
+      "Attach an existing readable, nonempty project-relative Markdown plan. Requires its current task revision. Does not move, complete, or start Codex.",
+      [
+        "type": "object",
+        "properties": [
+          "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
+          "expected_revision": ["type": "integer"],
+          "plan_path": ["type": "string", "minLength": 1, "maxLength": 2000],
+        ],
+        "required": ["project_id", "task_id", "operation_id", "expected_revision", "plan_path"],
         "additionalProperties": false,
       ]),
     tool(

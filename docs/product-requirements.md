@@ -8,6 +8,8 @@
   board has a predictable path from idea to review.
 - As a user, I want to capture and edit tasks, so that ideas are useful before
   planning begins.
+- As a user, I want to paste an Apple Notes checklist into lane capture and
+  create one task per unchecked item, so I can quickly bring a list into a board.
 - As a user, I want to move tasks between stages, so that the board reflects my
   current intent.
 - As a user, I want task placement to remain independent of plan availability,
@@ -115,6 +117,11 @@ open.
   can work from the repository already open in that session.
 - As a user, I want explicit, revision-checked moves and completion changes to
   appear in StageChase, so task state stays in the local library.
+- As a user, I want a readable project-relative plan attached to its task after
+  planning, then the task moved to Planned, so the board shows that a plan is
+  ready for implementation.
+- As a user, I want successful implementation to complete the task without
+  changing its stage, while failed or blocked work remains incomplete.
 - As a user, I want Codex to report a concise latest session update, so the
   task detail shows recent progress without copying a conversation transcript.
 - The Mac-only MCP listener starts automatically on app launch by default, can
