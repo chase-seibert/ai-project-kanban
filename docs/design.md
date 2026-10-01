@@ -32,9 +32,12 @@ The phone directs the user to the Mac because project plan files are not synced.
 When the Mac-wide automatic invocation setting and the project automation
 setting are both enabled, Next/Implementation actions require confirmation
 including usage cost. The Mac setting can turn off automatic turns globally;
-task detail then prepares a manual Codex Desktop session, copies its persisted
-task context, and offers an explicit status refresh and rerun. Codex results do
-not move tasks between columns. Enabling automation alone never starts work.
+task detail then offers Copy prompt and Launch Codex using the same StageChase
+MCP prompt. It contains stable project/task IDs and a readable project-relative
+plan path when available. Launch opens a new Codex Desktop thread without
+submitting a turn. After success, that prompt directs Codex to complete the
+task through MCP while leaving its column unchanged. Enabling automation alone
+never starts work.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings
 shows progress, the saved endpoint, and timestamped framed exchange sizes and

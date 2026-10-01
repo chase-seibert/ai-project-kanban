@@ -10,6 +10,10 @@
 - Added a Connection settings control and Codex CLI setup command. MCP task
   operations never start StageChase's Codex runner. Added explicit external
   session bookkeeping and a bounded latest update visible in task detail.
+- Added Copy prompt and Launch Codex actions to task details. Both use the
+  same prompt with stable project/task IDs and a readable project-relative
+  plan path when available; successful MCP-reported work marks that task
+  complete without changing its stage.
 
 ## 2026-09-30
 

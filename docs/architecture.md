@@ -35,11 +35,14 @@ With automatic invocation enabled globally and for the project, a confirmed
 move to Next or Implementation resolves model settings, atomically writes the
 task/run state, then starts a serial Codex turn. Public events and approvals
 produce a verified run outcome; the task column never changes automatically.
-Tasks are never automatically marked complete. With automatic invocation off,
-task detail can prepare a manual Desktop handoff: StageChase saves task context,
-opens a linked empty session, and copies the context without submitting a turn.
-The user starts work in Codex Desktop. A user-initiated Refresh status reads the
-linked session and updates only its run record.
+Automatic runs do not mark tasks complete. With automatic invocation off,
+task detail offers Copy prompt and Launch Codex actions using one prompt with
+stable project/task IDs and a readable project-relative plan path when
+available. Launch opens `codex://threads/new` with the project folder and
+prompt without submitting a turn. That prompt authorizes Codex to mark the task
+complete through MCP after successful work, using the latest revision, while
+leaving its stage unchanged. Failed or blocked work stays incomplete. Legacy
+linked sessions can still be refreshed explicitly to update their run record.
 
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same

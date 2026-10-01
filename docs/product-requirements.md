@@ -89,11 +89,17 @@ open.
 
 - As a user, I want a Mac-wide setting to turn automatic Codex invocation on or
   off, so that confirmed stage moves can be separated from starting a turn.
-- As a user, I want a task-level Run in Codex action that saves task context,
-  opens a linked Codex Desktop session, and copies the context for me to start
-  manually.
-- As a user, I want to copy the saved context later, refresh the linked session
-  status on demand, and retry or rerun from the task.
+- As a user, I want task-level Copy prompt and Launch Codex actions to use the
+  same StageChase MCP prompt, so I can either paste it or open a new Codex
+  Desktop thread with the repository path and prompt.
+- As a user, I want the prompt to identify the project and task by stable IDs,
+  include a readable project-relative plan path when one exists, and otherwise
+  include the task title and notes.
+- As a user, I want successful work from that prompt to mark the identified
+  task complete through MCP after reporting success, without changing its
+  stage; failed or blocked work remains incomplete.
+- As a user, I want legacy linked-session status refresh and rerun controls to
+  remain available for existing handoffs.
 - Manual handoffs, status refreshes, and Codex outcomes do not move a task or
   start work from phone polling or replica updates.
 

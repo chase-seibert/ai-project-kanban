@@ -143,7 +143,7 @@ struct BoardHeader: View {
     if model.autoInvokeCodex && model.selectedProject?.automationEnabled == true {
       "Confirmed moves to Next or Implementation can invoke Codex. Columns stay independent."
     } else {
-      "Move tasks freely. Use Run in Codex for a manual Desktop handoff."
+      "Move tasks freely. Copy a task prompt or launch it in Codex Desktop from task details."
     }
   }
   private var automaticInvocationEnabled: Bool {

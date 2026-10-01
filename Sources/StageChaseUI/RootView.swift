@@ -345,8 +345,8 @@ private struct GeneralSettingsForm: View {
           )
           Text(
             model.autoInvokeCodex
-              ? "Confirmed moves into Next or Implementation can start Codex automatically when project automation is also enabled. Task columns stay independent; task details also offer a manual Desktop handoff."
-              : "Stage changes never start Codex. Use Run in Codex on a task to open Codex Desktop with its context copied to the clipboard."
+              ? "Confirmed moves into Next or Implementation can start Codex automatically when project automation is also enabled. Task columns stay independent; task details also offer a manual Desktop prompt."
+              : "Stage changes never start Codex. Task details let you copy the StageChase prompt or launch it in Codex Desktop."
           ).stageFont(.caption).foregroundStyle(.secondary)
           TextField("Codex executable (automatic if empty)", text: $executable)
           Text(model.runnerMessage).stageFont(.callout).foregroundStyle(.secondary)

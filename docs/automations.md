@@ -14,8 +14,11 @@ not yet verified.
 | Planning success | Require structured success plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
 | Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Prepare a checkout/worktree and invoke Codex; a plan is optional context |
 | Implementation success | Require structured success; update the run only. The user chooses the task column and completion state |
-| Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers a manual Desktop handoff |
-| Run in Codex from task detail | Persist task context, create an empty Codex Desktop session, copy the context, and open that session; the user starts the turn in Desktop |
+| Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers manual prompt copy and launch actions |
+| Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, including stable IDs and a readable project-relative plan path when available |
+| Launch Codex from task detail | Open `codex://threads/new` with the repository path and same MCP prompt; the user starts the turn in Desktop |
+| Successful task-prompt work | After `finish_task` succeeds, set that task complete through MCP using its latest revision; leave its stage unchanged |
+| Failed or blocked task-prompt work | Report the outcome through MCP and leave the task incomplete |
 | Use the optional Codex Desktop MCP connection | Read/create tasks and explicitly move/complete them through the Mac library; MCP task calls never start or control a Codex turn |
 | Refresh manual Codex status | Read the linked session only after the user presses Refresh status; update its run record without changing the task |
 | Retry/rerun a manual task | Reuse the saved context in a fresh Desktop session and copy it again; the user starts the new turn |
@@ -112,13 +115,15 @@ retried.
 
 The Mac-wide **Automatically invoke Codex** preference gates automatic turns;
 the existing project switch must also be enabled for stage-triggered automation.
-With automatic invocation off, users can choose **Run in Codex** on any task.
-StageChase stores the task context and linked session, copies the context for
-the user, and opens the session in Codex Desktop without submitting a turn.
-Task detail keeps the context available to copy later. Refresh status is an
-explicit `thread/read` action and never polls in the background or changes task
-placement. Automatic run settings do not restrict stage placement based on a
-plan, completion state, or Codex run status.
+With automatic invocation off, users can choose **Copy prompt** or **Launch
+Codex** on a task. Both actions use the same prompt, which identifies the
+project and task by stable IDs, includes a readable project-relative plan path
+when available, and otherwise includes the task title and notes. Launch opens
+`codex://threads/new` with the project folder and prompt; it does not submit a
+turn. The prompt directs Codex to update the task through the StageChase MCP
+and mark it complete only after successful work, without moving its stage.
+Automatic run settings do not restrict stage placement based on a plan,
+completion state, or Codex run status.
 
 Reference: [official app-server docs](https://learn.chatgpt.com/docs/app-server).
 

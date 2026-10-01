@@ -11,7 +11,8 @@ context together.
 The supplied plan defines a Mac-authoritative architecture with a SwiftUI Mac
 app, an iPhone companion, a five-stage workflow, local project configuration,
 and explicit Codex work: automatic turns follow confirmed stage transitions
-when enabled, while manual Desktop handoffs are started by the user.
+when enabled, while manual Desktop task prompts are started by the user and
+report task state through the local StageChase MCP.
 
 ## Constraints and non-goals
 

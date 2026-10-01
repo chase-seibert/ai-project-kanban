@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if os(macOS)
+  import AppKit
+#endif
+
 #if os(iOS)
   import UIKit
 #endif
@@ -93,11 +97,11 @@ struct ProjectEditor: View {
           #if os(macOS)
             Toggle("Allow automatic Codex runs for this project", isOn: $project.automationEnabled)
             Text(
-              "This project switch works with the Mac-wide automatic invocation setting. Task details can always prepare a manual handoff to Codex Desktop. Plans and Codex status do not restrict task columns."
+              "This project switch works with the Mac-wide automatic invocation setting. Task details can copy a StageChase MCP prompt or launch it in Codex Desktop. Plans and Codex status do not restrict task columns."
             )
             .stageFont(.callout).foregroundStyle(.secondary)
             Text(
-              "Uses StageChase’s selected model and reasoning effort. Usage may count toward your subscription or API billing. Never commits, pushes, or marks tasks complete automatically."
+              "Uses StageChase’s selected model and reasoning effort. Usage may count toward your subscription or API billing. Automatic runs never commit, push, or mark tasks complete. A manually started task prompt can mark its task complete through MCP after success."
             )
             .stageFont(.caption).foregroundStyle(.secondary)
           #else
@@ -201,7 +205,18 @@ struct TaskDetail: View {
   @State private var draft: WorkItem?
   @State private var edited = false
   @State private var deleting = false
+  @State private var promptCopied = false
   var item: WorkItem? { model.library.tasks.first { $0.id == taskID } }
+  #if os(macOS)
+    private var handoffProject: Project? {
+      guard let item else { return nil }
+      return model.library.projects.first { $0.id == item.projectID }
+    }
+    private var codexHandoffPrompt: String? {
+      guard let item, let project = handoffProject else { return nil }
+      return makeCodexHandoffPrompt(for: item, project: project)
+    }
+  #endif
   var body: some View {
     ScrollView {
       if let item {
@@ -224,12 +239,20 @@ struct TaskDetail: View {
           #if os(macOS)
             if !model.isConnectedPhone {
               HStack {
-                Button("Run in Codex", systemImage: "arrow.up.right.square") {
-                  Task { await model.runTaskInCodex(taskID) }
+                Button(promptCopied ? "Prompt copied" : "Copy prompt", systemImage: promptCopied ? "checkmark" : "doc.on.doc") {
+                  copyCodexPrompt()
+                }
+                .disabled(handoffActionsDisabled || codexHandoffPrompt == nil)
+                Button("Launch Codex", systemImage: "arrow.up.right.square") {
+                  launchCodex()
                 }
                 .disabled(
-                  edited || model.planFeedbackInFlight.contains(taskID)
-                    || model.library.latestRun(for: taskID)?.status.isActive == true)
+                  handoffActionsDisabled || codexHandoffPrompt == nil
+                    || handoffProject?.directory.isEmpty != false)
+                .help(
+                  handoffProject?.directory.isEmpty == false
+                    ? "Open this project in Codex Desktop with the task prompt."
+                    : "Choose a repository folder in Project settings before launching Codex.")
               }
             }
           #endif
@@ -397,14 +420,14 @@ struct TaskDetail: View {
                     ? "Codex runs on Mac. Stage changes do not start or manage Codex work."
                     : model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
                       ? "Confirmed moves can start Codex. Task placement stays under your control."
-                      : "Use Run in Codex to prepare a manual Desktop handoff. Task placement stays under your control."
+                      : "Copy the task prompt or launch it in Codex Desktop. Task placement stays under your control."
                 )
                 .stageFont(.callout).foregroundStyle(.secondary)
               #else
                 Text(
                   model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
                     ? "Confirmed moves can start Codex. Task placement stays under your control."
-                    : "Use Run in Codex to prepare a manual Desktop handoff. Task placement stays under your control."
+                    : "Copy the task prompt or launch it in Codex Desktop. Task placement stays under your control."
                 )
                 .stageFont(.callout).foregroundStyle(.secondary)
               #endif
@@ -429,6 +452,7 @@ struct TaskDetail: View {
       .task(id: taskID) {
         draft = item
         edited = false
+        promptCopied = false
       }
       .onChange(of: item?.revision) { _, _ in if !edited { draft = item } }
       .confirmationDialog(
@@ -455,6 +479,73 @@ struct TaskDetail: View {
   }
 
   #if os(macOS)
+    private var handoffActionsDisabled: Bool {
+      edited || model.planFeedbackInFlight.contains(taskID)
+        || model.library.latestRun(for: taskID)?.status.isActive == true
+    }
+
+    private func makeCodexHandoffPrompt(for task: WorkItem, project: Project) -> String {
+      let readablePlanPath = task.planPath.flatMap { path in
+        hasReadablePlan(path: path, project: project) ? path : nil
+      }
+      let taskBrief: String
+      if let readablePlanPath {
+        taskBrief = """
+          Read and follow the existing task plan at the project-relative path `\(readablePlanPath)`.
+          Use the task title and notes below as identifying context.
+          """
+      } else {
+        taskBrief = """
+          No readable saved plan is attached. Execute the task described by its title and notes below.
+          """
+      }
+      let notes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+      return """
+        Execute this existing task in the repository opened in this Codex Desktop session. Follow this repository's AGENTS.md instructions. Use the StageChase MCP server (`stagechase`) to read and update the task; do not start or manage another Codex session.
+
+        First call `read_task` with the exact project and task IDs below and verify the returned IDs match. Then inspect the task context and work on it.
+
+        \(taskBrief)
+
+        Project name: \(project.name)
+        Project ID (`project_id`): \(project.id.uuidString.lowercased())
+        Task ID (`task_id`): \(task.id.uuidString.lowercased())
+        Task title: \(task.title)
+        Task notes:
+        \(notes.isEmpty ? "(No additional notes.)" : notes)
+
+        When work actually begins, call `begin_task` with a fresh `operation_id`, and keep its returned `run_id` and task revision. Report concise progress through `report_task_update` when useful, always passing the latest task revision and saving the revision returned. On successful implementation, call `finish_task` with status `succeeded` and a concise final message, passing the latest revision; then call `set_task_completed` with `completed: true`, using the task revision returned by `finish_task` and a fresh operation ID. Do not move the task to another column. If work fails, call `finish_task` with `failed` or `cancelled` as appropriate and leave the task incomplete. If work needs user input, report that outcome with `report_task_update` status `needsInput` and leave it incomplete. Use a fresh operation ID for each write; on revision conflict reread the task before deciding what to do. If the MCP is unavailable, do not claim the task was updated or completed.
+        """
+    }
+
+    private func copyCodexPrompt() {
+      guard let prompt = codexHandoffPrompt else { return }
+      NSPasteboard.general.clearContents()
+      guard NSPasteboard.general.setString(prompt, forType: .string) else {
+        model.error = "The task prompt could not be copied to the clipboard."
+        return
+      }
+      promptCopied = true
+    }
+
+    private func launchCodex() {
+      guard let project = handoffProject, !project.directory.isEmpty,
+        let prompt = codexHandoffPrompt
+      else { return }
+      var components = URLComponents()
+      components.scheme = "codex"
+      components.host = "threads"
+      components.path = "/new"
+      components.queryItems = [
+        URLQueryItem(name: "path", value: project.directory),
+        URLQueryItem(name: "prompt", value: prompt),
+      ]
+      guard let url = components.url, NSWorkspace.shared.open(url) else {
+        model.error = "Codex Desktop could not open this task. Copy the prompt and paste it into Codex Desktop instead."
+        return
+      }
+    }
+
     private var planFeedbackBinding: Binding<String> {
       Binding(
         get: { model.planFeedbackDraft(for: taskID) },

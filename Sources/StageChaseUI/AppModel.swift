@@ -728,16 +728,16 @@ import UniformTypeIdentifiers
   func retry(_ id: UUID) async {
     guard let run = library.runs.first(where: { $0.id == id }) else { return }
     guard run.kind != .task else {
-      error = "Use Run in Codex to prepare a fresh Desktop handoff."
+      error = "Use Copy prompt or Launch Codex from task details to start a manual handoff."
       return
     }
     guard autoInvokeCodex else {
-      error = "Automatic invocation is off. Use Run in Codex on the task for a manual handoff."
+      error = "Automatic invocation is off. Use Copy prompt or Launch Codex from task details."
       return
     }
     guard library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true
     else {
-      error = "Automatic runs are disabled for this project. Use Run in Codex for a manual handoff."
+      error = "Automatic runs are disabled for this project. Use Copy prompt or Launch Codex from task details."
       return
     }
     if run.modelConfiguration != nil {
@@ -812,44 +812,6 @@ import UniformTypeIdentifiers
     #endif
   }
   #if os(macOS)
-    func runTaskInCodex(_ taskID: UUID) async {
-      guard !isPreview, let task = library.tasks.first(where: { $0.id == taskID }),
-        library.projects.contains(where: { $0.id == task.projectID })
-      else { return }
-      var run = AgentRun(task: task, kind: .task)
-      run.status = .readyForHandoff
-      run.summary = "Preparing a manual handoff to Codex Desktop."
-      run.handoffContext = """
-        Continue the StageChase task below in this project. Follow the repository's AGENTS.md instructions.
-
-        Task: \(task.title)
-        Current column: \(task.stage.title)
-        Details: \(task.notes)
-        Existing plan path: \(task.planPath ?? "None")
-
-        Work on the requested task. StageChase keeps task columns independent from Codex state, so do not change the column. Do not commit, push, publish, deploy, send messages, or delete unrelated files. Run appropriate verification and report changed files, results, and limitations.
-        """
-      guard await perform(.createManualRun(run)) else { return }
-      do {
-        guard let runner else { throw BoardError.invalid("The Mac Codex runner is unavailable.") }
-        try await runner.prepareDesktopHandoff(runID: run.id)
-        guard var savedRun = library.runs.first(where: { $0.id == run.id }),
-          let threadID = savedRun.threadID
-        else { throw BoardError.invalid("StageChase could not save the Codex Desktop session.") }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(savedRun.handoffContext ?? "", forType: .string)
-        savedRun.summary = "Context copied. Run it in Codex Desktop, then refresh status here."
-        guard await perform(.updateRun(savedRun)) else { return }
-        openCodexSession(threadID)
-      } catch {
-        guard var failedRun = library.runs.first(where: { $0.id == run.id }) else { return }
-        failedRun.status = .failed
-        failedRun.error = error.localizedDescription
-        failedRun.summary = "Codex Desktop handoff could not be prepared."
-        _ = await perform(.updateRun(failedRun))
-      }
-    }
-
     func rerunInCodex(_ runID: UUID) async {
       guard var run = library.runs.first(where: { $0.id == runID }), run.kind == .task,
         let context = run.handoffContext
