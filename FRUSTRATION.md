@@ -12,4 +12,5 @@
 
 ## 2026-10-01
 
+- A rebuild/relaunch check found `make run` reused a stale StageChase process; the sandbox denied signaling it, and `open` then reported `kLSNoExecutableErr` even though the rebuilt executable was present. Closing the stale process with host access and launching the exact bundle through the desktop app controller worked. Improve the relaunch workflow so it reliably quits stale instances and opens the rebuilt bundle.
 - A nested `codex exec` could not reach StageChase's loopback MCP endpoint from its sandbox, even after allowing workspace writes. The StageChase settings UI showed the listener as stopped on a later check; restarting it and making a direct local MCP request worked. Avoid repeated nested CLI attempts: verify the listener is active and use the MCP connection in the current session, or report that the tools are unavailable.

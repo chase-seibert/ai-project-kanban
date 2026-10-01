@@ -115,6 +115,13 @@ struct ProjectEditor: View {
           Text("Automation")
         }
         #if os(macOS)
+          Section("Codex workspace") {
+            Toggle("Use a managed worktree for implementation", isOn: $project.usesWorktrees)
+            Text(
+              "When on, dirty repositories use an isolated worktree. When off, implementation runs use this project folder directly, including its existing local changes. Planning always uses the project folder."
+            )
+            .stageFont(.caption).foregroundStyle(.secondary)
+          }
           Section("Codex model") {
             CodexModelOverrideEditor(
               configuration: $project.modelOverride,
@@ -152,6 +159,128 @@ struct ProjectEditor: View {
     #endif
   }
 }
+
+#if os(macOS)
+  struct ProjectHeaderControls: View {
+    @Environment(AppModel.self) private var model
+    let project: Project
+    @State private var savingWorktree = false
+    @State private var worktreeError: String?
+    @State private var showingModel = false
+    @State private var modelDraft: CodexModelConfiguration?
+    @State private var savingModel = false
+    @State private var modelError: String?
+
+    private var effectiveModel: (configuration: CodexModelConfiguration, scope: CodexModelScope) {
+      CodexModelResolver.effective(
+        task: nil, project: project.modelOverride, global: model.globalModelConfiguration)
+    }
+
+    var body: some View {
+      HStack(spacing: 10) {
+        Toggle(
+          "Worktrees",
+          isOn: Binding(
+            get: {
+              model.library.projects.first(where: { $0.id == project.id })?.usesWorktrees ?? false
+            },
+            set: saveWorktreePreference)
+        )
+        .toggleStyle(.switch)
+        .accessibilityLabel("Use managed worktrees for implementation")
+        .help(
+          "Dirty repositories use an isolated worktree. Turn off to use the project folder directly."
+        )
+        .disabled(savingWorktree)
+
+        Button {
+          modelDraft = model.library.projects.first(where: { $0.id == project.id })?.modelOverride
+          modelError = nil
+          showingModel = true
+        } label: {
+          Label("\(effectiveModel.configuration.summary)", systemImage: "cpu")
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+        }
+        .buttonStyle(.borderless)
+        .help(
+          "Project model · \(effectiveModel.scope.title). Task model choices still take precedence."
+        )
+        .popover(isPresented: $showingModel, arrowEdge: .bottom) {
+          modelPopover.frame(width: 310).padding(14)
+        }
+
+        if savingWorktree || savingModel {
+          ProgressView().controlSize(.small).help("Saving project settings")
+        } else if let error = worktreeError ?? modelError {
+          Image(systemName: "exclamationmark.circle.fill")
+            .foregroundStyle(.orange)
+            .accessibilityLabel("Project settings save failed")
+            .help(error)
+        }
+      }
+    }
+
+    private var modelPopover: some View {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Project model").stageFont(.headline)
+        Text("Effective: \(effectiveModel.configuration.summary) · \(effectiveModel.scope.title)")
+          .stageFont(.caption).foregroundStyle(.secondary)
+        CodexModelOverrideEditor(
+          configuration: Binding(
+            get: { modelDraft }, set: { modelDraft = $0 }),
+          inherited: model.globalModelConfiguration,
+          inheritLabel: "Use global model settings",
+          catalog: model.modelCatalog)
+        if let error = model.modelCatalogError {
+          Text(error).stageFont(.caption).foregroundStyle(.orange)
+        }
+        if let modelError {
+          Text(modelError).stageFont(.caption).foregroundStyle(.orange)
+        }
+        HStack {
+          Button("Cancel") { showingModel = false }
+            .keyboardShortcut(.cancelAction)
+          Spacer()
+          Button("Save") { saveModelPreference() }
+            .keyboardShortcut(.defaultAction)
+            .disabled(savingModel || modelDraft == project.modelOverride)
+        }
+      }
+    }
+
+    private func saveWorktreePreference(_ enabled: Bool) {
+      guard !savingWorktree,
+        var updated = model.library.projects.first(where: { $0.id == project.id })
+      else { return }
+      updated.usesWorktrees = enabled
+      savingWorktree = true
+      worktreeError = nil
+      Task {
+        let saved = await model.perform(.editProject(updated))
+        if !saved { worktreeError = model.error ?? "Could not save the worktree setting." }
+        savingWorktree = false
+      }
+    }
+
+    private func saveModelPreference() {
+      guard !savingModel,
+        var updated = model.library.projects.first(where: { $0.id == project.id })
+      else { return }
+      updated.modelOverride = modelDraft
+      savingModel = true
+      modelError = nil
+      Task {
+        if await model.perform(.editProject(updated)) {
+          showingModel = false
+        } else {
+          modelError = model.error ?? "Could not save the project model."
+        }
+        savingModel = false
+      }
+    }
+  }
+#endif
 
 struct NewTaskEditor: View {
   @Environment(AppModel.self) private var model
@@ -239,7 +368,10 @@ struct TaskDetail: View {
           #if os(macOS)
             if !model.isConnectedPhone {
               HStack {
-                Button(promptCopied ? "Prompt copied" : "Copy prompt", systemImage: promptCopied ? "checkmark" : "doc.on.doc") {
+                Button(
+                  promptCopied ? "Prompt copied" : "Copy prompt",
+                  systemImage: promptCopied ? "checkmark" : "doc.on.doc"
+                ) {
                   copyCodexPrompt()
                 }
                 .disabled(handoffActionsDisabled || codexHandoffPrompt == nil)
@@ -248,7 +380,8 @@ struct TaskDetail: View {
                 }
                 .disabled(
                   handoffActionsDisabled || codexHandoffPrompt == nil
-                    || handoffProject?.directory.isEmpty != false)
+                    || handoffProject?.directory.isEmpty != false
+                )
                 .help(
                   handoffProject?.directory.isEmpty == false
                     ? "Open this project in Codex Desktop with the task prompt."
@@ -541,7 +674,8 @@ struct TaskDetail: View {
         URLQueryItem(name: "prompt", value: prompt),
       ]
       guard let url = components.url, NSWorkspace.shared.open(url) else {
-        model.error = "Codex Desktop could not open this task. Copy the prompt and paste it into Codex Desktop instead."
+        model.error =
+          "Codex Desktop could not open this task. Copy the prompt and paste it into Codex Desktop instead."
         return
       }
     }

@@ -25,7 +25,11 @@ struct SyncConnectionView: View {
 
   #if os(macOS)
     @ViewBuilder private var macConnection: some View {
-      Section("Mac listener") {
+      Section("Local Wi-Fi sync listener") {
+        Text(
+          "Pairs the iPhone with this Mac for board synchronization. This listener is independent of the Codex Desktop MCP server below."
+        )
+        .stageFont(.caption).foregroundStyle(.secondary)
         if let server = model.syncServer, server.status != "Off" {
           LabeledContent("Listener", value: server.status)
           LabeledContent("Active requests", value: "\(server.activeConnectionCount)")
@@ -83,8 +87,12 @@ struct SyncConnectionView: View {
             .buttonStyle(.borderedProminent)
         }
       }
-      Section("Codex Desktop task tools") {
-        LabeledContent("Server", value: model.mcpServer?.status ?? "Off")
+      Section("Codex Desktop MCP listener") {
+        Text(
+          "Exposes StageChase project and task tools to Codex Desktop over a separate loopback connection. The listener starts automatically when StageChase opens; stopping it here keeps it off on later launches."
+        )
+        .stageFont(.caption).foregroundStyle(.secondary)
+        LabeledContent("MCP server", value: model.mcpServer?.status ?? "Off")
         Button("Copy Codex disconnect command") {
           NSPasteboard.general.clearContents()
           NSPasteboard.general.setString("codex mcp remove stagechase", forType: .string)
@@ -97,16 +105,16 @@ struct SyncConnectionView: View {
               "codex mcp add stagechase --url \"\(endpoint)\"", forType: .string)
           }
           Text(
-            "Run the copied command in Terminal to add this local server to Codex Desktop. Codex and the StageChase app must run on this Mac."
+            "Run the copied command in Terminal to register this MCP endpoint with Codex Desktop. The endpoint includes its local access token. Codex and StageChase must run on this Mac."
           )
           .stageFont(.caption).foregroundStyle(.secondary)
-          Button("Stop task server", role: .destructive) { model.stopMCPServer() }
+          Button("Stop MCP listener", role: .destructive) { model.stopMCPServer() }
         } else {
           Text(
             "The local MCP server exposes project and task read/write tools while StageChase is open. Task moves only change the board; they never start Codex."
           )
           .stageFont(.caption).foregroundStyle(.secondary)
-          Button("Start task server") { model.startMCPServer() }
+          Button("Start MCP listener") { model.startMCPServer() }
             .buttonStyle(.borderedProminent)
         }
         if let error = model.mcpServer?.error {
@@ -255,7 +263,7 @@ private struct SyncNetworkEventSection: View {
         Button("Clear connection log", role: .destructive, action: clear)
       }
     } header: {
-      Text("Recent network exchanges")
+      Text("Recent local Wi-Fi sync exchanges")
     } footer: {
       Text(
         "Shows framed message byte counts and outcomes only, not lower-level TCP packet sizes. Message contents, task text, and credentials are never recorded. Up to 200 events are kept on this device."

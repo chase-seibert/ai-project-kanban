@@ -533,6 +533,10 @@ struct AgentApproval {
       throw BoardError.invalid(
         "Implementation requires the repository root folder, not one of its subfolders.")
     }
+    let usesWorktrees =
+      run.usesWorktrees
+      ?? (model?.library.projects.first(where: { $0.id == run.projectID })?.usesWorktrees ?? false)
+    guard usesWorktrees else { return projectRoot }
     let status = try await runGit(["status", "--porcelain"], at: projectRoot)
     guard !status.isEmpty else { return projectRoot }
     let parent: URL

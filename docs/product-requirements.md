@@ -59,6 +59,10 @@ open.
   project and task overrides, so that each run uses a deliberate model choice.
 - As a user, I want confirmed runs and retries to keep their saved model and
   reasoning effort, so that later settings changes do not silently alter work.
+- As a user, I want to change a project's worktree preference and model from its
+  Mac board header, so project run choices are quick to see and edit.
+- As a user, I want worktrees off by default for existing and new projects,
+  while retaining an opt-in isolated checkout for dirty repositories.
 - As a user, I want unavailable models and unsupported reasoning choices to
   stop visibly before a turn starts, so that the app never substitutes silently.
 
@@ -78,8 +82,10 @@ open.
 
 - As a user, I want Implementation runs to use a plan when one is available,
   while allowing implementation without a plan.
-- As a user, I want dirty project state to select a managed worktree, so that
-  unrelated local changes are protected.
+- As a user, I want a per-project worktree toggle to choose between direct
+  project-folder implementation and managed worktrees for dirty repositories.
+  The setting defaults off for all projects; changing it affects future runs
+  only, and a retry keeps its saved working folder.
 - As a user, I want failed automation to remain visible and retryable, so that
   a transient failure does not lose the plan or hide the work.
 - As a user, I want Codex outcomes to leave the task in its current stage, so I
@@ -111,9 +117,10 @@ open.
   appear in StageChase, so task state stays in the local library.
 - As a user, I want Codex to report a concise latest session update, so the
   task detail shows recent progress without copying a conversation transcript.
-- The Mac-only MCP listener is opt-in and loopback-only. Tool calls never start,
-  resume, retry, stop, or approve Codex work. Completion remains independent of
-  the five fixed workflow stages.
+- The Mac-only MCP listener starts automatically on app launch by default, can
+  be stopped persistently in Connection settings, and is loopback-only. Tool
+  calls never start, resume, retry, stop, or approve Codex work, and completion
+  remains independent of the five fixed workflow stages.
 
 ## Plan feedback
 

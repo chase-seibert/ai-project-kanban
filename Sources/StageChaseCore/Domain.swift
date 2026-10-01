@@ -191,11 +191,39 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var name: String
   public var directory = ""
   public var automationEnabled = false
+  public var usesWorktrees = false
   public var modelOverride: CodexModelConfiguration?
   public var createdAt = Date()
+
+  private enum CodingKeys: String, CodingKey {
+    case id, name, directory, automationEnabled, usesWorktrees, modelOverride, createdAt
+  }
+
   public init(name: String, directory: String = "") {
     self.name = name
     self.directory = directory
+  }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+    name = try values.decode(String.self, forKey: .name)
+    directory = try values.decodeIfPresent(String.self, forKey: .directory) ?? ""
+    automationEnabled = try values.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
+    usesWorktrees = try values.decodeIfPresent(Bool.self, forKey: .usesWorktrees) ?? false
+    modelOverride = try values.decodeIfPresent(CodexModelConfiguration.self, forKey: .modelOverride)
+    createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encode(id, forKey: .id)
+    try values.encode(name, forKey: .name)
+    try values.encode(directory, forKey: .directory)
+    try values.encode(automationEnabled, forKey: .automationEnabled)
+    try values.encode(usesWorktrees, forKey: .usesWorktrees)
+    try values.encodeIfPresent(modelOverride, forKey: .modelOverride)
+    try values.encode(createdAt, forKey: .createdAt)
   }
 }
 
@@ -252,6 +280,7 @@ public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var threadID: String?
   public var turnID: String?
   public var workDirectory: String?
+  public var usesWorktrees: Bool?
   public var summary = "Waiting for the Mac runner"
   public var latestMessage: String?
   public var error: String?
@@ -260,12 +289,15 @@ public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var handoffContext: String?
   public var createdAt = Date()
   public var updatedAt = Date()
-  public init(task: WorkItem, kind: RunKind, modelConfiguration: ResolvedCodexConfiguration? = nil)
-  {
+  public init(
+    task: WorkItem, kind: RunKind, modelConfiguration: ResolvedCodexConfiguration? = nil,
+    usesWorktrees: Bool? = nil
+  ) {
     taskID = task.id
     projectID = task.projectID
     self.kind = kind
     self.modelConfiguration = modelConfiguration
+    self.usesWorktrees = usesWorktrees
   }
 }
 
@@ -399,7 +431,7 @@ public enum BoardReducer {
       }
       let run = AgentRun(
         task: item, kind: item.stage == .next ? .planning : .implementation,
-        modelConfiguration: configuration)
+        modelConfiguration: configuration, usesWorktrees: project.usesWorktrees)
       state.runs.append(run)
       state.activity.append(
         Activity(

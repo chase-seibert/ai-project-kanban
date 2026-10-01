@@ -107,6 +107,7 @@ import UniformTypeIdentifiers
   }
   static let autoInvokeCodexPreferenceKey = "autoInvokeCodex"
   #if os(macOS)
+    static let mcpServerEnabledPreferenceKey = "mcpServerEnabled"
     var runner: CodexRunner?
     var syncServer: SyncServer?
     var mcpServer: MCPServer?
@@ -156,6 +157,10 @@ import UniformTypeIdentifiers
             let server = MCPServer(repository: repository)
             server.onLibraryChanged = { [weak self] library in self?.library = library }
             mcpServer = server
+          }
+          if preferences.object(forKey: Self.mcpServerEnabledPreferenceKey) as? Bool ?? true {
+            preferences.set(true, forKey: Self.mcpServerEnabledPreferenceKey)
+            mcpServer?.start()
           }
           if syncServer == nil {
             let server = SyncServer(repository: repository)
@@ -235,10 +240,14 @@ import UniformTypeIdentifiers
         server.onLibraryChanged = { [weak self] library in self?.library = library }
         mcpServer = server
       }
+      preferences.set(true, forKey: Self.mcpServerEnabledPreferenceKey)
       mcpServer?.start()
     }
 
-    func stopMCPServer() { mcpServer?.stop() }
+    func stopMCPServer() {
+      preferences.set(false, forKey: Self.mcpServerEnabledPreferenceKey)
+      mcpServer?.stop()
+    }
   #endif
 
   #if os(iOS)
@@ -737,7 +746,8 @@ import UniformTypeIdentifiers
     }
     guard library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true
     else {
-      error = "Automatic runs are disabled for this project. Use Copy prompt or Launch Codex from task details."
+      error =
+        "Automatic runs are disabled for this project. Use Copy prompt or Launch Codex from task details."
       return
     }
     if run.modelConfiguration != nil {

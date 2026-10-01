@@ -55,6 +55,16 @@ with High reasoning. Catalog discovery is a Settings/confirmation action and
 does not start a turn. The iPhone preserves saved overrides and run snapshots
 but does not expose Mac model controls or discover models.
 
+The Mac project board header exposes that project's effective model and a
+compact override editor, plus a **Use worktrees** toggle. The model follows
+task → project → global precedence. Worktrees default off for new projects and
+for projects decoded from older library data. When enabled, a dirty repository
+uses a managed worktree for a new implementation run; when disabled, the run
+uses the project folder directly. Clean repositories and planning runs use the
+project folder either way. A confirmed run records its selected worktree
+setting; a retry reuses its saved working folder. Preference changes affect
+future confirmed runs and do not alter saved run snapshots.
+
 Mac Settings also exposes a multiline **Plan format prompt** editor with a
 reset-to-default action. Its default asks plans to start with user-story
 requirements, then cover architecture and data-model changes, basic test cases,
@@ -69,7 +79,9 @@ size. Cmd-Z/Shift-Cmd-Z undo/redo manual task creation, edits, moves, completion
 and deletion without agent history. Agent side effects are never undone or
 restarted. Reordering currently has no undo action. Deletion requires confirmation.
 
-Mac Settings → Connection also exposes an opt-in Codex Desktop MCP endpoint.
-It lists and reads project tasks and supports task creation, explicit stage
-moves, and completion changes through the Mac library. The endpoint binds to
-loopback; task moves do not prompt for or launch automated runs.
+Mac Settings → Connection also exposes the Codex Desktop MCP endpoint. It
+starts automatically when the app opens by default; stopping it in Connection
+settings persists that choice, and the Start button re-enables startup. It lists
+and reads project tasks and supports task creation, explicit stage moves, and
+completion changes through the Mac library. The endpoint binds to loopback;
+task moves do not prompt for or launch automated runs.

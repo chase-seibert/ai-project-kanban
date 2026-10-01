@@ -19,6 +19,20 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.projects[1].name == "Renamed")
 }
 
+@Test func projectWorktreePreferenceDefaultsOffAndSurvivesCoding() throws {
+  let legacy = Data(
+    #"{"id":"00000000-0000-0000-0000-000000000001","name":"Legacy","directory":"/tmp/legacy","automationEnabled":true,"createdAt":0}"#
+      .utf8)
+  let decoded = try JSONDecoder().decode(Project.self, from: legacy)
+  #expect(!decoded.usesWorktrees)
+  #expect(!Project(name: "New").usesWorktrees)
+
+  var enabled = decoded
+  enabled.usesWorktrees = true
+  let roundTrip = try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(enabled))
+  #expect(roundTrip == enabled)
+}
+
 @Test func syncMessagesAreAuthenticatedEncryptedAndBounded() throws {
   let key = SyncCrypto.randomSecret()
   let task = WorkItem(projectID: UUID(), title: "Keep this private")
@@ -42,6 +56,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
 @Test func syncSnapshotPreservesSharedStateButOmitsMacOnlyConfiguration() throws {
   var project = Project(name: "Shared", directory: "/Users/test/private-repo")
   project.automationEnabled = true
+  project.usesWorktrees = true
   project.modelOverride = CodexModelConfiguration(selection: .model("private-model"))
   var task = WorkItem(projectID: project.id, title: "Task", stage: .planned)
   task.planPath = "/Users/test/private-repo/plan.md"
@@ -56,11 +71,12 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 7, library: library)
   let json = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
   #expect(!json.contains("private-repo"))
-  #expect(!json.contains("private-model"))
   #expect(!json.contains("planPath"))
   let replica = try snapshot.replica()
   #expect(replica.projects[0].id == project.id)
   #expect(replica.projects[0].automationEnabled)
+  #expect(replica.projects[0].usesWorktrees)
+  #expect(replica.projects[0].modelOverride == project.modelOverride)
   #expect(replica.tasks[0].notes == task.notes)
   #expect(replica.tasks[0].planPath == nil)
   #expect(replica.runs[0].status == run.status)
@@ -554,6 +570,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let repo = try LibraryRepository(inMemory: true)
   let a = Project(name: "A")
   var b = Project(name: "B")
+  b.usesWorktrees = true
   b.modelOverride = CodexModelConfiguration(selection: .model("gpt-6-sol"), effort: "medium")
   _ = try await repo.apply(.createProject(a))
   _ = try await repo.apply(.createProject(b))
@@ -566,6 +583,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(imported.projects.count == 2)
   #expect(imported.tasks[0].projectID == b.id)
   #expect(imported.projects.first(where: { $0.id == b.id })?.modelOverride == b.modelOverride)
+  #expect(imported.projects.first(where: { $0.id == b.id })?.usesWorktrees == true)
   #expect(imported.tasks[0].modelOverride == savedTask.modelOverride)
   await #expect(throws: BoardError.self) { try await restored.importLibrary(data) }
 }

@@ -127,12 +127,16 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
   public var id: UUID
   public var name: String
   public var automationEnabled: Bool
+  public var usesWorktrees: Bool?
+  public var modelOverride: CodexModelConfiguration?
   public var createdAt: Date
 
   public init(_ project: Project) {
     id = project.id
     name = project.name
     automationEnabled = project.automationEnabled
+    usesWorktrees = project.usesWorktrees
+    modelOverride = project.modelOverride
     createdAt = project.createdAt
   }
 }
@@ -194,6 +198,8 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       var project = Project(name: $0.name)
       project.id = $0.id
       project.automationEnabled = $0.automationEnabled
+      project.usesWorktrees = $0.usesWorktrees ?? false
+      project.modelOverride = $0.modelOverride
       project.createdAt = $0.createdAt
       return project
     }

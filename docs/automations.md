@@ -9,10 +9,11 @@ not yet verified.
 | --- | --- |
 | Open, poll, switch project, enable automation | Does not enqueue or start work |
 | Refresh model catalog or edit model or approval settings | Does not enqueue or start work |
+| Change a project's header settings | Saves that project's worktree preference or model override; does not enqueue or start work |
 | Edit or reset the plan format prompt | Saves a Mac-local preference; does not enqueue work |
 | Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
 | Planning success | Require structured success plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
-| Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Prepare a checkout/worktree and invoke Codex; a plan is optional context |
+| Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Use the project folder, or create a managed worktree for a dirty repository when that project's worktree setting is on; then invoke Codex. A plan is optional context |
 | Implementation success | Require structured success; update the run only. The user chooses the task column and completion state |
 | Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers manual prompt copy and launch actions |
 | Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, including stable IDs and a readable project-relative plan path when available |
@@ -143,3 +144,15 @@ before retry. The global preference is Mac-local and is not included in library
 exports; project/task overrides and run records travel with the library. The
 iPhone does not query the catalog or run Codex. The phone shows safe run status
 summaries but has no remote approval, Stop, or Retry controls.
+
+The Mac board header shows the selected project's effective model and offers a
+project override editor. Task overrides still take precedence. Each project
+also has a **Use worktrees** toggle in the Mac header. It defaults off for new
+projects and older project payloads that lack the setting. When enabled, a dirty
+repository uses a managed worktree for a new implementation run; clean
+repositories and planning runs use the project folder. When disabled,
+implementation runs use the project folder directly, including local changes.
+Newly confirmed runs save the selected worktree setting with the run. Existing
+retries always reuse their saved working folder and model snapshot. Editing
+either header setting starts no work, and changes apply only to future
+confirmed runs.

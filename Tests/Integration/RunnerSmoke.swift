@@ -333,6 +333,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try "# Implement fixture\n".write(to: plan, atomically: true, encoding: .utf8)
     var gitProject = Project(name: "Git fixture", directory: gitRoot.path)
     gitProject.automationEnabled = true
+    gitProject.usesWorktrees = true
     _ = await model.saveProject(gitProject, isNew: true)
     model.runner = CodexRunner(
       model: model, executableOverride: fixture,
@@ -345,6 +346,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try await wait { model.library.latestRun(for: implementation.id)?.status.isActive == false }
     guard let run = model.library.latestRun(for: implementation.id), run.status == .succeeded,
       let path = run.workDirectory, path != gitRoot.path,
+      run.usesWorktrees == true,
       run.modelConfiguration == fixtureModelConfiguration
     else { throw BoardError.invalid("Missing isolated worktree") }
     let original = try String(contentsOf: readme, encoding: .utf8)
@@ -359,5 +361,23 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     }
     print(
       "PASS: dirty checkout isolated, original edits preserved, plan copied, task column unchanged")
+
+    var directProject = gitProject
+    directProject.usesWorktrees = false
+    _ = await model.perform(.editProject(directProject))
+    let directImplementation = WorkItem(
+      projectID: directProject.id, title: "Direct implementation fixture",
+      stage: .implementation)
+    _ = await model.perform(
+      .createTask(directImplementation, configuration: fixtureModelConfiguration))
+    model.kickRunner()
+    try await wait {
+      model.library.latestRun(for: directImplementation.id)?.status.isActive == false
+    }
+    guard let directRun = model.library.latestRun(for: directImplementation.id),
+      directRun.status == .succeeded, directRun.workDirectory == gitRoot.path,
+      directRun.usesWorktrees == false
+    else { throw BoardError.invalid("Disabled worktrees did not use the project folder") }
+    print("PASS: dirty implementation with worktrees disabled uses the project folder")
   }
 }

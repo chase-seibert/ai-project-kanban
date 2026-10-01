@@ -116,6 +116,11 @@ struct BoardHeader: View {
             Text(boardSubtitle).stageFont(.caption).foregroundStyle(.secondary)
           #endif
         }
+        #if os(macOS)
+          if !model.isConnectedPhone, let project = model.selectedProject {
+            ProjectHeaderControls(project: project).id(project.id)
+          }
+        #endif
         Spacer(minLength: 6)
         if !model.isConnectedPhone {
           Button {

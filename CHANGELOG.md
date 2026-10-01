@@ -2,6 +2,11 @@
 
 ## 2026-10-01
 
+- Start the loopback-only Codex Desktop MCP listener automatically on app launch
+  by default, with a persistent Stop/Start choice in Connection settings.
+- Added Mac project-header controls for a per-project managed-worktree toggle
+  and model override. Worktrees default off for existing and new projects;
+  project-folder runs with local changes are explained in the UI.
 - Added an opt-in, loopback-only MCP task server for Codex Desktop. It lists
   projects/tasks, reads tasks, creates Inbox tasks, and supports explicit,
   revision-checked stage and completion changes through the local library.
