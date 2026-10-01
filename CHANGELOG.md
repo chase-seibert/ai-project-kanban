@@ -2,6 +2,11 @@
 
 ## 2026-10-01
 
+- Added unread badges for task column and completion changes. Project badges count
+  changed tasks, while task badges clear independently when a task is opened.
+- Added Mac-only Copy plan prompt and Plan in Codex task-detail actions. Their
+  shared plan-only prompt carries the plan-format preference, preserves the
+  selected path, and attaches successful plans without completing the task.
 - Lane quick capture now turns pasted Apple Notes unchecked checklist entries
   into separate tasks, while preserving explicit Codex confirmation for later
   moves into automated stages.

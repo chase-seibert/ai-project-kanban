@@ -325,6 +325,18 @@ public struct ProgressStep: Codable, Hashable, Sendable {
   }
 }
 
+public enum TaskChangeKind: String, Codable, Hashable, Sendable {
+  case stageChanged
+  case completionChanged
+
+  public var badgeTitle: String {
+    switch self {
+    case .stageChanged: "Column changed"
+    case .completionChanged: "Status changed"
+    }
+  }
+}
+
 public struct Activity: Codable, Hashable, Identifiable, Sendable {
   public var id = UUID()
   public var projectID: UUID?
@@ -332,11 +344,16 @@ public struct Activity: Codable, Hashable, Identifiable, Sendable {
   public var runID: UUID?
   public var message: String
   public var date = Date()
-  public init(_ message: String, projectID: UUID? = nil, taskID: UUID? = nil, runID: UUID? = nil) {
+  public var taskChange: TaskChangeKind?
+  public init(
+    _ message: String, projectID: UUID? = nil, taskID: UUID? = nil, runID: UUID? = nil,
+    taskChange: TaskChangeKind? = nil
+  ) {
     self.message = message
     self.projectID = projectID
     self.taskID = taskID
     self.runID = runID
+    self.taskChange = taskChange
   }
 }
 
@@ -542,7 +559,7 @@ public enum BoardReducer {
       state.activity.append(
         Activity(
           "Moved “\(state.tasks[index].title)” to \(stage.title).",
-          projectID: state.tasks[index].projectID, taskID: id))
+          projectID: state.tasks[index].projectID, taskID: id, taskChange: .stageChanged))
     case .complete(let id, let complete, let revision):
       let index = try taskIndex(id, revision)
       try ensureIdle(id)
@@ -551,7 +568,7 @@ public enum BoardReducer {
       state.activity.append(
         Activity(
           complete ? "Task marked complete by you." : "Task reopened.",
-          projectID: state.tasks[index].projectID, taskID: id))
+          projectID: state.tasks[index].projectID, taskID: id, taskChange: .completionChanged))
     case .reportTaskUpdate(let id, let message, let revision):
       let index = try taskIndex(id, revision)
       let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -615,10 +632,23 @@ public enum BoardReducer {
       }
       state.tasks.removeAll { $0.id == id }
       if let desired { state.tasks.append(desired) }
+      let taskChange: TaskChangeKind?
+      if let existing, let desired {
+        if existing.stage != desired.stage {
+          taskChange = .stageChanged
+        } else if existing.completed != desired.completed {
+          taskChange = .completionChanged
+        } else {
+          taskChange = nil
+        }
+      } else {
+        taskChange = nil
+      }
       state.activity.append(
         Activity(
           "Undid or redid a manual task change. No automation was started.",
-          projectID: desired?.projectID ?? existing?.projectID, taskID: id))
+          projectID: desired?.projectID ?? existing?.projectID, taskID: id,
+          taskChange: taskChange))
     case .reorder(let id, let before, let revision):
       let source = state.tasks[try taskIndex(id, revision)]
       let target = state.tasks[try taskIndex(before)]

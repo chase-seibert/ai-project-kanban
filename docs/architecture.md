@@ -18,6 +18,8 @@
   records remain persisted. Mac opens saved Codex thread links directly. iPhone
   tries the same URL and offers a Mac continuation message plus session-ID copy
   when no handler accepts it. New Project and Edit Project are distinct routes.
+  Move and completion activity is tagged for unread badges; local read timestamps
+  are tracked independently for each project and task on each device.
   Model configuration is a global Mac preference with optional project/task
   overrides; queued runs save the resolved model, effort, policy, and source.
 - `Apps/StageChaseMac/`: native scene/commands, `AgentConnection` protocol,
@@ -43,6 +45,19 @@ prompt without submitting a turn. That prompt authorizes Codex to mark the task
 complete through MCP after successful work, using the latest revision, while
 leaving its stage unchanged. Failed or blocked work stays incomplete. Legacy
 linked sessions can still be refreshed explicitly to update their run record.
+
+Mac task detail also has a separate plan handoff. `PlanHandoffPrompt` builds
+plan-only instructions for both Copy plan prompt and Plan in Codex, so both
+actions deliver identical text while keeping implementation completion clauses
+out of this flow. It includes the current Mac-local plan-format preference.
+New plans target `WorkItem.canonicalPlanPath(for:)`; an explicit saved path is
+preserved for revisions and for reporting an unreadable attachment. The UI
+labels revision actions only when that attached Markdown file is readable and
+nonempty. Launch opens a new `codex://threads/new` URL and never submits a turn.
+After saving a readable nonempty plan, the external Codex session finishes its
+run, attaches the plan with the latest revision through `attach_task_plan`, and
+moves the incomplete task to Planned with the returned revision. Copying or
+opening the prompt does not mutate task state; these actions are Mac-only.
 
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same

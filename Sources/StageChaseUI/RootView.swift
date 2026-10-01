@@ -201,39 +201,63 @@ struct ProjectSidebar: View {
     List {
       Section {
         ForEach(model.library.projects) { project in
-          Button {
-            model.select(project.id)
-            onOpen?()
-          } label: {
-            HStack(spacing: 10) {
-              Image(systemName: "square.stack.3d.up.fill").foregroundStyle(
-                project.id == model.selectedProjectID ? Color.accentColor : .secondary)
-              VStack(alignment: .leading, spacing: 4) {
-                Text(project.name).stageFont(.body, weight: .medium).foregroundStyle(.primary)
-                #if os(iOS)
-                  Text("\(model.library.items(in: project.id).count) open tasks").stageFont(
-                    .caption
-                  )
-                  .foregroundStyle(.secondary)
+          let unreadCount = model.unreadProjectChangeCount(project.id)
+          HStack(spacing: 8) {
+            Button {
+              model.select(project.id)
+              onOpen?()
+            } label: {
+              HStack(spacing: 10) {
+                Image(systemName: "square.stack.3d.up.fill").foregroundStyle(
+                  project.id == model.selectedProjectID ? Color.accentColor : .secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                  Text(project.name).stageFont(.body, weight: .medium).foregroundStyle(.primary)
+                  #if os(iOS)
+                    Text("\(model.library.items(in: project.id).count) open tasks").stageFont(
+                      .caption
+                    )
+                    .foregroundStyle(.secondary)
+                  #endif
+                }
+                Spacer()
+                #if os(macOS)
+                  Text("\(model.library.items(in: project.id).count)").stageFont(.caption)
+                    .monospacedDigit().foregroundStyle(.secondary)
+                #else
+                  Image(systemName: "chevron.right").stageFont(.caption).foregroundStyle(.tertiary)
                 #endif
               }
-              Spacer()
-              #if os(macOS)
-                Text("\(model.library.items(in: project.id).count)").stageFont(.caption)
-                  .monospacedDigit().foregroundStyle(.secondary)
-              #else
-                Image(systemName: "chevron.right").stageFont(.caption).foregroundStyle(.tertiary)
-              #endif
-            }.padding(.vertical, 6).contentShape(Rectangle())
-          }.buttonStyle(.plain)
-            .listRowBackground(
-              project.id == model.selectedProjectID ? Color.accentColor.opacity(0.1) : .clear
-            )
-            .contextMenu {
-              if !model.isConnectedPhone {
-                Button("Project settings…") { model.sheet = .editProject(project) }
-              }
+              .padding(.vertical, 6)
+              .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if unreadCount > 0 {
+              Button {
+                model.markProjectChangesRead(project.id)
+              } label: {
+                Text("\(unreadCount)")
+                  .font(.caption2.weight(.bold).monospacedDigit())
+                  .foregroundStyle(.white)
+                  .padding(.horizontal, 7)
+                  .padding(.vertical, 3)
+                  .background(Color.accentColor, in: Capsule())
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Clear \(unreadCount) changed tasks in \(project.name)")
+              .accessibilityIdentifier("unread-project-\(project.id.uuidString)")
+              .help("Clear changed task badges for this project")
+            }
+          }
+          .accessibilityElement(children: .contain)
+          .listRowBackground(
+            project.id == model.selectedProjectID ? Color.accentColor.opacity(0.1) : .clear
+          )
+          .contextMenu {
+            if !model.isConnectedPhone {
+              Button("Project settings…") { model.sheet = .editProject(project) }
+            }
+          }
         }
         if !model.isConnectedPhone {
           Button {

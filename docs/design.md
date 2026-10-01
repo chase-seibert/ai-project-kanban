@@ -44,6 +44,14 @@ plan path when available. Launch opens a new Codex Desktop thread without
 submitting a turn. After success, that prompt directs Codex to complete the
 task through MCP while leaving its column unchanged. Enabling automation alone
 never starts work.
+Mac task detail also offers separate **Copy plan prompt** and **Plan in Codex**
+actions. Both use the same plan-only prompt, include the Mac plan-format
+preference, and open a new thread without submitting a turn. The labels identify
+whether Codex will create a first plan or revise a readable attached plan. New
+plans use the lowercase task UUID path under `to-do/`; revisions retain the
+attached path. Codex attaches the saved Markdown plan through MCP and moves a
+successful plan to Planned while leaving the task incomplete. These actions are
+Mac-only and do not change task state when copied or opened.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings
 shows progress, the saved endpoint, and timestamped framed exchange sizes and

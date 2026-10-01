@@ -111,6 +111,36 @@ open.
 - Manual handoffs, status refreshes, and Codex outcomes do not move a task or
   start work from phone polling or replica updates.
 
+## Manual plan handoff
+
+- As a user, I want separate Copy plan prompt and Plan in Codex actions in Mac
+  task detail, so I can create a first plan or revise a readable attached plan
+  without authorizing implementation.
+- As a user, I want both actions to use identical plan-only instructions with
+  stable project/task IDs, the current Mac plan-format preference, and the
+  intended project-relative path, so copying and launching produce the same
+  plan workflow.
+- As a user, I want a new plan to use the canonical `to-do/<lowercase task
+  UUID>.md` path and a revision to preserve its attached path, so plans remain
+  predictable while honoring an existing location.
+- As a user, I want Codex to attach the saved readable Markdown plan through
+  revision-checked MCP operations and move successful planning to Planned,
+  while leaving the task incomplete and never starting another Codex session.
+- Copying or opening a plan prompt does not itself change task state or start a
+  Codex turn. Plan handoff controls remain unavailable on iPhone and paired
+  phone replicas.
+
+## Unread task changes
+
+- As a user, I want task cards to identify column moves and completion-status
+  changes that I have not opened, so I can see what changed after returning.
+- As a user, I want each project row to show how many tasks have unread changes,
+  so I can find affected projects quickly.
+- Opening a task clears only that task's badge. Selecting a project clears its
+  project-level badge independently. Read markers are local to each device.
+- Only column and completion-status changes create these badges; task edits and
+  agent activity do not.
+
 ## Codex Desktop task tools
 
 - As a user, I want Codex Desktop to list, read, and create project tasks, so I

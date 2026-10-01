@@ -6,6 +6,58 @@ import Testing
 private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   selection: .latestLuna, modelID: "gpt-6.10-luna", effort: "high", scope: .global)
 
+@Test func planHandoffPromptUsesCanonicalPathAndPlanOnlyMCPWorkflow() throws {
+  let project = Project(name: "Prompt project", directory: "/tmp/missing-plan-project")
+  let task = WorkItem(projectID: project.id, title: "Add a plan action")
+  var notedTask = task
+  notedTask.notes = "Keep the Mac-only boundary."
+  let format = "Start with user stories, then risks."
+
+  let prompt = PlanHandoffPrompt.make(for: notedTask, project: project, formatPrompt: format)
+
+  #expect(PlanHandoffPrompt.planPath(for: notedTask) == WorkItem.canonicalPlanPath(for: task.id))
+  #expect(prompt.contains("to-do/\(task.id.uuidString.lowercased()).md"))
+  #expect(prompt.contains("Project ID (`project_id`): \(project.id.uuidString.lowercased())"))
+  #expect(prompt.contains("Task ID (`task_id`): \(task.id.uuidString.lowercased())"))
+  #expect(prompt.contains("Start with user stories, then risks."))
+  #expect(prompt.contains("attach_task_plan"))
+  #expect(prompt.contains("move_task` to `planned`"))
+  #expect(prompt.contains("Keep the task incomplete"))
+  #expect(!prompt.contains("set_task_completed"))
+  #expect(!prompt.contains("Execute this existing task"))
+  #expect(!prompt.contains("implementation work"))
+}
+
+@Test func planHandoffPromptPreservesReadableAndUnreadableAttachedPaths() throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChasePlanPrompt-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let project = Project(name: "Prompt project", directory: root.path)
+  var task = WorkItem(projectID: project.id, title: "Revise my plan")
+  task.planPath = "custom/plans/my-plan.md"
+  let planURL = root.appendingPathComponent(task.planPath!)
+  try FileManager.default.createDirectory(
+    at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+  try "## Existing plan\n\nKeep the user context.".write(
+    to: planURL, atomically: true, encoding: .utf8)
+
+  #expect(PlanHandoffPrompt.hasReadablePlan(for: task, project: project))
+  let revisionPrompt = PlanHandoffPrompt.make(
+    for: task, project: project, formatPrompt: "Use concise sections.")
+  #expect(PlanHandoffPrompt.planPath(for: task) == "custom/plans/my-plan.md")
+  #expect(revisionPrompt.contains("Revise the existing plan"))
+  #expect(revisionPrompt.contains("custom/plans/my-plan.md"))
+  #expect(revisionPrompt.contains("Use concise sections."))
+
+  try FileManager.default.removeItem(at: planURL)
+  #expect(!PlanHandoffPrompt.hasReadablePlan(for: task, project: project))
+  let unavailablePrompt = PlanHandoffPrompt.make(for: task, project: project, formatPrompt: "")
+  #expect(unavailablePrompt.contains("Create a plan at the target path"))
+  #expect(unavailablePrompt.contains("custom/plans/my-plan.md"))
+  #expect(unavailablePrompt.contains("No custom plan-format preference is set."))
+}
+
 @Test func creatingProjectsNeverEditsExistingProject() throws {
   let a = Project(name: "First")
   let b = Project(name: "Second")

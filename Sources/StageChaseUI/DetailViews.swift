@@ -335,6 +335,7 @@ struct TaskDetail: View {
   @State private var edited = false
   @State private var deleting = false
   @State private var promptCopied = false
+  @State private var planPromptCopied = false
   #if os(macOS)
     @FocusState private var focusedEditor: TaskEditorField?
     private enum TaskEditorField: Hashable {
@@ -350,6 +351,15 @@ struct TaskDetail: View {
     private var codexHandoffPrompt: String? {
       guard let item, let project = handoffProject else { return nil }
       return TaskHandoffPrompt.make(for: item, project: project)
+    }
+    private var planCodexHandoffPrompt: String? {
+      guard let item, let project = handoffProject else { return nil }
+      return PlanHandoffPrompt.make(
+        for: item, project: project, formatPrompt: model.resolvedPlanFormatPrompt)
+    }
+    private var hasReadableAttachedPlan: Bool {
+      guard let item, let project = handoffProject else { return false }
+      return PlanHandoffPrompt.hasReadablePlan(for: item, project: project)
     }
   #endif
   var body: some View {
@@ -373,26 +383,57 @@ struct TaskDetail: View {
           }
           #if os(macOS)
             if !model.isConnectedPhone {
-              HStack {
-                Button(
-                  promptCopied ? "Copied" : "Copy plan or prompt (⌘C)",
-                  systemImage: promptCopied ? "checkmark" : "doc.on.doc"
-                ) {
-                  copyCodexPrompt()
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Button(
+                    promptCopied ? "Copied" : "Copy plan or prompt (⌘C)",
+                    systemImage: promptCopied ? "checkmark" : "doc.on.doc"
+                  ) {
+                    copyCodexPrompt()
+                  }
+                  .disabled(handoffActionsDisabled || codexHandoffPrompt == nil)
+                  Button("Launch Codex (⌘R)", systemImage: "arrow.up.right.square") {
+                    launchCodex()
+                  }
+                  .keyboardShortcut("r", modifiers: [.command])
+                  .disabled(
+                    handoffActionsDisabled || codexHandoffPrompt == nil
+                      || handoffProject?.directory.isEmpty != false
+                  )
+                  .help(
+                    handoffProject?.directory.isEmpty == false
+                      ? "Open this project in Codex Desktop with the task prompt."
+                      : "Choose a repository folder in Project settings before launching Codex.")
                 }
-                .disabled(handoffActionsDisabled || codexHandoffPrompt == nil)
-                Button("Launch Codex (⌘R)", systemImage: "arrow.up.right.square") {
-                  launchCodex()
+                HStack {
+                  Button(
+                    planPromptCopied
+                      ? "Copied"
+                      : hasReadableAttachedPlan ? "Copy revision" : "Copy plan",
+                    systemImage: planPromptCopied ? "checkmark" : "doc.on.doc"
+                  ) {
+                    copyPlanCodexPrompt()
+                  }
+                  .disabled(handoffActionsDisabled || planCodexHandoffPrompt == nil)
+                  .help(
+                    hasReadableAttachedPlan
+                      ? "Copy the plan-only prompt to revise the attached plan."
+                      : "Copy the plan-only prompt to create a plan.")
+                  Button(
+                    hasReadableAttachedPlan ? "Revise plan in Codex" : "Plan in Codex",
+                    systemImage: "arrow.up.right.square"
+                  ) {
+                    launchPlanCodex()
+                  }
+                  .disabled(
+                    handoffActionsDisabled || planCodexHandoffPrompt == nil
+                      || handoffProject?.directory.isEmpty != false
+                  )
+                  .help(
+                    handoffProject?.directory.isEmpty == false
+                      ? "Open a new Codex Desktop thread with plan-only instructions."
+                      : "Choose a repository folder in Project settings before planning in Codex.")
                 }
-                .keyboardShortcut("r", modifiers: [.command])
-                .disabled(
-                  handoffActionsDisabled || codexHandoffPrompt == nil
-                    || handoffProject?.directory.isEmpty != false
-                )
-                .help(
-                  handoffProject?.directory.isEmpty == false
-                    ? "Open this project in Codex Desktop with the task prompt."
-                    : "Choose a repository folder in Project settings before launching Codex.")
               }
             }
           #endif
@@ -624,6 +665,7 @@ struct TaskDetail: View {
         draft = item
         edited = false
         promptCopied = false
+        planPromptCopied = false
         #if os(macOS)
           await Task.yield()
           focusedEditor = nil
@@ -691,13 +733,25 @@ struct TaskDetail: View {
     }
 
     private func launchCodex() {
+      launchCodex(
+        prompt: codexHandoffPrompt,
+        promptFailureMessage: "This task prompt could not be prepared.")
+    }
+
+    private func launchPlanCodex() {
+      launchCodex(
+        prompt: planCodexHandoffPrompt,
+        promptFailureMessage: "This plan prompt could not be prepared.")
+    }
+
+    private func launchCodex(prompt: String?, promptFailureMessage: String) {
       guard let project = handoffProject else { return }
       guard !project.directory.isEmpty else {
         model.error = "Choose a repository folder in Project settings before launching Codex."
         return
       }
-      guard let prompt = codexHandoffPrompt else {
-        model.error = "This task prompt could not be prepared."
+      guard let prompt else {
+        model.error = promptFailureMessage
         return
       }
       var components = URLComponents()
@@ -713,6 +767,16 @@ struct TaskDetail: View {
           "Codex Desktop could not open this task. Copy the prompt and paste it into Codex Desktop instead."
         return
       }
+    }
+
+    private func copyPlanCodexPrompt() {
+      guard let prompt = planCodexHandoffPrompt else { return }
+      NSPasteboard.general.clearContents()
+      guard NSPasteboard.general.setString(prompt, forType: .string) else {
+        model.error = "The plan instructions could not be copied to the clipboard."
+        return
+      }
+      planPromptCopied = true
     }
 
     private var planFeedbackBinding: Binding<String> {

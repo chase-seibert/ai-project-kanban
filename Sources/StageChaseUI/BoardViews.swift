@@ -364,6 +364,7 @@ struct TaskCard: View {
   let item: WorkItem
   var body: some View {
     Button {
+      model.markTaskChangesRead(item.id)
       #if os(macOS)
         model.selectedTaskID = item.id
         model.boardSelectedTaskID = item.id
@@ -373,6 +374,12 @@ struct TaskCard: View {
       #endif
     } label: {
       VStack(alignment: .leading, spacing: 10) {
+        if let change = model.unreadTaskChangeKind(for: item.id) {
+          Label(change.badgeTitle, systemImage: "circle.fill")
+            .stageFont(.caption, weight: .semibold)
+            .foregroundStyle(Color.accentColor)
+            .accessibilityIdentifier("unread-task-\(item.id.uuidString)")
+        }
         if let priority = item.priority {
           Label("\(priority.rawValue) · \(priority.title)", systemImage: "flag.fill")
             .stageFont(.caption, weight: .semibold)

@@ -29,6 +29,7 @@ import UniformTypeIdentifiers
   var selectedProjectID: UUID?
   var selectedTaskID: UUID?
   var boardSelectedTaskID: UUID?
+  private var taskChangeReadStateRevision = 0
   var boardFocusedStage: WorkflowStage = .inbox
   var taskPendingDeletionID: UUID?
   var launchTaskOnSelectionID: UUID?
@@ -192,6 +193,10 @@ import UniformTypeIdentifiers
           }
         }
       #endif
+      if selectedProjectID == nil {
+        selectedProjectID = library.projects.first?.id
+      }
+      initializeTaskChangeReadMarkersIfNeeded()
     } catch { loadError = error.localizedDescription }
   }
 
@@ -512,6 +517,63 @@ import UniformTypeIdentifiers
     selectedTaskID = nil
     search = ""
     preferences.set(project?.uuidString, forKey: "selectedProject")
+    if let project { markProjectChangesRead(project) }
+  }
+
+  func unreadTaskChangeKind(for taskID: UUID) -> TaskChangeKind? {
+    _ = taskChangeReadStateRevision
+    guard let latest = latestTaskChange(for: taskID),
+      latest.date > readDate(forKey: taskChangeReadKey(taskID))
+    else { return nil }
+    return latest.taskChange
+  }
+
+  func unreadProjectChangeCount(_ projectID: UUID) -> Int {
+    _ = taskChangeReadStateRevision
+    let readAt = readDate(forKey: projectChangeReadKey(projectID))
+    return library.tasks.filter { task in
+      task.projectID == projectID
+        && (latestTaskChange(for: task.id)?.date ?? .distantPast) > readAt
+    }.count
+  }
+
+  func markTaskChangesRead(_ taskID: UUID) {
+    let date = latestTaskChange(for: taskID)?.date ?? .now
+    preferences.set(date, forKey: taskChangeReadKey(taskID))
+    taskChangeReadStateRevision &+= 1
+  }
+
+  func markProjectChangesRead(_ projectID: UUID) {
+    let date =
+      library.activity.filter { $0.projectID == projectID && $0.taskChange != nil }
+      .map(\.date).max() ?? .now
+    preferences.set(date, forKey: projectChangeReadKey(projectID))
+    taskChangeReadStateRevision &+= 1
+  }
+
+  private func latestTaskChange(for taskID: UUID) -> Activity? {
+    library.activity.filter { $0.taskID == taskID && $0.taskChange != nil }
+      .max { $0.date < $1.date }
+  }
+
+  private func readDate(forKey key: String) -> Date {
+    preferences.object(forKey: key) as? Date ?? .distantPast
+  }
+
+  private func taskChangeReadKey(_ id: UUID) -> String {
+    "taskChangeReadAt.\(id.uuidString.lowercased())"
+  }
+
+  private func projectChangeReadKey(_ id: UUID) -> String {
+    "projectChangeReadAt.\(id.uuidString.lowercased())"
+  }
+
+  private func initializeTaskChangeReadMarkersIfNeeded() {
+    let key = "taskChangeReadMarkersInitialized"
+    guard !preferences.bool(forKey: key) else { return }
+    for project in library.projects { markProjectChangesRead(project.id) }
+    for task in library.tasks { markTaskChangesRead(task.id) }
+    preferences.set(true, forKey: key)
   }
 
   #if os(macOS)
