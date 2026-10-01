@@ -111,6 +111,13 @@ size. Cmd-Z/Shift-Cmd-Z undo/redo manual task creation, edits, moves, completion
 and deletion without agent history. Agent side effects are never undone or
 restarted. Reordering currently has no undo action. Deletion requires confirmation.
 
+The macOS app uses one primary StageChase window. The project board, task detail,
+activity, project editors, and Settings remain in that window; transient editors,
+detail, and Settings use sheets or in-window inspectors. The standard Settings
+menu command and Command-comma open the Settings sheet. The primary window remains
+resizable with its existing minimum and default sizes. The iPhone app retains its
+own navigation and scene behavior.
+
 Mac Settings → Connection also exposes the Codex Desktop MCP endpoint. It
 starts automatically when the app opens by default; stopping it in Connection
 settings persists that choice, and the Start button re-enables startup. It lists

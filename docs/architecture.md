@@ -24,8 +24,10 @@
   are tracked independently for each project and task on each device.
   Model configuration is a global Mac preference with optional project/task
   overrides; queued runs save the resolved model, effort, policy, and source.
-- `Apps/StageChaseMac/`: native scene/commands, `AgentConnection` protocol,
-  JSONL `CodexConnection`, and `CodexRunner` coordinator.
+- `Apps/StageChaseMac/`: one singleton `Window` scene for the board and its
+  in-window sheets/inspectors, native commands, `AgentConnection` protocol,
+  JSONL `CodexConnection`, and `CodexRunner` coordinator. The standard Settings
+  command routes to the Settings sheet rather than a separate scene.
 - `Apps/StageChasePhone/`: iPhone scene using the shared UI and repository.
 - `Tests/`: reducer/persistence regressions and an offline process-level
   app-server fixture for progress, completion, blocked work, approvals, and stop.

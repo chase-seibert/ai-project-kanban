@@ -5,7 +5,7 @@ import SwiftUI
   @State private var model = AppModel()
   @AppStorage("textScale") private var textScale = 1.0
   var body: some Scene {
-    WindowGroup("StageChase") {
+    Window("StageChase", id: "main") {
       RootView().environment(model).environment(\.stageTextScale, textScale).font(
         .system(size: 13 * textScale)
       )
@@ -13,6 +13,10 @@ import SwiftUI
       .tint(.indigo)
     }.defaultSize(width: 1560, height: 900)
       .commands {
+        CommandGroup(replacing: .appSettings) {
+          Button("Settings…") { model.sheet = .settings }
+            .keyboardShortcut(",", modifiers: .command)
+        }
         CommandGroup(replacing: .newItem) {
           Button("New Task… (⌘N)") { model.sheet = .newTask(.inbox) }.keyboardShortcut("n")
             .disabled(
@@ -78,10 +82,6 @@ import SwiftUI
           Button("Actual Text Size") { textScale = 1 }.keyboardShortcut("0")
         }
       }
-    Settings {
-      AppSettings().environment(model).environment(\.stageTextScale, textScale)
-        .font(.system(size: 13 * textScale))
-    }
   }
 }
 

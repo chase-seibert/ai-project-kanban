@@ -2,6 +2,9 @@
 
 ## 2026-10-01
 
+- Consolidated the macOS app into one resizable primary window. Settings and the
+  existing board tools now stay in that window, and the standard Settings menu
+  command and Command-comma open the in-window Settings sheet.
 - Consolidated the board into Inbox, Planning, and Implementing sections, with
   independent task statuses, attention-state sorting, three-column Mac layout
   with vertical task lists, and horizontal iPhone sections. Legacy stages and task payloads still decode and
