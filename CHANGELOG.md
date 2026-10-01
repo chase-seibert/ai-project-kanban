@@ -32,6 +32,9 @@
 - Added optional task priorities, priority-first ordering within columns, sync
   snapshot support, and keyboard navigation and task actions on Mac. Added Task
   and Navigate menus that list shortcuts, plus shortcut hints on task actions.
+- Opening a task no longer focuses its editable fields automatically, keeping
+  board shortcuts available until a field is deliberately selected.
+- Return now submits either task deletion confirmation dialog.
 
 ## 2026-09-30
 

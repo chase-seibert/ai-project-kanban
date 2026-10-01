@@ -335,6 +335,12 @@ struct TaskDetail: View {
   @State private var edited = false
   @State private var deleting = false
   @State private var promptCopied = false
+  #if os(macOS)
+    @FocusState private var focusedEditor: TaskEditorField?
+    private enum TaskEditorField: Hashable {
+      case title, notes, planPath, planFeedback
+    }
+  #endif
   var item: WorkItem? { model.library.tasks.first { $0.id == taskID } }
   #if os(macOS)
     private var handoffProject: Project? {
@@ -394,6 +400,9 @@ struct TaskDetail: View {
             TextField("Title", text: draftBinding(\.title), axis: .vertical).stageFont(
               .title2, weight: .bold
             ).textFieldStyle(.plain)
+              #if os(macOS)
+                .focused($focusedEditor, equals: .title)
+              #endif
               .disabled(model.planFeedbackInFlight.contains(taskID))
             if model.isConnectedPhone {
               LabeledContent("Priority", value: draft?.priority?.title ?? "No priority")
@@ -427,6 +436,9 @@ struct TaskDetail: View {
               TextEditor(text: draftBinding(\.notes)).frame(minHeight: 110).scrollContentBackground(
                 .hidden
               )
+              #if os(macOS)
+                .focused($focusedEditor, equals: .notes)
+              #endif
               .padding(8).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
               .disabled(model.planFeedbackInFlight.contains(taskID))
             }
@@ -444,6 +456,9 @@ struct TaskDetail: View {
                     })
                 )
                 .textFieldStyle(.roundedBorder)
+                #if os(macOS)
+                  .focused($focusedEditor, equals: .planPath)
+                #endif
                 .disabled(model.planFeedbackInFlight.contains(taskID))
                 #if os(macOS)
                   if let path = item.planPath,
@@ -470,6 +485,7 @@ struct TaskDetail: View {
                     .stageFont(.callout).foregroundStyle(.secondary)
                   TextEditor(text: planFeedbackBinding)
                     .frame(minHeight: 105)
+                    .focused($focusedEditor, equals: .planFeedback)
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
@@ -609,6 +625,8 @@ struct TaskDetail: View {
         edited = false
         promptCopied = false
         #if os(macOS)
+          await Task.yield()
+          focusedEditor = nil
           if model.launchTaskOnSelectionID == taskID {
             model.launchTaskOnSelectionID = nil
             launchCodex()
@@ -632,7 +650,7 @@ struct TaskDetail: View {
               dismiss()
             }
           }
-        }
+        }.keyboardShortcut(.defaultAction)
       }
   }
   private func draftBinding(_ keyPath: WritableKeyPath<WorkItem, String>) -> Binding<String> {

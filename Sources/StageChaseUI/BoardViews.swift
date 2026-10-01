@@ -99,7 +99,7 @@ struct BoardView: View {
             }
             model.taskPendingDeletionID = nil
           }
-        }
+        }.keyboardShortcut(.defaultAction)
       }
     #endif
   }
