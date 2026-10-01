@@ -9,6 +9,8 @@ top-aligned lanes, per-column quick capture, drag-and-drop, task details, and
 explicit completion. The Mac adds search, a task inspector, agent activity,
 native undo/redo for manual task edits, keyboard shortcuts, and text-size settings.
 
+![StageChase project board](docs/images/codex-clipboard-0fabb416-c5e8-4844-b4a8-db6a0d7c083e.png)
+
 ## Run
 
 No third-party packages or native dependency installations are needed.
