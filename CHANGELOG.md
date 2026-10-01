@@ -2,6 +2,10 @@
 
 ## 2026-10-01
 
+- Added Mac Git status in project headers and task details, including the
+  current branch and commit hash, plus a task action that stages all project
+  changes and commits with the task title as its message. Added an optional
+  per-project deployed-revision checkpoint recorded from current `HEAD`.
 - Added unread badges for task column and completion changes. Project badges count
   changed tasks, while task badges clear independently when a task is opened.
 - Added Mac-only Copy plan prompt and Plan in Codex task-detail actions. Their

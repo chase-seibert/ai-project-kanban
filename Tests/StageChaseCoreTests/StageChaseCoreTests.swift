@@ -85,6 +85,21 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(roundTrip == enabled)
 }
 
+@Test func deployedRevisionIsOptionalBackwardCompatibleProjectData() throws {
+  let legacy = Data(
+    #"{"id":"00000000-0000-0000-0000-000000000001","name":"Legacy","directory":"/tmp/legacy","createdAt":0}"#
+      .utf8)
+  let decoded = try JSONDecoder().decode(Project.self, from: legacy)
+  #expect(decoded.deployedCommitHash == nil)
+  #expect(decoded.deployedAt == nil)
+
+  var deployed = decoded
+  deployed.deployedCommitHash = String(repeating: "a", count: 40)
+  deployed.deployedAt = Date(timeIntervalSince1970: 1_790_000_000)
+  let restored = try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(deployed))
+  #expect(restored == deployed)
+}
+
 @Test func syncMessagesAreAuthenticatedEncryptedAndBounded() throws {
   let key = SyncCrypto.randomSecret()
   let task = WorkItem(projectID: UUID(), title: "Keep this private")

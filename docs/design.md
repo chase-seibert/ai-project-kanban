@@ -79,6 +79,16 @@ project folder either way. A confirmed run records its selected worktree
 setting; a retry reuses its saved working folder. Preference changes affect
 future confirmed runs and do not alter saved run snapshots.
 
+The Mac project header shows the current Git branch, `HEAD`, working-tree
+change count, and recorded deployed revision, with explicit refresh and
+deployment-recording controls. Task detail shows its latest run's working
+folder status when available, or shared project status otherwise, alongside a
+direct **Commit all changes for this task** action. It stages every repository
+change in that working folder and uses the task title as the commit message,
+without a file selection or message editor. The detail copy makes clear that
+shared checkout files are not mapped to individual tasks. Git actions remain
+unavailable on iPhone.
+
 Mac Settings also exposes a multiline **Plan format prompt** editor with a
 reset-to-default action. Its default asks plans to start with user-story
 requirements, then cover architecture and data-model changes, basic test cases,

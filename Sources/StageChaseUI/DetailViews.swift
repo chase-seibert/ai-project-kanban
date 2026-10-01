@@ -177,47 +177,50 @@ struct ProjectEditor: View {
     }
 
     var body: some View {
-      HStack(spacing: 10) {
-        Toggle(
-          "Worktrees",
-          isOn: Binding(
-            get: {
-              model.library.projects.first(where: { $0.id == project.id })?.usesWorktrees ?? false
-            },
-            set: saveWorktreePreference)
-        )
-        .toggleStyle(.switch)
-        .accessibilityLabel("Use managed worktrees for implementation")
-        .help(
-          "Dirty repositories use an isolated worktree. Turn off to use the project folder directly."
-        )
-        .disabled(savingWorktree)
+      VStack(alignment: .leading, spacing: 9) {
+        HStack(spacing: 10) {
+          Toggle(
+            "Worktrees",
+            isOn: Binding(
+              get: {
+                model.library.projects.first(where: { $0.id == project.id })?.usesWorktrees ?? false
+              },
+              set: saveWorktreePreference)
+          )
+          .toggleStyle(.switch)
+          .accessibilityLabel("Use managed worktrees for implementation")
+          .help(
+            "Dirty repositories use an isolated worktree. Turn off to use the project folder directly."
+          )
+          .disabled(savingWorktree)
 
-        Button {
-          modelDraft = model.library.projects.first(where: { $0.id == project.id })?.modelOverride
-          modelError = nil
-          showingModel = true
-        } label: {
-          Label("\(effectiveModel.configuration.summary)", systemImage: "cpu")
-            .labelStyle(.titleAndIcon)
-            .lineLimit(1)
-        }
-        .buttonStyle(.borderless)
-        .help(
-          "Project model · \(effectiveModel.scope.title). Task model choices still take precedence."
-        )
-        .popover(isPresented: $showingModel, arrowEdge: .bottom) {
-          modelPopover.frame(width: 310).padding(14)
-        }
+          Button {
+            modelDraft = model.library.projects.first(where: { $0.id == project.id })?.modelOverride
+            modelError = nil
+            showingModel = true
+          } label: {
+            Label("\(effectiveModel.configuration.summary)", systemImage: "cpu")
+              .labelStyle(.titleAndIcon)
+              .lineLimit(1)
+          }
+          .buttonStyle(.borderless)
+          .help(
+            "Project model · \(effectiveModel.scope.title). Task model choices still take precedence."
+          )
+          .popover(isPresented: $showingModel, arrowEdge: .bottom) {
+            modelPopover.frame(width: 310).padding(14)
+          }
 
-        if savingWorktree || savingModel {
-          ProgressView().controlSize(.small).help("Saving project settings")
-        } else if let error = worktreeError ?? modelError {
-          Image(systemName: "exclamationmark.circle.fill")
-            .foregroundStyle(.orange)
-            .accessibilityLabel("Project settings save failed")
-            .help(error)
+          if savingWorktree || savingModel {
+            ProgressView().controlSize(.small).help("Saving project settings")
+          } else if let error = worktreeError ?? modelError {
+            Image(systemName: "exclamationmark.circle.fill")
+              .foregroundStyle(.orange)
+              .accessibilityLabel("Project settings save failed")
+              .help(error)
+          }
         }
+        ProjectGitStatusView(project: project, taskID: nil, showDeployedAction: true)
       }
     }
 
@@ -277,6 +280,123 @@ struct ProjectEditor: View {
           modelError = model.error ?? "Could not save the project model."
         }
         savingModel = false
+      }
+    }
+  }
+
+  struct ProjectGitStatusView: View {
+    @Environment(AppModel.self) private var model
+    let project: Project
+    let taskID: UUID?
+    var showDeployedAction = false
+
+    private var currentProject: Project {
+      model.library.projects.first(where: { $0.id == project.id }) ?? project
+    }
+    private var status: GitRepositoryStatus? {
+      if let taskID { return model.gitTaskStatuses[taskID] }
+      return model.gitStatuses[project.id]
+    }
+    private var statusError: String? {
+      if let taskID { return model.gitTaskStatusErrors[taskID] }
+      return model.gitStatusErrors[project.id]
+    }
+    private var isBusy: Bool { model.gitBusyProjectIDs.contains(project.id) }
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 5) {
+        HStack(spacing: 7) {
+          if let status {
+            Image(
+              systemName: status.changedFileCount == 0
+                ? "checkmark.circle" : "circle.lefthalf.filled"
+            )
+            .foregroundStyle(status.changedFileCount == 0 ? .green : .orange)
+            Text(status.branch ?? "Detached HEAD")
+            if let head = status.head {
+              Text(String(head.prefix(12))).monospaced().textSelection(.enabled)
+            } else {
+              Text("No commits yet")
+            }
+            Text(status.changedFileCount == 0 ? "Clean" : "\(status.changedFileCount) changed")
+              .foregroundStyle(.secondary)
+              .help(
+                "Staged: \(status.stagedFileCount) · Unstaged: \(status.unstagedFileCount) · Untracked: \(status.untrackedFileCount)"
+              )
+          } else if let error = statusError {
+            Label(error, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.orange).help(error)
+          } else {
+            ProgressView().controlSize(.small)
+            Text("Loading Git status…").foregroundStyle(.secondary)
+          }
+          Button {
+            Task {
+              if let taskID {
+                await model.refreshTaskGitStatus(taskID: taskID)
+              } else {
+                await model.refreshGitStatus(projectID: project.id)
+              }
+            }
+          } label: {
+            Image(systemName: "arrow.clockwise")
+          }
+          .buttonStyle(.borderless).help("Refresh Git status")
+          .disabled(isBusy)
+        }
+        if let hash = currentProject.deployedCommitHash {
+          HStack(spacing: 5) {
+            Text("Deployed: \(String(hash.prefix(12)))").monospaced()
+              .textSelection(.enabled)
+            if let date = currentProject.deployedAt {
+              Text("· \(date.formatted(date: .abbreviated, time: .shortened))")
+                .foregroundStyle(.secondary)
+            }
+          }
+        } else {
+          Text("No deployed revision recorded").foregroundStyle(.secondary)
+        }
+        if let taskID {
+          Text(
+            model.taskUsesSeparateGitWorktree(taskID: taskID)
+              ? "Status for this task's recorded Codex worktree."
+              : "Shared project repository status; files are not assigned to this task."
+          ).stageFont(.caption).foregroundStyle(.secondary)
+          Button {
+            Task { await model.commitTaskChanges(taskID: taskID) }
+          } label: {
+            if isBusy { ProgressView().controlSize(.small) }
+            Label("Commit all changes for this task", systemImage: "checkmark.circle")
+          }
+          .disabled(
+            isBusy || currentProject.directory.isEmpty
+              || model.library.latestRun(for: taskID)?.status.isActive == true
+          )
+          .help(
+            "Stage and commit every change in this task's work folder using its title as the message."
+          )
+          .accessibilityHint(
+            "Stages and commits all repository changes without a file picker or message editor.")
+        }
+        if showDeployedAction {
+          Button("Record current HEAD as deployed") {
+            Task { await model.recordDeployedRevision(projectID: project.id) }
+          }
+          .disabled(isBusy || status?.head == nil)
+          .help("Save the latest commit hash and time as this project's deployed revision.")
+        }
+        if let message = model.gitActionMessages[project.id] {
+          Text(message).stageFont(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+      }
+      .stageFont(.caption)
+      .task(id: "\(project.id.uuidString):\(taskID?.uuidString ?? "project"): \(project.directory)")
+      {
+        if let taskID {
+          await model.refreshTaskGitStatus(taskID: taskID)
+        } else {
+          await model.refreshGitStatus(projectID: project.id)
+        }
       }
     }
   }
@@ -435,6 +555,12 @@ struct TaskDetail: View {
                       : "Choose a repository folder in Project settings before planning in Codex.")
                 }
               }
+            }
+          #endif
+          #if os(macOS)
+            if !model.isConnectedPhone, let project = handoffProject {
+              Divider()
+              ProjectGitStatusView(project: project, taskID: item.id)
             }
           #endif
           if draft != nil {

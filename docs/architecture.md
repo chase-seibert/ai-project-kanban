@@ -112,6 +112,32 @@ StageChase/Worktrees when the checkout is dirty. Only the approved plan is copie
 other uncommitted changes stay in the original checkout. The working folder is
 recorded and shown. Worktrees are retained, never auto-deleted.
 
+## Mac Git status, task commits, and deployed revision
+
+`GitService` runs argument-based Git commands against the configured project
+folder on a utility task. It derives the current branch, full `HEAD` hash, and
+staged, unstaged, and untracked change counts from Git each time; these values
+are transient and are never copied to the phone. This reflects commits made
+outside StageChase as soon as status is refreshed. Task detail displays the
+recorded working folder for that task's latest run when one exists; otherwise
+it displays shared project status and says clearly that changed files are not
+assigned to the task.
+
+The explicit **Commit all changes for this task** action stages all non-ignored
+working-tree changes (`git add -A`) in the task's recorded run folder (or the
+project folder when no run folder is recorded), then commits them using the task
+title as a single-line message. There is no file or message picker. The action is never
+triggered by a Codex run, task transition, MCP request, or phone synchronization.
+An empty repository or clean worktree cannot create an empty task commit.
+
+Each project optionally stores a deployed commit hash and recording timestamp
+in its normal Codable record. The Mac project controls record the current `HEAD`
+when the user confirms a deployment. This checkpoint is a manual reference;
+it does not observe deployment systems and may become stale if deployment or
+branch changes happen elsewhere. Older project records decode with no
+checkpoint. The checkpoint is included in the phone's project replica, while
+local repository paths and Git contents remain Mac-only.
+
 ## Plan feedback
 
 Mac task detail appends typed or system-dictated feedback to a saved plan in any

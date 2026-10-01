@@ -48,6 +48,27 @@ These requirements are implemented in part and remain unverified on devices.
 Phone confirmation for automated transitions and conflict reapplication remain
 open.
 
+## Git status and deployed revision
+
+- As a user, I want the Mac project header and task detail to show the current
+  branch, `HEAD` commit hash, and shared working-tree status, so I can see
+  changes and commits made either inside or outside StageChase.
+- As a user, I want a direct task action to stage all non-ignored project
+  changes and commit them with a single-line version of the task title, so I do
+  not need to select files or write a separate message.
+- As a user, I want to record the current `HEAD` as a project's deployed
+  revision, so I can compare the deployment checkpoint with current code.
+- Git status comes from the configured Mac project folder, or from the latest
+  run's recorded worktree when one exists. Task detail shows shared project
+  status without claiming individual file ownership; branch-to-task association
+  is deferred.
+- Git operations are explicit Mac actions. Codex runs, task moves, MCP reads or
+  writes, and phone synchronization never commit. Recording a deployed revision
+  is manual and can become stale when deployments happen elsewhere.
+- The deployed hash and timestamp are optional backward-compatible project
+  fields. Phone replicas may display this checkpoint, but never receive local
+  repository paths or status contents.
+
 ## Planned automation
 
 - As a user, I want a confirmed move into Next to create one persisted Codex

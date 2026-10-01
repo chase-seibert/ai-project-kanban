@@ -207,10 +207,13 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var automationEnabled = false
   public var usesWorktrees = false
   public var modelOverride: CodexModelConfiguration?
+  public var deployedCommitHash: String?
+  public var deployedAt: Date?
   public var createdAt = Date()
 
   private enum CodingKeys: String, CodingKey {
-    case id, name, directory, automationEnabled, usesWorktrees, modelOverride, createdAt
+    case id, name, directory, automationEnabled, usesWorktrees, modelOverride
+    case deployedCommitHash, deployedAt, createdAt
   }
 
   public init(name: String, directory: String = "") {
@@ -226,6 +229,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     automationEnabled = try values.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
     usesWorktrees = try values.decodeIfPresent(Bool.self, forKey: .usesWorktrees) ?? false
     modelOverride = try values.decodeIfPresent(CodexModelConfiguration.self, forKey: .modelOverride)
+    deployedCommitHash = try values.decodeIfPresent(String.self, forKey: .deployedCommitHash)
+    deployedAt = try values.decodeIfPresent(Date.self, forKey: .deployedAt)
     createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
   }
 
@@ -237,6 +242,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     try values.encode(automationEnabled, forKey: .automationEnabled)
     try values.encode(usesWorktrees, forKey: .usesWorktrees)
     try values.encodeIfPresent(modelOverride, forKey: .modelOverride)
+    try values.encodeIfPresent(deployedCommitHash, forKey: .deployedCommitHash)
+    try values.encodeIfPresent(deployedAt, forKey: .deployedAt)
     try values.encode(createdAt, forKey: .createdAt)
   }
 }

@@ -131,6 +131,8 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
   public var automationEnabled: Bool
   public var usesWorktrees: Bool?
   public var modelOverride: CodexModelConfiguration?
+  public var deployedCommitHash: String?
+  public var deployedAt: Date?
   public var createdAt: Date
 
   public init(_ project: Project) {
@@ -139,6 +141,8 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
     automationEnabled = project.automationEnabled
     usesWorktrees = project.usesWorktrees
     modelOverride = project.modelOverride
+    deployedCommitHash = project.deployedCommitHash
+    deployedAt = project.deployedAt
     createdAt = project.createdAt
   }
 }
@@ -202,6 +206,8 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       project.automationEnabled = $0.automationEnabled
       project.usesWorktrees = $0.usesWorktrees ?? false
       project.modelOverride = $0.modelOverride
+      project.deployedCommitHash = $0.deployedCommitHash
+      project.deployedAt = $0.deployedAt
       project.createdAt = $0.createdAt
       return project
     }

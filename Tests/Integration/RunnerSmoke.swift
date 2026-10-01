@@ -12,6 +12,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     throw BoardError.invalid("Fixture timed out")
   }
   @MainActor static func main() async throws {
+    try await testGitService()
     let fixture = CommandLine.arguments[1]
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
       "stagechase-smoke-\(UUID())")
@@ -84,6 +85,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     }
     model.setApprovalMode(.approveForMe)
     await model.load()
+    try await testTaskWorktreeCommit(model: model)
     model.runner = CodexRunner(model: model, executableOverride: fixture)
     var project = Project(name: "Fixture", directory: folder.path)
     project.automationEnabled = true
@@ -379,5 +381,133 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       directRun.usesWorktrees == false
     else { throw BoardError.invalid("Disabled worktrees did not use the project folder") }
     print("PASS: dirty implementation with worktrees disabled uses the project folder")
+  }
+
+  static func testGitService() async throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stagechase-git-smoke-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    _ = try runGit(["init", "-q"], at: root)
+    _ = try runGit(["config", "user.name", "StageChase Fixture"], at: root)
+    _ = try runGit(["config", "user.email", "fixture@example.invalid"], at: root)
+    let service = GitService()
+
+    let empty = try await service.status(in: root)
+    guard empty.head == nil, empty.changedFileCount == 0 else {
+      throw BoardError.invalid("An empty Git repository status was not reported correctly")
+    }
+    let tracked = root.appendingPathComponent("tracked.txt")
+    try "original\n".write(to: tracked, atomically: true, encoding: .utf8)
+    _ = try runGit(["add", "tracked.txt"], at: root)
+    _ = try runGit(["commit", "-m", "fixture base"], at: root)
+    try "staged version\n".write(to: tracked, atomically: true, encoding: .utf8)
+    _ = try runGit(["add", "tracked.txt"], at: root)
+    try "tracked edit\n".write(to: tracked, atomically: true, encoding: .utf8)
+    try "new file\n".write(
+      to: root.appendingPathComponent("new file.txt"), atomically: true, encoding: .utf8)
+    let dirty = try await service.status(in: root)
+    guard dirty.changedFileCount == 2, dirty.stagedFileCount == 1,
+      dirty.untrackedFileCount == 1, dirty.unstagedFileCount == 1
+    else {
+      throw BoardError.invalid("Git status did not safely count untracked filenames")
+    }
+    let result = try await service.commitAll(in: root, taskTitle: "  Add Git status\nfor tasks  ")
+    let clean = try await service.status(in: root)
+    let message = String(
+      decoding: try runGit(["log", "-1", "--format=%s"], at: root), as: UTF8.self
+    )
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard clean.head == result.hash, clean.changedFileCount == 0,
+      message == "Add Git status for tasks"
+    else {
+      throw BoardError.invalid("Git task commit did not stage all changes or normalize its title")
+    }
+    try "external commit\n".write(to: tracked, atomically: true, encoding: .utf8)
+    _ = try runGit(["add", "tracked.txt"], at: root)
+    _ = try runGit(["commit", "-m", "external commit"], at: root)
+    let afterExternalCommit = try await service.status(in: root)
+    guard afterExternalCommit.head != result.hash, afterExternalCommit.changedFileCount == 0 else {
+      throw BoardError.invalid("Git status did not refresh current HEAD after an external commit")
+    }
+    do {
+      _ = try await service.commitAll(in: root, taskTitle: "Empty commit check")
+      throw BoardError.invalid("Git service allowed an empty task commit")
+    } catch GitServiceError.noChanges {}
+    let nonRepository = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stagechase-nonrepo-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: nonRepository, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: nonRepository) }
+    do {
+      _ = try await service.status(in: nonRepository)
+      throw BoardError.invalid("Git service treated a non-repository folder as valid")
+    } catch GitServiceError.command {}
+    print(
+      "PASS: Git status tracks clean, dirty, untracked, and empty-repository states; task commits stage all changes"
+    )
+  }
+
+  @MainActor static func testTaskWorktreeCommit(model: AppModel) async throws {
+    let parent = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stagechase-task-worktree-\(UUID().uuidString)", isDirectory: true)
+    let root = parent.appendingPathComponent("project", isDirectory: true)
+    let worktree = parent.appendingPathComponent("worktree", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: parent) }
+    _ = try runGit(["init", "-q"], at: root)
+    _ = try runGit(["config", "user.name", "StageChase Fixture"], at: root)
+    _ = try runGit(["config", "user.email", "fixture@example.invalid"], at: root)
+    try "base\n".write(
+      to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+    _ = try runGit(["add", "file.txt"], at: root)
+    _ = try runGit(["commit", "-m", "base"], at: root)
+    _ = try runGit(["worktree", "add", "--detach", worktree.path, "HEAD"], at: root)
+
+    let project = Project(name: "Task worktree fixture", directory: root.path)
+    guard await model.saveProject(project, isNew: true) else {
+      throw BoardError.invalid(model.error ?? "Could not create the task worktree fixture project")
+    }
+    let task = WorkItem(projectID: project.id, title: "Commit run worktree")
+    guard await model.perform(.createTask(task)) else {
+      throw BoardError.invalid(model.error ?? "Could not create the task worktree fixture task")
+    }
+    var run = AgentRun(task: task, kind: .implementation)
+    run.status = .succeeded
+    run.workDirectory = worktree.path
+    model.library.runs.append(run)
+    try "worktree change\n".write(
+      to: worktree.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+    guard model.taskUsesSeparateGitWorktree(taskID: task.id) else {
+      throw BoardError.invalid("Task Git status did not select its recorded run worktree")
+    }
+    await model.commitTaskChanges(taskID: task.id)
+    let worktreeMessage = String(
+      decoding: try runGit(["log", "-1", "--format=%s"], at: worktree), as: UTF8.self
+    ).trimmingCharacters(in: .whitespacesAndNewlines)
+    let rootStatus = try runGit(["status", "--porcelain"], at: root)
+    guard worktreeMessage == "Commit run worktree", rootStatus.isEmpty else {
+      throw BoardError.invalid("Task commit did not target only the recorded run worktree")
+    }
+    print(
+      "PASS: task commits target their recorded worktree while project Git status remains scoped to the checkout"
+    )
+  }
+
+  static func runGit(_ arguments: [String], at root: URL) throws -> Data {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git"] + arguments
+    process.currentDirectoryURL = root
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+      throw BoardError.invalid(String(decoding: data, as: UTF8.self))
+    }
+    return data
   }
 }
