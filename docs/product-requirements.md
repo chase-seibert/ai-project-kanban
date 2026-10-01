@@ -4,16 +4,24 @@
 
 - As a user, I want to create a board, so that different projects can have
   separate workflows.
-- As a user, I want the five workflow stages to remain fixed, so that every
-  board has a predictable path from idea to review.
+- As a user, I want three board sections, Inbox, Planning, and Implementing, so
+  that the Mac board is simpler and the iPhone can show the same workflow.
+- As a user, I want task status to be separate from section, so that each task
+  shows whether it is in triage, planning, ready, building, waiting, error,
+  quota, review, or done.
+- As a user, I want Waiting, Error, Quota, and Review tasks sorted first in that
+  order within their section, so that attention-needed work is easy to find.
+- As a user, I want the Mac sections shown as three side-by-side columns with
+  vertical task lists and iPhone sections kept as horizontal pages, so each
+  device retains a useful board layout.
 - As a user, I want to capture and edit tasks, so that ideas are useful before
   planning begins.
 - As a user, I want to paste an Apple Notes checklist into lane capture and
   create one task per unchecked item, so I can quickly bring a list into a board.
-- As a user, I want to move tasks between stages, so that the board reflects my
-  current intent.
-- As a user, I want task placement to remain independent of plan availability,
-  Codex run state, and run outcome, so the columns reflect my intent.
+- As a user, I want to move tasks between Inbox, Planning, and Implementing, so
+  that the board reflects my current intent.
+- As a user, I want section placement to remain independent of plan availability
+  and Codex run state, so the board reflects my intent.
 - As a user, I want transitions and activity to be recorded, so that I can see
   what changed and why.
 - As a user, I want Mac and iPhone to show concise run status and progress
@@ -71,7 +79,7 @@ open.
 
 ## Planned automation
 
-- As a user, I want a confirmed move into Next to create one persisted Codex
+- As a user, I want a confirmed move into Planning to create one persisted Codex
   planning run when automatic invocation is enabled globally and for that
   project, so that planning is explicit and idempotent.
 - As a user, I want the Markdown plan to use a readable normalized task-title
@@ -104,7 +112,7 @@ open.
 
 ## Implementation automation
 
-- As a user, I want Implementation runs to use a plan when one is available,
+- As a user, I want Implementing runs to use a plan when one is available,
   while allowing implementation without a plan.
 - As a user, I want a per-project worktree toggle to choose between direct
   project-folder implementation and managed worktrees for dirty repositories.
@@ -112,25 +120,24 @@ open.
   only, and a retry keeps its saved working folder.
 - As a user, I want failed automation to remain visible and retryable, so that
   a transient failure does not lose the plan or hide the work.
-- As a user, I want Codex outcomes to leave the task in its current stage, so I
-  decide where it belongs and when it is complete.
+- As a user, I want Codex outcomes to update task status without changing its
+  section or completing it, so I decide when the task is Done.
 
 ## Manual Codex Desktop handoff
 
 - As a user, I want a Mac-wide setting to turn automatic Codex invocation on or
-  off, so that confirmed stage moves can be separated from starting a turn.
-- As a user, I want task-level Copy prompt and Launch Codex actions to use the
-  same StageChase MCP prompt, so I can either paste it or open a new Codex
-  Desktop thread with the repository path and prompt.
+  off, so confirmed section moves are distinct from starting a turn.
+- As a user, I want a Launch Codex action to open a new Codex Desktop thread
+  with the repository path and StageChase MCP prompt.
 - As a user, I want generated task prompts to start with the exact task title
   and Codex sessions to use that title alone, so the task stays clear in both
   the prompt and Desktop session list.
 - As a user, I want the prompt to identify the project and task by stable IDs,
   include a readable project-relative plan path when one exists, and otherwise
   include the task title and notes.
-- As a user, I want successful work from that prompt to mark the identified
-  task complete through MCP after reporting success, without changing its
-  stage; failed or blocked work remains incomplete.
+- As a user, I want successful implementation from that prompt to move the
+  identified task to Review through MCP after reporting success, leaving it
+  incomplete until I sign off; failed or blocked work remains incomplete.
 - As a user, I want legacy linked-session status refresh and rerun controls to
   remain available for existing handoffs.
 - As a user, I want a task-level Refresh action to reread saved task fields,
@@ -143,9 +150,9 @@ open.
 
 ## Manual plan handoff
 
-- As a user, I want separate Copy plan prompt and Plan in Codex actions in Mac
-  task detail, so I can create a first plan or revise a readable attached plan
-  without authorizing implementation.
+- As a user, I want a contextual Plan in Codex or Revise plan in Codex action
+  in Mac task detail, so I can create or revise a plan without authorizing
+  implementation.
 - As a user, I want both actions to use identical plan-only instructions with
   stable project/task IDs, the current Mac plan-format preference, and the
   intended project-relative path, so copying and launching produce the same
@@ -154,10 +161,10 @@ open.
   task UUID under `to-do/` and a revision to preserve its attached path, so
   plans are recognizable, collision-safe, and honor an existing location.
 - As a user, I want Codex to attach the saved readable Markdown plan through
-  revision-checked MCP operations and move successful planning to Planned,
-  while leaving the task incomplete and never starting another Codex session.
-- Copying or opening a plan prompt does not itself change task state or start a
-  Codex turn. Plan handoff controls remain unavailable on iPhone and paired
+  revision-checked MCP operations and set successful planning to Ready in
+  Planning, while leaving the task incomplete and never starting another Codex
+  session.
+- Opening a plan prompt does not itself change task state. Plan handoff controls remain unavailable on iPhone and paired
   phone replicas.
 
 ## Unread task changes
@@ -178,25 +185,24 @@ open.
 - As a user, I want explicit, revision-checked moves and completion changes to
   appear in StageChase, so task state stays in the local library.
 - As a user, I want a readable project-relative plan attached to its task after
-  planning, then the task moved to Planned, so the board shows that a plan is
-  ready for implementation.
-- As a user, I want successful implementation to complete the task without
-  changing its stage, while failed or blocked work remains incomplete.
+  planning, then its status set to Ready while it remains in Planning.
+- As a user, I want successful implementation to enter Review, then mark Done
+  only when I sign off, so Codex outcomes never close the loop automatically.
 - As a user, I want Codex to report a concise latest session update, so the
   task detail shows recent progress without copying a conversation transcript.
 - The Mac-only MCP listener starts automatically on app launch by default, can
   be stopped persistently in Connection settings, and is loopback-only. Tool
-  calls never start, resume, retry, stop, or approve Codex work, and completion
-  remains independent of the five fixed workflow stages.
+  calls never start, resume, retry, stop, or approve Codex work, and only an
+  explicit user action can mark a task Done.
 
 ## Plan feedback
 
-- As a user, I want to type or dictate feedback on a saved plan and explicitly
-  append it under a `User feedback on the plan` heading, so my raw feedback is
-  preserved with the project document.
-- Appending feedback preserves the submitted wording and existing plan content,
-  does not start Codex or change the task, and reports file errors without
-  clearing the draft.
+- As a user, I want one automatically saved context field for task notes or plan
+  feedback, so I can edit context without an extra append action.
+- With a readable plan attached, leaving the field appends its exact wording
+  under a `User feedback on the plan` heading. Appending preserves existing plan
+  content, does not start Codex or change the task, and reports file errors
+  without clearing the draft or duplicating a successful retry.
 - Plan feedback is available on Mac, where the project plan file is stored.
   The phone explains where to append it; feedback and project plan files are
   not included in phone sync.

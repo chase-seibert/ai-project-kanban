@@ -113,23 +113,23 @@
       }
 
       private func moveFocus(by offset: Int) {
-        let stages = WorkflowStage.allCases
+        let stages = WorkflowSection.allCases
         guard let index = stages.firstIndex(of: model.boardFocusedStage) else { return }
         let targetIndex = index + offset
         guard stages.indices.contains(targetIndex) else { return }
         let stage = stages[targetIndex]
         model.boardFocusedStage = stage
-        if let selectedTask, selectedTask.stage == stage { return }
+        if let selectedTask, selectedTask.section == stage { return }
         model.boardSelectedTaskID = model.items(stage).first?.id
       }
 
       private func moveSelected(by offset: Int) {
         guard let item = selectedTask,
-          let index = WorkflowStage.allCases.firstIndex(of: item.stage)
+          let index = WorkflowSection.allCases.firstIndex(of: item.section)
         else { return }
         let destination = index + offset
-        guard WorkflowStage.allCases.indices.contains(destination) else { return }
-        model.requestMove(item, to: WorkflowStage.allCases[destination])
+        guard WorkflowSection.allCases.indices.contains(destination) else { return }
+        model.requestMove(item, to: WorkflowSection.allCases[destination])
       }
 
       private func copySelected() {

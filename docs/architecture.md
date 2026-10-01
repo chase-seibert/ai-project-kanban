@@ -5,8 +5,10 @@
 - `Sources/StageChaseCore/Domain.swift`: Sendable models and a pure command
   reducer. Independent project UUIDs, optimistic task revisions, durable runs.
   Confirmed automated moves create one run in the same transaction; moving to
-  the current stage is a no-op. Reads never start agents. Tasks can move between
-  columns while Codex runs; stage placement and completion are user-controlled.
+  the current section is a no-op. Reads never start agents. Tasks can move
+  between sections while Codex runs; section placement and completion are
+  user-controlled. Persisted `WorkflowStage` remains as a compatibility field
+  for older JSON payloads and MCP clients.
 - `Sources/StageChaseCore/Repository.swift`: actor-owned SwiftData/SQLite.
   Versioned schema V1 stores independently addressable project/task/run/event
   records. Only changed entities are encoded and looked up by unique key; saves
@@ -34,18 +36,43 @@ SwiftPM exposes StageChaseCore for tests. App targets do not import it separatel
 ## Runner lifecycle
 
 With automatic invocation enabled globally and for the project, a confirmed
-move to Next or Implementation resolves model settings, atomically writes the
+move to Planning or Implementing resolves model settings, atomically writes the
 task/run state, then starts a serial Codex turn. Public events and approvals
-produce a verified run outcome; the task column never changes automatically.
-Automatic runs do not mark tasks complete. With automatic invocation off,
-task detail offers Copy prompt and Launch Codex actions using one prompt with
+produce a verified run outcome; the task section never changes automatically.
+Planning completion sets Ready, implementation completion sets Review, and only
+the user's explicit sign-off sets Done and the existing completion flag. With
+automatic invocation off,
+task detail offers a Launch Codex action using the generated prompt with
 stable project/task IDs and a readable project-relative plan path when
 available. Prompts start with the exact task title; manual and runner-created
 Codex sessions use the task title alone. Launch opens `codex://threads/new` with the project folder and
-prompt without submitting a turn. That prompt authorizes Codex to mark the task
-complete through MCP after successful work, using the latest revision, while
-leaving its stage unchanged. Failed or blocked work stays incomplete. Legacy
+prompt without submitting a turn. That prompt directs Codex to move successful
+implementation to Review through MCP after successful work, using the latest
+revision, while leaving the task incomplete. Failed or blocked work stays
+incomplete. Legacy
 linked sessions can still be refreshed explicitly to update their run record.
+
+## Consolidated sections and task status
+
+`WorkItem.section` stores Inbox, Planning, or Implementing independently from
+`WorkItem.status`. The status flow is Inbox/Triage → Planning → Ready → Building
+→ Review → Done. Waiting and Error represent blocked or failed runs; Quota is
+selected for quota-specific failure messages. Runner updates derive Building,
+Waiting, Error, and Quota from `AgentRun`; a successful plan sets Ready, and a
+successful implementation sets Review. Only an explicit user completion action
+sets Done and the legacy `completed` flag. Waiting, Error, Quota, and Review sort
+first within a section in that order, followed by priority and stable rank.
+
+Legacy `stage` values remain encoded for the local MCP and older phone clients:
+Inbox maps to Inbox/Triage; Next maps to Planning/Planning; Planned maps to
+Planning/Ready; Implementation maps to Implementing/Ready; Review maps to
+Implementing/Review. Decoding old JSON payloads fills the new fields from this
+mapping without changing task identity, revision, rank, completion, plan, or run
+history. Sync snapshots carry optional section/status values so older snapshot
+readers can ignore them and newer readers can map old snapshots. The Mac board
+presents the sections as three side-by-side columns with independently
+vertical-scrolling task lists; iPhone keeps the three sections horizontally paged.
+
 Mac task detail also has a task-scoped Refresh action. It rereads the authoritative
 SwiftData library without crash recovery or writes, then rechecks the attached
 project-relative plan and explicitly reads an existing linked Codex thread when
@@ -57,8 +84,7 @@ the last saved run/error state. Refresh is user-triggered and never starts,
 retries, stops, or approves a Codex turn.
 
 Mac task detail also has a separate plan handoff. `PlanHandoffPrompt` builds
-plan-only instructions for both Copy plan prompt and Plan in Codex, so both
-actions deliver identical text while keeping implementation completion clauses
+plan-only instructions for Plan in Codex and Revise plan in Codex, keeping implementation completion clauses
 out of this flow. It includes the current Mac-local plan-format preference.
 New plans target a normalized task-title slug with the full stable task UUID as
 a collision-safe suffix under `to-do/`; an explicit saved path is preserved for
@@ -67,8 +93,9 @@ labels revision actions only when that attached Markdown file is readable and
 nonempty. Launch opens a new `codex://threads/new` URL and never submits a turn.
 After saving a readable nonempty plan, the external Codex session finishes its
 run, attaches the plan with the latest revision through `attach_task_plan`, and
-moves the incomplete task to Planned with the returned revision. Copying or
-opening the prompt does not mutate task state; these actions are Mac-only.
+sets the incomplete task's status to Ready in Planning with the returned
+revision. Opening the prompt does not mutate task state; these actions are
+Mac-only.
 
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same
@@ -151,12 +178,14 @@ local repository paths and Git contents remain Mac-only.
 
 ## Plan feedback
 
-Mac task detail appends typed or system-dictated feedback to a saved plan in any
-task column. `PlanFileStore` resolves the Markdown target
+The Mac task context field autosaves ordinary notes and, when a readable plan is
+attached, appends typed or system-dictated feedback when focus leaves the field.
+`PlanFileStore` resolves the Markdown target
 inside its project folder, coordinates and serializes the append, retains the
 original file bytes, and verifies the resulting file before reporting success.
 Each append adds a `User feedback on the plan` heading followed by the raw text.
-Failed writes keep the editor draft. This file action does not mutate the task,
+An identical retry at the end of the file is idempotent. Failed writes keep the
+editor draft. This file action does not mutate the task,
 create a run, or call the runner. Project plan paths are not part of phone sync;
 the phone directs users to append feedback on Mac.
 

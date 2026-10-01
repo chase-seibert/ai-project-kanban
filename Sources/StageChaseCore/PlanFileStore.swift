@@ -104,6 +104,12 @@ public actor PlanFileStore {
         } else {
           separator = newline + newline
         }
+        let headingAndFeedback =
+          "## User feedback on the plan" + newline + newline + feedback
+        if existingText.hasSuffix(headingAndFeedback) {
+          wroteAndVerified = true
+          return
+        }
         let suffix = separator + "## User feedback on the plan" + newline + newline + feedback
         var appended = original
         appended.append(contentsOf: suffix.utf8)

@@ -407,13 +407,13 @@ struct NewTaskEditor: View {
   @Environment(\.dismiss) private var dismiss
   @State private var title = ""
   @State private var modelOverride: CodexModelConfiguration?
-  @State var stage: WorkflowStage
+  @State var stage: WorkflowSection
   var body: some View {
     NavigationStack {
       Form {
         TextField("What needs doing?", text: $title, axis: .vertical).lineLimit(2...6)
-        Picker("Stage", selection: $stage) {
-          ForEach(WorkflowStage.allCases) { Text($0.title).tag($0) }
+        Picker("Section", selection: $stage) {
+          ForEach(WorkflowSection.allCases) { Text($0.title).tag($0) }
         }
         #if os(macOS)
           if let project = model.selectedProject {
@@ -432,7 +432,7 @@ struct NewTaskEditor: View {
           ToolbarItem(placement: .confirmationAction) {
             Button("Add") {
               Task {
-                if await model.addTask(title, stage: stage, modelOverride: modelOverride) {
+                if await model.addTask(title, section: stage, modelOverride: modelOverride) {
                   dismiss()
                 }
               }
@@ -453,6 +453,8 @@ struct TaskDetail: View {
   let taskID: UUID
   @State private var draft: WorkItem?
   @State private var edited = false
+  @State private var notesSaveTask: Task<Void, Never>?
+  @State private var notesSaveMessage: String?
   @State private var deleting = false
   @State private var promptCopied = false
   @State private var planPromptCopied = false
@@ -481,15 +483,24 @@ struct TaskDetail: View {
       guard let item, let project = handoffProject else { return false }
       return PlanHandoffPrompt.hasReadablePlan(for: item, project: project)
     }
+    private var usesPlanFeedbackField: Bool { !model.isConnectedPhone && hasReadableAttachedPlan }
+  #else
+    private var usesPlanFeedbackField: Bool { false }
   #endif
   var body: some View {
     ScrollView {
       if let item {
         VStack(alignment: .leading, spacing: 22) {
           HStack {
-            Label(item.stage.title, systemImage: item.stage.symbol).stageFont(
+            Label(item.section.title, systemImage: item.section.symbol).stageFont(
               .subheadline, weight: .semibold
-            ).foregroundStyle(item.stage.color)
+            ).foregroundStyle(item.section.color)
+            Text(item.status.title).stageFont(.caption, weight: .medium)
+              .padding(.horizontal, 8).padding(.vertical, 4)
+              .background(
+                item.status.isAttentionState
+                  ? Color.orange.opacity(0.12) : Color.secondary.opacity(0.10),
+                in: Capsule())
             Spacer()
             Button {
               #if os(macOS)
@@ -505,13 +516,6 @@ struct TaskDetail: View {
             if !model.isConnectedPhone {
               VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                  Button(
-                    promptCopied ? "Copied" : "Copy plan or prompt (⌘C)",
-                    systemImage: promptCopied ? "checkmark" : "doc.on.doc"
-                  ) {
-                    copyCodexPrompt()
-                  }
-                  .disabled(handoffActionsDisabled || codexHandoffPrompt == nil)
                   Button("Launch Codex (⌘R)", systemImage: "arrow.up.right.square") {
                     launchCodex()
                   }
@@ -540,19 +544,6 @@ struct TaskDetail: View {
                     .textSelection(.enabled)
                 }
                 HStack {
-                  Button(
-                    planPromptCopied
-                      ? "Copied"
-                      : hasReadableAttachedPlan ? "Copy revision" : "Copy plan",
-                    systemImage: planPromptCopied ? "checkmark" : "doc.on.doc"
-                  ) {
-                    copyPlanCodexPrompt()
-                  }
-                  .disabled(handoffActionsDisabled || planCodexHandoffPrompt == nil)
-                  .help(
-                    hasReadableAttachedPlan
-                      ? "Copy the plan-only prompt to revise the attached plan."
-                      : "Copy the plan-only prompt to create a plan.")
                   Button(
                     hasReadableAttachedPlan ? "Revise plan in Codex" : "Plan in Codex",
                     systemImage: "arrow.up.right.square"
@@ -613,33 +604,41 @@ struct TaskDetail: View {
               .disabled(model.planFeedbackInFlight.contains(taskID))
             }
             VStack(alignment: .leading, spacing: 8) {
-              Text("NOTES").stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
-              TextEditor(text: draftBinding(\.notes)).frame(minHeight: 110).scrollContentBackground(
+              Text(usesPlanFeedbackField ? "TASK CONTEXT AND PLAN FEEDBACK" : "TASK CONTEXT")
+                .stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
+              TextEditor(text: contextBinding).frame(minHeight: 110).scrollContentBackground(
                 .hidden
               )
               #if os(macOS)
-                .focused($focusedEditor, equals: .notes)
+                .focused($focusedEditor, equals: usesPlanFeedbackField ? .planFeedback : .notes)
               #endif
               .padding(8).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
               .disabled(model.planFeedbackInFlight.contains(taskID))
+              Text(
+                usesPlanFeedbackField
+                  ? "Feedback appends to the saved plan when you leave this field."
+                  : "Changes save automatically."
+              )
+              .stageFont(.caption).foregroundStyle(.secondary)
+              if let notesSaveMessage {
+                Text(notesSaveMessage).stageFont(.caption)
+                  .foregroundStyle(notesSaveMessage.hasPrefix("Could") ? .red : .secondary)
+              }
+              #if os(macOS)
+                if usesPlanFeedbackField, let message = model.planFeedbackMessages[taskID] {
+                  Text(message.text).stageFont(.caption)
+                    .foregroundStyle(message.isError ? .red : .secondary)
+                    .textSelection(.enabled)
+                }
+              #endif
             }
             if !model.isConnectedPhone {
               VStack(alignment: .leading, spacing: 8) {
                 Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(
                   .secondary)
-                TextField(
-                  "to-do/my-plan.md",
-                  text: Binding(
-                    get: { draft?.planPath ?? "" },
-                    set: {
-                      draft?.planPath = $0.isEmpty ? nil : $0
-                      edited = true
-                    })
+                Text(item.planPath ?? "No saved plan").stageFont(.callout).foregroundStyle(
+                  .secondary
                 )
-                .textFieldStyle(.roundedBorder)
-                #if os(macOS)
-                  .focused($focusedEditor, equals: .planPath)
-                #endif
                 .disabled(model.planFeedbackInFlight.contains(taskID))
                 #if os(macOS)
                   if let path = item.planPath,
@@ -654,53 +653,7 @@ struct TaskDetail: View {
                 #endif
               }
             }
-            #if os(macOS)
-              if let path = item.planPath,
-                let project = model.library.projects.first(where: { $0.id == item.projectID }),
-                hasReadablePlan(path: path, project: project)
-              {
-                VStack(alignment: .leading, spacing: 8) {
-                  Text("PLAN FEEDBACK").stageFont(.caption, weight: .semibold)
-                    .foregroundStyle(.secondary)
-                  Text("Enter text or dictate to provide feedback on the plan.")
-                    .stageFont(.callout).foregroundStyle(.secondary)
-                  TextEditor(text: planFeedbackBinding)
-                    .frame(minHeight: 105)
-                    .focused($focusedEditor, equals: .planFeedback)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityLabel("Plan feedback")
-                    .disabled(model.planFeedbackInFlight.contains(taskID))
-                  HStack(alignment: .firstTextBaseline) {
-                    if let message = model.planFeedbackMessages[taskID] {
-                      Text(message.text)
-                        .stageFont(.caption)
-                        .foregroundStyle(message.isError ? .red : .secondary)
-                        .textSelection(.enabled)
-                    }
-                    Spacer()
-                    Button("Append feedback", systemImage: "text.append") {
-                      let feedback = model.planFeedbackDraft(for: taskID)
-                      Task {
-                        await model.appendPlanFeedback(
-                          taskID: taskID, expectedRevision: item.revision, text: feedback)
-                      }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                      model.planFeedbackDraft(for: taskID)
-                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || edited || model.library.latestRun(for: taskID)?.status.isActive == true
-                        || model.planFeedbackInFlight.contains(taskID))
-                  }
-                  if model.library.latestRun(for: taskID)?.status.isActive == true {
-                    Text("Wait for the active Codex run to finish before appending feedback.")
-                      .stageFont(.caption).foregroundStyle(.secondary)
-                  }
-                }
-              }
-            #elseif os(iOS)
+            #if os(iOS)
               if item.planPath != nil {
                 Text(
                   "Append feedback to the saved plan on the Mac where its project file is stored."
@@ -714,7 +667,7 @@ struct TaskDetail: View {
                 .keyboardShortcut(.return, modifiers: [.command])
             }
             #if os(macOS)
-              Section {
+              DisclosureGroup("Codex model") {
                 CodexModelOverrideEditor(
                   configuration: Binding(
                     get: { draft?.modelOverride },
@@ -725,21 +678,10 @@ struct TaskDetail: View {
                   inherited: model.inheritedConfiguration(for: draft ?? item),
                   inheritLabel: "Use project model settings",
                   catalog: model.modelCatalog)
-              } header: {
-                Text("Codex model")
               }
             #endif
           }
           HStack {
-            Menu {
-              ForEach(WorkflowStage.allCases.filter { $0 != item.stage }) { stage in
-                Button(stage.title, systemImage: stage.symbol) {
-                  model.requestMove(item, to: stage)
-                }
-              }
-            } label: {
-              Label("Move", systemImage: "arrow.right")
-            }
             Spacer()
             if !model.isConnectedPhone {
               Button(item.completed ? "Reopen" : "Complete", systemImage: "checkmark.circle") {
@@ -772,14 +714,14 @@ struct TaskDetail: View {
                     ? "Codex runs on Mac. Stage changes do not start or manage Codex work."
                     : model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
                       ? "Confirmed moves can start Codex. Task placement stays under your control."
-                      : "Copy the task prompt or launch it in Codex Desktop. Task placement stays under your control."
+                      : "Launch the task in Codex Desktop. Task placement stays under your control."
                 )
                 .stageFont(.callout).foregroundStyle(.secondary)
               #else
                 Text(
                   model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
                     ? "Confirmed moves can start Codex. Task placement stays under your control."
-                    : "Copy the task prompt or launch it in Codex Desktop. Task placement stays under your control."
+                    : "Launch the task in Codex Desktop. Task placement stays under your control."
                 )
                 .stageFont(.callout).foregroundStyle(.secondary)
               #endif
@@ -816,6 +758,15 @@ struct TaskDetail: View {
         #endif
       }
       .onChange(of: item?.revision) { _, _ in if !edited { draft = item } }
+      .onChange(of: draft?.notes) { _, value in
+        guard !usesPlanFeedbackField, let value else { return }
+        scheduleNotesSave(value)
+      }
+      #if os(macOS)
+        .onChange(of: focusedEditor) { previous, current in
+          if previous == .planFeedback, current != .planFeedback { appendPlanFeedbackOnBlur() }
+        }
+      #endif
       .onChange(of: model.saveTaskEditRequestedID) { _, requestedID in
         guard requestedID == taskID else { return }
         model.saveTaskEditRequestedID = nil
@@ -835,6 +786,51 @@ struct TaskDetail: View {
         }.keyboardShortcut(.defaultAction)
       }
   }
+  private var contextBinding: Binding<String> {
+    #if os(macOS)
+      if usesPlanFeedbackField { return planFeedbackBinding }
+    #endif
+    return Binding(get: { draft?.notes ?? "" }, set: { draft?.notes = $0 })
+  }
+
+  private func scheduleNotesSave(_ value: String) {
+    guard item?.notes != value else { return }
+    notesSaveTask?.cancel()
+    notesSaveMessage = "Saving…"
+    notesSaveTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(650))
+      guard !Task.isCancelled, let currentItem = self.item else { return }
+      if await model.perform(
+        .saveNotes(currentItem.id, value, expectedRevision: currentItem.revision))
+      {
+        notesSaveMessage = "Saved"
+        if var draft, let latest = self.item {
+          if draft.notes == value { draft.notes = value }
+          draft.revision = latest.revision
+          self.draft = draft
+        }
+      } else {
+        notesSaveMessage = "Could not save context. Your draft is still here."
+      }
+    }
+  }
+
+  #if os(macOS)
+    private func appendPlanFeedbackOnBlur() {
+      guard usesPlanFeedbackField, !edited, let item else { return }
+      let text = model.planFeedbackDraft(for: taskID)
+      guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+      Task {
+        let saved = await model.appendPlanFeedback(
+          taskID: taskID, expectedRevision: item.revision, text: text)
+        notesSaveMessage =
+          saved
+          ? "Feedback saved to plan."
+          : "Could not append feedback. Your draft is still here."
+      }
+    }
+  #endif
+
   private func draftBinding(_ keyPath: WritableKeyPath<WorkItem, String>) -> Binding<String> {
     Binding(
       get: { draft?[keyPath: keyPath] ?? "" },
@@ -846,6 +842,8 @@ struct TaskDetail: View {
 
   private func saveTaskEdits() {
     guard edited, let draft else { return }
+    notesSaveTask?.cancel()
+    notesSaveTask = nil
     Task {
       if await model.perform(.editTask(draft, expectedRevision: draft.revision)) {
         self.draft = self.item

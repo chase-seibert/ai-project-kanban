@@ -55,17 +55,17 @@ import SwiftUI
           Button("Set priority: Low (3)") { setSelectedPriority(.low, model: model) }
             .disabled(selectedBoardTask(model, includeDetailSelection: false) == nil)
           Divider()
-          Button("Move task to previous column (⌘←)") { moveSelectedTask(-1, model: model) }
+          Button("Move task to previous section (⌘←)") { moveSelectedTask(-1, model: model) }
             .disabled(!canMoveSelectedTask(-1, model: model))
-          Button("Move task to next column (⌘→)") { moveSelectedTask(1, model: model) }
+          Button("Move task to next section (⌘→)") { moveSelectedTask(1, model: model) }
             .disabled(!canMoveSelectedTask(1, model: model))
         }
         CommandMenu("Navigate") {
           Button("Previous task (↑)") { moveTaskSelection(-1, model: model) }
           Button("Next task (↓)") { moveTaskSelection(1, model: model) }
           Divider()
-          Button("Previous column (←)") { moveColumnFocus(-1, model: model) }
-          Button("Next column (→)") { moveColumnFocus(1, model: model) }
+          Button("Previous section (←)") { moveColumnFocus(-1, model: model) }
+          Button("Next section (→)") { moveColumnFocus(1, model: model) }
         }
         CommandGroup(after: .toolbar) {
           Button("Show Activity") {
@@ -100,18 +100,18 @@ import SwiftUI
 
 @MainActor private func moveSelectedTask(_ offset: Int, model: AppModel) {
   guard let item = selectedBoardTask(model, includeDetailSelection: true),
-    let index = WorkflowStage.allCases.firstIndex(of: item.stage)
+    let index = WorkflowSection.allCases.firstIndex(of: item.section)
   else { return }
   let target = index + offset
-  guard WorkflowStage.allCases.indices.contains(target) else { return }
-  model.requestMove(item, to: WorkflowStage.allCases[target])
+  guard WorkflowSection.allCases.indices.contains(target) else { return }
+  model.requestMove(item, to: WorkflowSection.allCases[target])
 }
 
 @MainActor private func canMoveSelectedTask(_ offset: Int, model: AppModel) -> Bool {
   guard let item = selectedBoardTask(model, includeDetailSelection: true),
-    let index = WorkflowStage.allCases.firstIndex(of: item.stage)
+    let index = WorkflowSection.allCases.firstIndex(of: item.section)
   else { return false }
-  return WorkflowStage.allCases.indices.contains(index + offset)
+  return WorkflowSection.allCases.indices.contains(index + offset)
 }
 
 @MainActor private func moveTaskSelection(_ offset: Int, model: AppModel) {
@@ -127,13 +127,14 @@ import SwiftUI
 }
 
 @MainActor private func moveColumnFocus(_ offset: Int, model: AppModel) {
-  let stages = WorkflowStage.allCases
+  let stages = WorkflowSection.allCases
   guard let index = stages.firstIndex(of: model.boardFocusedStage),
     stages.indices.contains(index + offset)
   else { return }
   let stage = stages[index + offset]
   model.boardFocusedStage = stage
-  if let selected = selectedBoardTask(model, includeDetailSelection: false), selected.stage == stage
+  if let selected = selectedBoardTask(model, includeDetailSelection: false),
+    selected.section == stage
   {
     return
   }

@@ -2,6 +2,11 @@
 
 ## 2026-10-01
 
+- Consolidated the board into Inbox, Planning, and Implementing sections, with
+  independent task statuses, attention-state sorting, three-column Mac layout
+  with vertical task lists, and horizontal iPhone sections. Legacy stages and task payloads still decode and
+  remain available to MCP and phone compatibility paths; plan and implementation
+  outcomes now set Ready and Review, while only user sign-off sets Done.
 - Corrected generated manual task prompts to move successful implementation work
   to Review and leave it incomplete for user review.
 - Generated plan filenames now use readable normalized task-title slugs with

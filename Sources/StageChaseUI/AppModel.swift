@@ -30,7 +30,7 @@ import UniformTypeIdentifiers
   var selectedTaskID: UUID?
   var boardSelectedTaskID: UUID?
   private var taskChangeReadStateRevision = 0
-  var boardFocusedStage: WorkflowStage = .inbox
+  var boardFocusedStage: WorkflowSection = .inbox
   var taskPendingDeletionID: UUID?
   var launchTaskOnSelectionID: UUID?
   var saveTaskEditRequestedID: UUID?
@@ -436,6 +436,12 @@ import UniformTypeIdentifiers
         case .editTask(let item, let expectedRevision):
           wireCommand = .editTask(id: item.id, title: item.title, notes: item.notes)
           revision = expectedRevision
+        case .saveNotes(let id, let notes, let expectedRevision):
+          guard let item = library.tasks.first(where: { $0.id == id }) else {
+            throw BoardError.missing
+          }
+          wireCommand = .editTask(id: id, title: item.title, notes: notes)
+          revision = expectedRevision
         case .move(let id, let stage, let expectedRevision, let configuration):
           guard configuration == nil else {
             throw BoardError.invalid("Confirm automated work on the Mac.")
@@ -637,6 +643,14 @@ import UniformTypeIdentifiers
     }
   }
 
+  func items(_ section: WorkflowSection) -> [WorkItem] {
+    guard let selectedProjectID else { return [] }
+    return library.items(in: selectedProjectID, section: section, completed: showCompleted).filter {
+      search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)
+        || $0.notes.localizedCaseInsensitiveContains(search)
+    }
+  }
+
   func saveProject(_ project: Project, isNew: Bool) async -> Bool {
     if await perform(isNew ? .createProject(project) : .editProject(project)) {
       select(project.id)
@@ -768,6 +782,27 @@ import UniformTypeIdentifiers
     return await perform(.createTask(item))
   }
 
+  func addTask(
+    _ title: String, section: WorkflowSection, modelOverride: CodexModelConfiguration? = nil
+  ) async -> Bool {
+    guard let selectedProjectID else { return false }
+    let stage = section.compatibilityStage
+    var item = WorkItem(projectID: selectedProjectID, title: title, stage: stage)
+    item.section = section
+    item.status = section == .inbox ? .triage : (section == .planning ? .planning : .ready)
+    item.modelOverride = modelOverride
+    if !isConnectedPhone, autoInvokeCodex, selectedProject?.automationEnabled == true,
+      [.planning, .implementing].contains(section)
+    {
+      let move = PendingMove(
+        item: item, stage: stage, isNew: true, configuration: nil, loading: true)
+      if sheet != nil { moveAfterSheet = move } else { pendingMove = move }
+      if sheet == nil { preparePendingMove(move.id) }
+      return true
+    }
+    return await perform(.createTask(item))
+  }
+
   func setPriority(_ priority: TaskPriority?, for id: UUID) async {
     guard let item = library.tasks.first(where: { $0.id == id }), item.priority != priority else {
       return
@@ -793,6 +828,26 @@ import UniformTypeIdentifiers
     {
       let move = PendingMove(
         item: item, stage: stage, isNew: false, configuration: nil, loading: true)
+      pendingMove = move
+      preparePendingMove(move.id)
+    } else {
+      Task { await perform(.move(item.id, stage, expectedRevision: item.revision)) }
+    }
+  }
+
+  func requestMove(_ item: WorkItem, to section: WorkflowSection) {
+    guard item.section != section else { return }
+    let stage = section.compatibilityStage
+    let automation = library.projects.first { $0.id == item.projectID }?.automationEnabled == true
+    if !isConnectedPhone, autoInvokeCodex && automation,
+      [.planning, .implementing].contains(section)
+    {
+      var moved = item
+      moved.section = section
+      moved.stage = stage
+      moved.status = section == .planning ? .planning : .ready
+      let move = PendingMove(
+        item: moved, stage: stage, isNew: false, configuration: nil, loading: true)
       pendingMove = move
       preparePendingMove(move.id)
     } else {
@@ -1148,7 +1203,7 @@ import UniformTypeIdentifiers
 enum AppSheet: Identifiable {
   case newProject
   case editProject(Project)
-  case newTask(WorkflowStage)
+  case newTask(WorkflowSection)
   case task(UUID)
   case settings
   var id: String {

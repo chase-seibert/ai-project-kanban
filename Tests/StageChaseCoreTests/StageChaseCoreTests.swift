@@ -790,7 +790,10 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 1, library: library)
   let roundTrip = try JSONDecoder().decode(SyncSnapshot.self, from: JSONEncoder().encode(snapshot))
   #expect(roundTrip.tasks.first(where: { $0.id == highFirst.id })?.priority == .high)
-  #expect(try roundTrip.replica().tasks.first(where: { $0.id == highFirst.id })?.priority == .high)
+  let replica = try roundTrip.replica()
+  #expect(replica.tasks.first(where: { $0.id == highFirst.id })?.priority == .high)
+  #expect(replica.tasks.first(where: { $0.id == highFirst.id })?.section == highFirst.section)
+  #expect(replica.tasks.first(where: { $0.id == highFirst.id })?.status == highFirst.status)
 
   var changed = highFirst
   changed.priority = .low
@@ -816,6 +819,25 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(decoded.priority == nil)
 }
 
+@Test func repeatedPlanFeedbackAppendDoesNotDuplicateSuccessfulRetry() async throws {
+  let folder = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChasePlanFeedback-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: folder) }
+  let todo = folder.appendingPathComponent("to-do", isDirectory: true)
+  try FileManager.default.createDirectory(at: todo, withIntermediateDirectories: true)
+  let plan = todo.appendingPathComponent("plan.md")
+  try Data("# Plan\n".utf8).write(to: plan)
+  let store = PlanFileStore()
+  try await store.appendFeedback(
+    "Keep the migration small.", projectDirectory: folder.path, relativePath: "to-do/plan.md")
+  try await store.appendFeedback(
+    "Keep the migration small.", projectDirectory: folder.path, relativePath: "to-do/plan.md")
+  let text = try String(contentsOf: plan, encoding: .utf8)
+  #expect(text.components(separatedBy: "## User feedback on the plan").count == 2)
+  #expect(text.hasSuffix("Keep the migration small."))
+}
+
 @Test func reorderCannotCrossPriorityGroups() throws {
   let project = Project(name: "Priority")
   var high = WorkItem(projectID: project.id, title: "High")
@@ -827,4 +849,50 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(throws: BoardError.self) {
     try BoardReducer.apply(.reorder(high.id, before: medium.id, expectedRevision: 0), to: library)
   }
+}
+
+@Test func legacyWorkItemsDecodeIntoConsolidatedSectionsAndStatuses() throws {
+  let projectID = UUID()
+  for stage in WorkflowStage.allCases {
+    var item = WorkItem(projectID: projectID, title: stage.title, stage: stage)
+    item.revision = 7
+    item.rank = 3
+    let encoded = try JSONEncoder().encode(item)
+    var payload = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    payload.removeValue(forKey: "section")
+    payload.removeValue(forKey: "status")
+    let legacyData = try JSONSerialization.data(withJSONObject: payload)
+    let decoded = try JSONDecoder().decode(WorkItem.self, from: legacyData)
+    #expect(decoded.id == item.id)
+    #expect(decoded.revision == 7)
+    #expect(decoded.rank == 3)
+    #expect(decoded.section == WorkItem.legacySection(for: stage))
+    #expect(decoded.status == TaskStatus.legacyStatus(for: stage))
+  }
+}
+
+@Test func specialStatusesSortFirstAndUserSignoffMarksDone() throws {
+  let project = Project(name: "Statuses")
+  var normal = WorkItem(projectID: project.id, title: "Normal", stage: .implementation)
+  normal.rank = 0
+  var review = WorkItem(projectID: project.id, title: "Review", stage: .review)
+  review.rank = 8
+  var waiting = WorkItem(projectID: project.id, title: "Waiting", stage: .implementation)
+  waiting.status = .waiting
+  waiting.rank = 9
+  var failed = WorkItem(projectID: project.id, title: "Failed", stage: .implementation)
+  failed.status = .error
+  failed.rank = 10
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [normal, review, waiting, failed]
+
+  #expect(
+    library.items(in: project.id, section: .implementing).map(\.title)
+      == ["Waiting", "Failed", "Review", "Normal"])
+  library = try BoardReducer.apply(.complete(review.id, true, expectedRevision: 0), to: library)
+  let done = try #require(library.tasks.first(where: { $0.id == review.id }))
+  #expect(done.completed)
+  #expect(done.status == .done)
+  #expect(done.section == .implementing)
 }

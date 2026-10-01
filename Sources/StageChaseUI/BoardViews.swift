@@ -1,14 +1,12 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-extension WorkflowStage {
+extension WorkflowSection {
   var color: Color {
     switch self {
     case .inbox: .secondary
-    case .next: .purple
-    case .planned: .blue
-    case .implementation: .orange
-    case .review: .green
+    case .planning: .purple
+    case .implementing: .orange
     }
   }
 }
@@ -31,14 +29,14 @@ enum Palette {
 
 struct BoardView: View {
   @Environment(AppModel.self) private var model
-  @State private var focusedStage: WorkflowStage? = .inbox
+  @State private var focusedStage: WorkflowSection? = .inbox
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       BoardHeader()
       #if os(iOS)
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 8) {
-            ForEach(WorkflowStage.allCases) { stage in
+            ForEach(WorkflowSection.allCases) { stage in
               Button {
                 withAnimation { focusedStage = stage }
                 model.boardFocusedStage = stage
@@ -55,27 +53,42 @@ struct BoardView: View {
           }.padding(.horizontal, 16)
         }.padding(.bottom, 12)
       #endif
-      GeometryReader { geometry in
-        let width = laneWidth(geometry.size.width)
-        ScrollView(.horizontal) {
+      #if os(macOS)
+        GeometryReader { geometry in
           HStack(alignment: .top, spacing: 14) {
-            ForEach(WorkflowStage.allCases) { stage in
-              BoardLane(stage: stage).frame(
-                width: width, height: max(220, geometry.size.height - 20)
-              ).id(stage)
+            ForEach(WorkflowSection.allCases) { section in
+              BoardLane(section: section).frame(
+                maxWidth: .infinity, maxHeight: .infinity, alignment: .top
+              ).id(section)
             }
           }
-          .scrollTargetLayout()
           .padding(.horizontal, 20)
           .padding(.bottom, 16)
-          .frame(minWidth: geometry.size.width, alignment: .topLeading)
+          .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
-        .scrollPosition(id: $focusedStage, anchor: .leading)
-        .onChange(of: model.boardFocusedStage) { _, value in focusedStage = value }
-        #if os(iOS)
-          .scrollTargetBehavior(.viewAligned)
-        #endif
-      }
+      #else
+        GeometryReader { geometry in
+          let width = laneWidth(geometry.size.width)
+          ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+              ForEach(WorkflowSection.allCases) { stage in
+                BoardLane(section: stage).frame(
+                  width: width, height: max(220, geometry.size.height - 20)
+                ).id(stage)
+              }
+            }
+            .scrollTargetLayout()
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+            .frame(minWidth: geometry.size.width, alignment: .topLeading)
+          }
+          .scrollPosition(id: $focusedStage, anchor: .leading)
+          .onChange(of: model.boardFocusedStage) { _, value in focusedStage = value }
+          #if os(iOS)
+            .scrollTargetBehavior(.viewAligned)
+          #endif
+        }
+      #endif
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Palette.canvas)
@@ -103,13 +116,11 @@ struct BoardView: View {
       }
     #endif
   }
-  private func laneWidth(_ width: CGFloat) -> CGFloat {
-    #if os(macOS)
-      max(225, (width - 40 - 56) / 5)
-    #else
+  #if os(iOS)
+    private func laneWidth(_ width: CGFloat) -> CGFloat {
       min(420, max(270, width - 48))
-    #endif
-  }
+    }
+  #endif
 }
 
 struct BoardHeader: View {
@@ -141,11 +152,6 @@ struct BoardHeader: View {
             Text(boardSubtitle).stageFont(.caption).foregroundStyle(.secondary)
           #endif
         }
-        #if os(macOS)
-          if !model.isConnectedPhone, let project = model.selectedProject {
-            ProjectHeaderControls(project: project).id(project.id)
-          }
-        #endif
         Spacer(minLength: 6)
         if !model.isConnectedPhone {
           Button {
@@ -171,9 +177,9 @@ struct BoardHeader: View {
   }
   private var boardSubtitle: String {
     if model.autoInvokeCodex && model.selectedProject?.automationEnabled == true {
-      "Confirmed moves to Next or Implementation can invoke Codex. Columns stay independent."
+      "Confirmed moves into Planning or Implementing can invoke Codex. Status stays visible on each task."
     } else {
-      "Move tasks freely. Copy a task prompt or launch it in Codex Desktop from task details."
+      "Move tasks between sections. Launch a task or plan in Codex Desktop from task details."
     }
   }
   private var automaticInvocationEnabled: Bool {
@@ -192,7 +198,7 @@ struct BoardHeader: View {
 
 struct BoardLane: View {
   @Environment(AppModel.self) private var model
-  let stage: WorkflowStage
+  let section: WorkflowSection
   @State private var draft = ""
   @State private var adding = false
   @State private var targeted = false
@@ -202,9 +208,9 @@ struct BoardLane: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
-        Image(systemName: stage.symbol).foregroundStyle(stage.color)
-        Text(stage.title).stageFont(.headline)
-        Text("\(model.items(stage).count)").stageFont(.caption).monospacedDigit().foregroundStyle(
+        Image(systemName: section.symbol).foregroundStyle(section.color)
+        Text(section.title).stageFont(.headline)
+        Text("\(model.items(section).count)").stageFont(.caption).monospacedDigit().foregroundStyle(
           .secondary
         )
         .padding(.horizontal, 7).padding(.vertical, 3).background(.quaternary, in: Capsule())
@@ -215,18 +221,18 @@ struct BoardLane: View {
         } label: {
           Image(systemName: "plus")
         }
-        .buttonStyle(.borderless).help("Add to \(stage.title)").accessibilityLabel(
-          "Add task to \(stage.title)")
+        .buttonStyle(.borderless).help("Add to \(section.title)").accessibilityLabel(
+          "Add task to \(section.title)")
       }
-      Text(stage.subtitle).stageFont(.caption).foregroundStyle(.secondary)
-      Rectangle().fill(stage.color.opacity(0.5)).frame(height: 2)
+      Text(section.subtitle).stageFont(.caption).foregroundStyle(.secondary)
+      Rectangle().fill(section.color.opacity(0.5)).frame(height: 2)
       ScrollView(.vertical) {
         LazyVStack(alignment: .leading, spacing: 10) {
-          ForEach(model.items(stage)) { item in TaskCard(item: item) }
-          if model.items(stage).isEmpty && !adding {
+          ForEach(model.items(section)) { item in TaskCard(item: item) }
+          if model.items(section).isEmpty && !adding {
             VStack(spacing: 8) {
-              Image(systemName: stage.symbol).stageFont(.title2).foregroundStyle(
-                stage.color.opacity(0.65))
+              Image(systemName: section.symbol).stageFont(.title2).foregroundStyle(
+                section.color.opacity(0.65))
               Text(model.search.isEmpty ? "Room for what’s next" : "No matching tasks").stageFont(
                 .subheadline)
               Text(
@@ -255,7 +261,7 @@ struct BoardLane: View {
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
               }
             }.padding(12).background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
-              .overlay(RoundedRectangle(cornerRadius: 12).stroke(stage.color.opacity(0.5)))
+              .overlay(RoundedRectangle(cornerRadius: 12).stroke(section.color.opacity(0.5)))
           } else {
             Button {
               adding = true
@@ -265,7 +271,7 @@ struct BoardLane: View {
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10).padding(
                   .horizontal, 6)
             }.buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(
-              "Quick add to \(stage.title)")
+              "Quick add to \(section.title)")
           }
         }.padding(.bottom, 12)
       }
@@ -277,12 +283,12 @@ struct BoardLane: View {
     .padding(14)
     .frame(maxHeight: .infinity, alignment: .top)
     .background(
-      targeted ? stage.color.opacity(0.12) : Palette.card.opacity(0.34),
+      targeted ? section.color.opacity(0.12) : Palette.card.opacity(0.34),
       in: RoundedRectangle(cornerRadius: 16)
     )
     .overlay(
       RoundedRectangle(cornerRadius: 16).strokeBorder(
-        targeted ? stage.color : .primary.opacity(0.055), lineWidth: targeted ? 2 : 1)
+        targeted ? section.color : .primary.opacity(0.055), lineWidth: targeted ? 2 : 1)
     )
     .dropDestination(for: String.self) { values, _ in
       guard let value = values.first, value.hasPrefix("stagechase-task:"),
@@ -291,7 +297,7 @@ struct BoardLane: View {
           $0.id == id && $0.projectID == model.selectedProjectID
         })
       else { return false }
-      model.requestMove(item, to: stage)
+      model.requestMove(item, to: section)
       return true
     } isTargeted: {
       targeted = $0
@@ -332,10 +338,10 @@ struct BoardLane: View {
     let requiresConfirmation =
       model.autoInvokeCodex
       && model.selectedProject?.automationEnabled == true
-      && [.next, .implementation].contains(stage)
+      && section != .inbox
     guard !(titles.count > 1 && requiresConfirmation) else {
       captureError =
-        "Add this checklist in Inbox first. Moving tasks into \(stage.title) will ask before starting Codex."
+        "Add this checklist in Inbox first. Moving tasks into \(section.title) will ask before starting Codex."
       return
     }
     saving = true
@@ -343,7 +349,7 @@ struct BoardLane: View {
     Task {
       var savedCount = 0
       for title in titles {
-        guard await model.addTask(title, stage: stage) else { break }
+        guard await model.addTask(title, section: section) else { break }
         savedCount += 1
       }
       if savedCount == titles.count {
@@ -368,7 +374,7 @@ struct TaskCard: View {
       #if os(macOS)
         model.selectedTaskID = item.id
         model.boardSelectedTaskID = item.id
-        model.boardFocusedStage = item.stage
+        model.boardFocusedStage = item.section
       #else
         model.sheet = .task(item.id)
       #endif
@@ -390,8 +396,15 @@ struct TaskCard: View {
           .strikethrough(
             item.completed
           )
-          .frame(maxWidth: .infinity, alignment: .leading).fixedSize(
-            horizontal: false, vertical: true)
+        Label(
+          item.status.title,
+          systemImage: item.status == .done ? "checkmark.circle.fill" : "circle.fill"
+        )
+        .stageFont(.caption, weight: .medium).foregroundStyle(
+          item.status.isAttentionState ? .orange : .secondary
+        )
+        .frame(maxWidth: .infinity, alignment: .leading).fixedSize(
+          horizontal: false, vertical: true)
         if !item.notes.isEmpty {
           Text(item.notes).stageFont(.subheadline).foregroundStyle(.secondary).lineLimit(3)
         }
@@ -422,21 +435,21 @@ struct TaskCard: View {
           $0.id == id && $0.projectID == item.projectID
         })
       else { return false }
-      guard source.priority == item.priority || source.stage != item.stage else { return false }
-      if source.stage == item.stage {
+      guard source.priority == item.priority || source.section != item.section else { return false }
+      if source.section == item.section {
         Task {
           await model.perform(.reorder(id, before: item.id, expectedRevision: source.revision))
         }
       } else {
-        model.requestMove(source, to: item.stage)
+        model.requestMove(source, to: item.section)
       }
       return true
     }
     .contextMenu {
-      let ordered = model.library.items(in: item.projectID, stage: item.stage, completed: true)
+      let ordered = model.library.items(in: item.projectID, section: item.section, completed: true)
         .filter { $0.priority == item.priority }
       if let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0 {
-        Button("Move up in \(item.stage.title)", systemImage: "arrow.up") {
+        Button("Move up in \(item.section.title)", systemImage: "arrow.up") {
           let previous = ordered[index - 1]
           Task {
             await model.perform(
@@ -445,7 +458,7 @@ struct TaskCard: View {
         }
       }
       if let index = ordered.firstIndex(where: { $0.id == item.id }), index + 1 < ordered.count {
-        Button("Move down in \(item.stage.title)", systemImage: "arrow.down") {
+        Button("Move down in \(item.section.title)", systemImage: "arrow.down") {
           let next = ordered[index + 1]
           Task {
             await model.perform(.reorder(next.id, before: item.id, expectedRevision: next.revision))
@@ -453,7 +466,7 @@ struct TaskCard: View {
         }
       }
       if !ordered.isEmpty { Divider() }
-      ForEach(WorkflowStage.allCases.filter { $0 != item.stage }) { stage in
+      ForEach(WorkflowSection.allCases.filter { $0 != item.section }) { stage in
         Button {
           model.requestMove(item, to: stage)
         } label: {
@@ -471,7 +484,7 @@ struct TaskCard: View {
       }
     }
     .accessibilityLabel("\(item.priority.map { "\($0.title) priority, " } ?? "")\(item.title)")
-    .accessibilityHint("Open task details. Drag to another column or use the move menu.")
+    .accessibilityHint("Open task details. Drag to another section or use the move menu.")
   }
 }
 

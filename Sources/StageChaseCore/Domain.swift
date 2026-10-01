@@ -24,6 +24,79 @@ public enum WorkflowStage: String, Codable, CaseIterable, Identifiable, Sendable
   }
 }
 
+/// Board placement is independent from the task's current status. `WorkflowStage` remains as the
+/// compatibility vocabulary used by older library payloads and MCP clients.
+public enum WorkflowSection: String, Codable, CaseIterable, Identifiable, Sendable {
+  case inbox, planning, implementing
+  public var id: String { rawValue }
+  public var title: String { rawValue.capitalized }
+  public var symbol: String {
+    switch self {
+    case .inbox: "tray"
+    case .planning: "sparkles"
+    case .implementing: "hammer"
+    }
+  }
+  public var subtitle: String {
+    switch self {
+    case .inbox: "Ideas start here"
+    case .planning: "Shape the work"
+    case .implementing: "Move work to done"
+    }
+  }
+  public var compatibilityStage: WorkflowStage {
+    switch self {
+    case .inbox: .inbox
+    case .planning: .next
+    case .implementing: .implementation
+    }
+  }
+}
+
+public enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+  case triage, planning, ready, building, waiting, error, quota, review, done
+  public var id: String { rawValue }
+  public var title: String {
+    switch self {
+    case .triage: "Triage"
+    case .planning: "Planning"
+    case .ready: "Ready"
+    case .building: "Building"
+    case .waiting: "Waiting"
+    case .error: "Error"
+    case .quota: "Quota"
+    case .review: "Review"
+    case .done: "Done"
+    }
+  }
+  public var isAttentionState: Bool { [.waiting, .error, .quota, .review].contains(self) }
+  public var attentionOrder: Int {
+    switch self {
+    case .waiting: 0
+    case .error: 1
+    case .quota: 2
+    case .review: 3
+    default: 4
+    }
+  }
+  public static func legacyStatus(for stage: WorkflowStage) -> Self {
+    switch stage {
+    case .inbox: .triage
+    case .next: .planning
+    case .planned: .ready
+    case .implementation: .ready
+    case .review: .review
+    }
+  }
+  public var section: WorkflowSection {
+    switch self {
+    case .triage: .inbox
+    case .planning: .planning
+    case .ready, .building, .waiting, .error, .quota, .review, .done: .implementing
+    }
+  }
+}
+
 public enum TaskPriority: Int, Codable, CaseIterable, Identifiable, Sendable {
   case high = 1
   case medium = 2
@@ -254,6 +327,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var title: String
   public var notes = ""
   public var stage: WorkflowStage = .inbox
+  public var section: WorkflowSection = .inbox
+  public var status: TaskStatus = .triage
   public var rank = 0
   public var completed = false
   public var priority: TaskPriority?
@@ -268,6 +343,67 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     self.projectID = projectID
     self.title = title
     self.stage = stage
+    section = Self.legacySection(for: stage)
+    status = TaskStatus.legacyStatus(for: stage)
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, projectID, title, notes, stage, section, status, rank, completed, priority, revision
+    case planPath, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt, updatedAt
+  }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+    projectID = try values.decode(UUID.self, forKey: .projectID)
+    title = try values.decode(String.self, forKey: .title)
+    notes = try values.decodeIfPresent(String.self, forKey: .notes) ?? ""
+    stage = try values.decodeIfPresent(WorkflowStage.self, forKey: .stage) ?? .inbox
+    completed = try values.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+    section =
+      try values.decodeIfPresent(WorkflowSection.self, forKey: .section)
+      ?? (completed ? .implementing : Self.legacySection(for: stage))
+    status =
+      try values.decodeIfPresent(TaskStatus.self, forKey: .status)
+      ?? (completed ? .done : TaskStatus.legacyStatus(for: stage))
+    rank = try values.decodeIfPresent(Int.self, forKey: .rank) ?? 0
+    priority = try values.decodeIfPresent(TaskPriority.self, forKey: .priority)
+    revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+    planPath = try values.decodeIfPresent(String.self, forKey: .planPath)
+    latestCodexUpdate = try values.decodeIfPresent(String.self, forKey: .latestCodexUpdate)
+    latestCodexUpdateAt = try values.decodeIfPresent(Date.self, forKey: .latestCodexUpdateAt)
+    modelOverride = try values.decodeIfPresent(CodexModelConfiguration.self, forKey: .modelOverride)
+    createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encode(id, forKey: .id)
+    try values.encode(projectID, forKey: .projectID)
+    try values.encode(title, forKey: .title)
+    try values.encode(notes, forKey: .notes)
+    try values.encode(stage, forKey: .stage)
+    try values.encode(section, forKey: .section)
+    try values.encode(status, forKey: .status)
+    try values.encode(rank, forKey: .rank)
+    try values.encode(completed, forKey: .completed)
+    try values.encodeIfPresent(priority, forKey: .priority)
+    try values.encode(revision, forKey: .revision)
+    try values.encodeIfPresent(planPath, forKey: .planPath)
+    try values.encodeIfPresent(latestCodexUpdate, forKey: .latestCodexUpdate)
+    try values.encodeIfPresent(latestCodexUpdateAt, forKey: .latestCodexUpdateAt)
+    try values.encodeIfPresent(modelOverride, forKey: .modelOverride)
+    try values.encode(createdAt, forKey: .createdAt)
+    try values.encode(updatedAt, forKey: .updatedAt)
+  }
+
+  static func legacySection(for stage: WorkflowStage) -> WorkflowSection {
+    switch stage {
+    case .inbox: .inbox
+    case .next, .planned: .planning
+    case .implementation, .review: .implementing
+    }
   }
 
   public static func canonicalPlanPath(for id: UUID, title: String) -> String {
@@ -405,6 +541,22 @@ public struct Library: Codable, Equatable, Sendable {
       return $0.rank == $1.rank ? $0.createdAt < $1.createdAt : $0.rank < $1.rank
     }
   }
+  public func items(in project: UUID, section: WorkflowSection, completed: Bool = false)
+    -> [WorkItem]
+  {
+    tasks.filter {
+      $0.projectID == project && $0.section == section && (completed || !$0.completed)
+    }
+    .sorted {
+      if $0.status.attentionOrder != $1.status.attentionOrder {
+        return $0.status.attentionOrder < $1.status.attentionOrder
+      }
+      let leftPriority = $0.priority?.rawValue ?? Int.max
+      let rightPriority = $1.priority?.rawValue ?? Int.max
+      if leftPriority != rightPriority { return leftPriority < rightPriority }
+      return $0.rank == $1.rank ? $0.createdAt < $1.createdAt : $0.rank < $1.rank
+    }
+  }
   public func latestRun(for task: UUID) -> AgentRun? {
     runs.filter { $0.taskID == task }.max { $0.createdAt < $1.createdAt }
   }
@@ -447,6 +599,7 @@ public enum Mutation: Sendable {
   case createManualRun(AgentRun)
   case beginExternalRun(AgentRun)
   case editTask(WorkItem, expectedRevision: Int)
+  case saveNotes(UUID, String, expectedRevision: Int)
   case move(
     UUID, WorkflowStage, expectedRevision: Int, configuration: ResolvedCodexConfiguration? = nil)
   case complete(UUID, Bool, expectedRevision: Int)
@@ -482,7 +635,7 @@ public enum BoardReducer {
       guard let project = state.projects.first(where: { $0.id == item.projectID }) else {
         throw BoardError.missing
       }
-      guard project.automationEnabled, [.next, .implementation].contains(item.stage),
+      guard project.automationEnabled, [.planning, .implementing].contains(item.section),
         let configuration,
         !state.runs.contains(where: { $0.taskID == item.id && $0.status.isActive })
       else {
@@ -491,11 +644,11 @@ public enum BoardReducer {
       guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw BoardError.invalid("Choose a project folder before enabling Codex.")
       }
-      if item.stage == .next, item.planPath == nil {
+      if item.section == .planning, item.planPath == nil {
         item.planPath = WorkItem.canonicalPlanPath(for: item.id, title: item.title)
       }
       let run = AgentRun(
-        task: item, kind: item.stage == .next ? .planning : .implementation,
+        task: item, kind: item.section == .planning ? .planning : .implementation,
         modelConfiguration: configuration, usesWorktrees: project.usesWorktrees)
       state.runs.append(run)
       state.activity.append(
@@ -533,8 +686,10 @@ public enum BoardReducer {
         !state.tasks.contains(where: { $0.id == item.id })
       else { throw BoardError.missing }
       item.rank =
-        (state.tasks.filter { $0.projectID == item.projectID && $0.stage == item.stage }.map(\.rank)
-          .max() ?? -1) + 1
+        (state.tasks.filter { $0.projectID == item.projectID && $0.section == item.section }.map(
+          \.rank
+        )
+        .max() ?? -1) + 1
       try enqueue(&item, configuration: configuration)
       state.tasks.append(item)
       state.activity.append(
@@ -572,13 +727,21 @@ public enum BoardReducer {
       item.revision += 1
       item.updatedAt = .now
       state.tasks[index] = item
+    case .saveNotes(let id, let notes, let expectedRevision):
+      let index = try taskIndex(id, expectedRevision)
+      try ensureIdle(id)
+      state.tasks[index].notes = notes
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
     case .move(let id, let stage, let revision, let configuration):
       let index = try taskIndex(id, revision)
       if state.tasks[index].stage == stage { return state }
       var item = state.tasks[index]
       item.stage = stage
+      item.section = WorkItem.legacySection(for: stage)
+      item.status = TaskStatus.legacyStatus(for: stage)
       item.rank =
-        (state.tasks.filter { $0.projectID == item.projectID && $0.stage == stage }
+        (state.tasks.filter { $0.projectID == item.projectID && $0.section == item.section }
           .map(\.rank).max() ?? -1) + 1
       item.revision += 1
       item.updatedAt = .now
@@ -592,7 +755,15 @@ public enum BoardReducer {
       let index = try taskIndex(id, revision)
       try ensureIdle(id)
       state.tasks[index].completed = complete
+      if complete {
+        state.tasks[index].status = .done
+        state.tasks[index].section = .implementing
+        state.tasks[index].stage = .review
+      } else if state.tasks[index].status == .done {
+        state.tasks[index].status = .review
+      }
       state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
       state.activity.append(
         Activity(
           complete ? "Task marked complete by you." : "Task reopened.",
@@ -632,6 +803,7 @@ public enum BoardReducer {
       state.tasks[index].revision += 1
       state.tasks[index].updatedAt = .now
       state.runs[runIndex].status = status
+      state.tasks[index].status = Self.taskStatus(for: status, message: trimmed)
       state.runs[runIndex].summary = trimmed
       state.runs[runIndex].latestMessage = trimmed
       state.runs[runIndex].updatedAt = .now
@@ -681,13 +853,13 @@ public enum BoardReducer {
       let source = state.tasks[try taskIndex(id, revision)]
       let target = state.tasks[try taskIndex(before)]
       try ensureIdle(id)
-      guard source.projectID == target.projectID, source.stage == target.stage,
+      guard source.projectID == target.projectID, source.section == target.section,
         source.priority == target.priority
       else {
         throw BoardError.invalid("Reorder tasks within the same priority group.")
       }
       if id == before { return state }
-      var ordered = state.items(in: source.projectID, stage: source.stage, completed: true)
+      var ordered = state.items(in: source.projectID, section: source.section, completed: true)
         .filter { $0.priority == source.priority && $0.id != id }
       let index = ordered.firstIndex { $0.id == before } ?? ordered.endIndex
       ordered.insert(source, at: index)
@@ -753,6 +925,16 @@ public enum BoardReducer {
         throw BoardError.missing
       }
       state.runs[index] = run
+      if let taskIndex = state.tasks.firstIndex(where: { $0.id == run.taskID }) {
+        let status =
+          run.status == .succeeded && run.kind == .planning
+          ? TaskStatus.ready : Self.taskStatus(for: run.status, message: run.error ?? run.summary)
+        if state.tasks[taskIndex].status != status {
+          state.tasks[taskIndex].status = status
+          state.tasks[taskIndex].updatedAt = .now
+          state.tasks[taskIndex].revision += 1
+        }
+      }
     case .finishRun(let runID, let planPath):
       guard let index = state.runs.firstIndex(where: { $0.id == runID }) else {
         throw BoardError.missing
@@ -778,6 +960,10 @@ public enum BoardReducer {
         }
       }
       state.runs[index].status = .succeeded
+      state.tasks[taskIndex].section = run.kind == .planning ? .planning : .implementing
+      state.tasks[taskIndex].status = run.kind == .planning ? .ready : .review
+      state.tasks[taskIndex].revision += 1
+      state.tasks[taskIndex].updatedAt = .now
       state.runs[index].updatedAt = .now
       state.runs[index].summary =
         run.kind == .planning
@@ -792,6 +978,18 @@ public enum BoardReducer {
     }
     try state.validate()
     return state
+  }
+
+  private static func taskStatus(for status: RunStatus, message: String) -> TaskStatus {
+    switch status {
+    case .queued, .running: .building
+    case .needsInput, .interrupted: .waiting
+    case .failed:
+      message.localizedCaseInsensitiveContains("quota") ? .quota : .error
+    case .succeeded: .review
+    case .readyForHandoff: .ready
+    case .cancelled, .stale: .ready
+    }
   }
 }
 
@@ -832,6 +1030,10 @@ public enum LegacyImport {
       item.notes = value.description
       item.rank = value.position
       item.completed = value.completed
+      if value.completed {
+        item.section = .implementing
+        item.status = .done
+      }
       item.revision = value.revision
       item.planPath = value.plan?.relativePath
       return item

@@ -49,7 +49,8 @@ public enum SyncCommandValidator {
   public static func orderDigest(
     projectID: UUID, stage: WorkflowStage, in library: Library
   ) -> String {
-    let ids = library.items(in: projectID, stage: stage, completed: true)
+    let section = WorkItem.legacySection(for: stage)
+    let ids = library.items(in: projectID, section: section, completed: true)
       .map { "\($0.id.uuidString):\($0.revision)" }.joined(separator: "|")
     return SHA256.hash(data: Data(ids.utf8)).map { String(format: "%02x", $0) }.joined()
   }
@@ -87,7 +88,7 @@ public enum SyncCommandValidator {
       guard let revision = envelope.expectedRevision,
         let item = library.tasks.first(where: { $0.id == id }),
         let target = library.tasks.first(where: { $0.id == beforeID }),
-        item.projectID == target.projectID, item.stage == target.stage
+        item.projectID == target.projectID, item.section == target.section
       else { throw BoardError.missing }
       guard digest == orderDigest(projectID: item.projectID, stage: item.stage, in: library) else {
         throw BoardError.conflict
@@ -103,6 +104,8 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   public var title: String
   public var notes: String
   public var stage: WorkflowStage
+  public var section: WorkflowSection?
+  public var status: TaskStatus?
   public var rank: Int
   public var completed: Bool
   public var priority: TaskPriority?
@@ -116,6 +119,8 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
     title = item.title
     notes = item.notes
     stage = item.stage
+    section = item.section
+    status = item.status
     rank = item.rank
     completed = item.completed
     priority = item.priority
@@ -213,6 +218,9 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     }
     library.tasks = tasks.map {
       var item = WorkItem(projectID: $0.projectID, title: $0.title, stage: $0.stage)
+      item.section =
+        $0.section ?? ($0.completed ? .implementing : WorkItem.legacySection(for: $0.stage))
+      item.status = $0.status ?? ($0.completed ? .done : TaskStatus.legacyStatus(for: $0.stage))
       item.id = $0.id
       item.notes = $0.notes
       item.rank = $0.rank

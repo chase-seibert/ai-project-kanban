@@ -4,56 +4,62 @@ Mac sidebar and iPhone Projects tab are the main entry points. New Project opens
 a blank form with a fresh identity; Project Settings edits the chosen project.
 Switching projects clears task selection and search.
 
-Five fixed, color-accented lanes fill the available height from the top. Mac fits
-all five when possible, otherwise scrolls horizontally. Lanes scroll vertically,
-have named + buttons, and offer inline multiline capture. Cards drag between
-stages or onto another card to reorder within a stage. Context menus and detail
-move menus provide an accessible alternative.
+The board has three sections in order: Inbox, Planning, and Implementing. Mac
+shows them as three side-by-side columns with independently vertical-scrolling
+task lists; iPhone keeps horizontally paged columns. Tasks show a
+separate status badge. Waiting, Error, Quota, and Review sort ahead of ordinary
+statuses in that order, then priority and the user's stable rank decide order.
+Section headers offer named + buttons and inline multiline capture. Cards drag
+between sections or onto another card to reorder within a section. The card menu
+offers an accessible move alternative; task detail keeps its primary actions
+focused on launch, planning, and user sign-off.
 Lane capture accepts a pasted Apple Notes checklist when every nonblank line is
 an unchecked `- [ ] item` entry (also `* [ ]`, `+ [ ]`, `☐`, and `□`). It creates
 one task per checklist entry and strips the checkbox marker; ordinary text still
-creates one task. When automatic invocation is enabled for Next or Implementation,
+creates one task. When automatic invocation is enabled for Planning or Implementing,
 bulk capture is directed to Inbox so each later move retains its explicit run
 confirmation.
 
-iPhone uses a horizontally paged board and stage strip: one readable lane plus
+iPhone uses a horizontally paged board and section strip: one readable lane plus
 a hint of its neighbor, not five squeezed desktop columns. Generated launch
 configuration enables the full display rather than iOS compatibility framing.
 
-Mac task detail is an inspector; iPhone uses a sheet. Title, notes, saved plan,
-move, and manual completion share the model. Plans and Codex run state do not
-restrict task placement. Dirty drafts require Save; stale revisions produce an
-error. Task detail and the Activity screen show compact
+Mac task detail is an inspector; iPhone uses a sheet. Title, task context, saved
+plan, status, and manual completion share the model. Plans and Codex run state do
+not restrict section placement. Title and priority drafts require Save; ordinary
+task context saves automatically. Stale revisions
+produce an error. Task detail and the Activity screen show compact
 Codex run status and progress instead of a long chronological event timeline.
 The Activity screen lists active runs; task detail keeps the latest run. Full
 event records remain stored; open a run in Codex on Mac to inspect its session.
 On iPhone, StageChase tries the Codex thread URL and, if no app can open it,
 directs the user to continue on Mac and lets them copy the session ID. The phone
 cannot manage the Mac runner.
-For an incomplete Planned task with a saved plan, Mac task detail also accepts
-typed or system-dictated plan feedback. Append feedback explicitly; StageChase
-adds a `User feedback on the plan` heading and preserves the user's wording.
+For an incomplete Planning task with a saved plan, the same context field accepts
+typed or system-dictated plan feedback. Leaving the field appends feedback;
+StageChase adds a `User feedback on the plan` heading, preserves the wording, and
+keeps a failed draft available for retry.
 The phone directs the user to the Mac because project plan files are not synced.
 
 When the Mac-wide automatic invocation setting and the project automation
-setting are both enabled, Next/Implementation actions require confirmation
+setting are both enabled, moves into Planning or Implementing require confirmation
 including usage cost. The Mac setting can turn off automatic turns globally;
-task detail then offers Copy prompt and Launch Codex using the same StageChase
+task detail then offers Launch Codex using a StageChase
 MCP prompt. It starts with the exact task title and contains stable project/task IDs and a readable project-relative
 plan path when available. The new session is named with the task title alone.
 Launch opens a new Codex Desktop thread without
-submitting a turn. After success, that prompt directs Codex to complete the
-task through MCP while leaving its column unchanged. Enabling automation alone
+submitting a turn. After success, that prompt directs Codex to move the task to
+Review through MCP and leave it incomplete. Enabling automation alone
 never starts work.
-Mac task detail also offers separate **Copy plan prompt** and **Plan in Codex**
-actions. Both use the same plan-only prompt, include the Mac plan-format
+Mac task detail also offers **Plan in Codex** or **Revise plan in Codex**
+actions. They use the plan-only prompt, include the Mac plan-format
 preference, and open a new thread without submitting a turn. The labels identify
 whether Codex will create a first plan or revise a readable attached plan. New
 plans use a normalized task-title slug plus the full lowercase task UUID under
 `to-do/`; revisions retain the attached path. Plan prompts also start with the
-exact task title. Codex attaches the saved Markdown plan through MCP and moves a
-successful plan to Planned while leaving the task incomplete. These actions are
-Mac-only and do not change task state when copied or opened.
+exact task title. Codex attaches the saved Markdown plan through MCP and sets
+the status to Ready while leaving it in Planning and incomplete. Launching the
+action does not itself change task state.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings
 shows progress, the saved endpoint, and timestamped framed exchange sizes and
