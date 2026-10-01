@@ -24,6 +24,20 @@ public enum WorkflowStage: String, Codable, CaseIterable, Identifiable, Sendable
   }
 }
 
+public enum TaskPriority: Int, Codable, CaseIterable, Identifiable, Sendable {
+  case high = 1
+  case medium = 2
+  case low = 3
+  public var id: Int { rawValue }
+  public var title: String {
+    switch self {
+    case .high: "High"
+    case .medium: "Medium"
+    case .low: "Low"
+    }
+  }
+}
+
 public enum CodexModelSelection: Codable, Hashable, Sendable {
   case latestLuna
   case model(String)
@@ -235,6 +249,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var stage: WorkflowStage = .inbox
   public var rank = 0
   public var completed = false
+  public var priority: TaskPriority?
   public var revision = 0
   public var planPath: String?
   public var latestCodexUpdate: String?
@@ -338,7 +353,12 @@ public struct Library: Codable, Equatable, Sendable {
     tasks.filter {
       $0.projectID == project && (stage == nil || $0.stage == stage) && (completed || !$0.completed)
     }
-    .sorted { $0.rank == $1.rank ? $0.createdAt < $1.createdAt : $0.rank < $1.rank }
+    .sorted {
+      let leftPriority = $0.priority?.rawValue ?? Int.max
+      let rightPriority = $1.priority?.rawValue ?? Int.max
+      if leftPriority != rightPriority { return leftPriority < rightPriority }
+      return $0.rank == $1.rank ? $0.createdAt < $1.createdAt : $0.rank < $1.rank
+    }
   }
   public func latestRun(for task: UUID) -> AgentRun? {
     runs.filter { $0.taskID == task }.max { $0.createdAt < $1.createdAt }
@@ -603,13 +623,14 @@ public enum BoardReducer {
       let source = state.tasks[try taskIndex(id, revision)]
       let target = state.tasks[try taskIndex(before)]
       try ensureIdle(id)
-      guard source.projectID == target.projectID, source.stage == target.stage else {
-        throw BoardError.invalid("Reorder tasks within the same column.")
+      guard source.projectID == target.projectID, source.stage == target.stage,
+        source.priority == target.priority
+      else {
+        throw BoardError.invalid("Reorder tasks within the same priority group.")
       }
       if id == before { return state }
-      var ordered = state.items(in: source.projectID, stage: source.stage, completed: true).filter {
-        $0.id != id
-      }
+      var ordered = state.items(in: source.projectID, stage: source.stage, completed: true)
+        .filter { $0.priority == source.priority && $0.id != id }
       let index = ordered.firstIndex { $0.id == before } ?? ordered.endIndex
       ordered.insert(source, at: index)
       for (rank, item) in ordered.enumerated() {

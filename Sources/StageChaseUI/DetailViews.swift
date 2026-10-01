@@ -343,7 +343,7 @@ struct TaskDetail: View {
     }
     private var codexHandoffPrompt: String? {
       guard let item, let project = handoffProject else { return nil }
-      return makeCodexHandoffPrompt(for: item, project: project)
+      return TaskHandoffPrompt.make(for: item, project: project)
     }
   #endif
   var body: some View {
@@ -369,15 +369,16 @@ struct TaskDetail: View {
             if !model.isConnectedPhone {
               HStack {
                 Button(
-                  promptCopied ? "Prompt copied" : "Copy prompt",
+                  promptCopied ? "Copied" : "Copy plan or prompt (⌘C)",
                   systemImage: promptCopied ? "checkmark" : "doc.on.doc"
                 ) {
                   copyCodexPrompt()
                 }
                 .disabled(handoffActionsDisabled || codexHandoffPrompt == nil)
-                Button("Launch Codex", systemImage: "arrow.up.right.square") {
+                Button("Launch Codex (⌘R)", systemImage: "arrow.up.right.square") {
                   launchCodex()
                 }
+                .keyboardShortcut("r", modifiers: [.command])
                 .disabled(
                   handoffActionsDisabled || codexHandoffPrompt == nil
                     || handoffProject?.directory.isEmpty != false
@@ -394,6 +395,33 @@ struct TaskDetail: View {
               .title2, weight: .bold
             ).textFieldStyle(.plain)
               .disabled(model.planFeedbackInFlight.contains(taskID))
+            if model.isConnectedPhone {
+              LabeledContent("Priority", value: draft?.priority?.title ?? "No priority")
+            } else {
+              HStack {
+                Text("Priority").foregroundStyle(.secondary)
+                Picker(
+                  "Priority",
+                  selection: Binding(
+                    get: { draft?.priority },
+                    set: {
+                      draft?.priority = $0
+                      edited = true
+                    }
+                  )
+                ) {
+                  Text("No priority").tag(TaskPriority?.none)
+                  ForEach(TaskPriority.allCases) { priority in
+                    Text("\(priority.rawValue) · \(priority.title)").tag(
+                      TaskPriority?.some(priority))
+                  }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Spacer()
+              }
+              .disabled(model.planFeedbackInFlight.contains(taskID))
+            }
             VStack(alignment: .leading, spacing: 8) {
               Text("NOTES").stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
               TextEditor(text: draftBinding(\.notes)).frame(minHeight: 110).scrollContentBackground(
@@ -484,15 +512,9 @@ struct TaskDetail: View {
               }
             #endif
             if edited {
-              Button("Save changes") {
-                guard let draft else { return }
-                Task {
-                  if await model.perform(.editTask(draft, expectedRevision: draft.revision)) {
-                    self.draft = self.item
-                    edited = false
-                  }
-                }
-              }.buttonStyle(.borderedProminent)
+              Button("Save changes (⌘Return)") { saveTaskEdits() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: [.command])
             }
             #if os(macOS)
               Section {
@@ -568,7 +590,7 @@ struct TaskDetail: View {
           }
           if !model.isConnectedPhone {
             Divider()
-            Button("Delete task", role: .destructive) { deleting = true }
+            Button("Delete task (Delete)", role: .destructive) { deleting = true }
               .buttonStyle(.borderless)
               .disabled(model.planFeedbackInFlight.contains(taskID))
           } else if let run = model.library.latestRun(for: taskID),
@@ -586,8 +608,19 @@ struct TaskDetail: View {
         draft = item
         edited = false
         promptCopied = false
+        #if os(macOS)
+          if model.launchTaskOnSelectionID == taskID {
+            model.launchTaskOnSelectionID = nil
+            launchCodex()
+          }
+        #endif
       }
       .onChange(of: item?.revision) { _, _ in if !edited { draft = item } }
+      .onChange(of: model.saveTaskEditRequestedID) { _, requestedID in
+        guard requestedID == taskID else { return }
+        model.saveTaskEditRequestedID = nil
+        saveTaskEdits()
+      }
       .confirmationDialog(
         "Delete this task and its run history?", isPresented: $deleting, titleVisibility: .visible
       ) {
@@ -611,60 +644,44 @@ struct TaskDetail: View {
       })
   }
 
+  private func saveTaskEdits() {
+    guard edited, let draft else { return }
+    Task {
+      if await model.perform(.editTask(draft, expectedRevision: draft.revision)) {
+        self.draft = self.item
+        edited = false
+      }
+    }
+  }
+
   #if os(macOS)
     private var handoffActionsDisabled: Bool {
       edited || model.planFeedbackInFlight.contains(taskID)
         || model.library.latestRun(for: taskID)?.status.isActive == true
     }
 
-    private func makeCodexHandoffPrompt(for task: WorkItem, project: Project) -> String {
-      let readablePlanPath = task.planPath.flatMap { path in
-        hasReadablePlan(path: path, project: project) ? path : nil
-      }
-      let taskBrief: String
-      if let readablePlanPath {
-        taskBrief = """
-          Read and follow the existing task plan at the project-relative path `\(readablePlanPath)`.
-          Use the task title and notes below as identifying context.
-          """
-      } else {
-        taskBrief = """
-          No readable saved plan is attached. Execute the task described by its title and notes below.
-          """
-      }
-      let notes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-      return """
-        Execute this existing task in the repository opened in this Codex Desktop session. Follow this repository's AGENTS.md instructions. Use the StageChase MCP server (`stagechase`) to read and update the task; do not start or manage another Codex session.
-
-        First call `read_task` with the exact project and task IDs below and verify the returned IDs match. Then inspect the task context and work on it.
-
-        \(taskBrief)
-
-        Project name: \(project.name)
-        Project ID (`project_id`): \(project.id.uuidString.lowercased())
-        Task ID (`task_id`): \(task.id.uuidString.lowercased())
-        Task title: \(task.title)
-        Task notes:
-        \(notes.isEmpty ? "(No additional notes.)" : notes)
-
-        When work actually begins, call `begin_task` with a fresh `operation_id`, and keep its returned `run_id` and task revision. Report concise progress through `report_task_update` when useful, always passing the latest task revision and saving the revision returned. On successful implementation, call `finish_task` with status `succeeded` and a concise final message, passing the latest revision; then call `set_task_completed` with `completed: true`, using the task revision returned by `finish_task` and a fresh operation ID. Do not move the task to another column. If work fails, call `finish_task` with `failed` or `cancelled` as appropriate and leave the task incomplete. If work needs user input, report that outcome with `report_task_update` status `needsInput` and leave it incomplete. Use a fresh operation ID for each write; on revision conflict reread the task before deciding what to do. If the MCP is unavailable, do not claim the task was updated or completed.
-        """
-    }
-
     private func copyCodexPrompt() {
-      guard let prompt = codexHandoffPrompt else { return }
+      guard let item, let project = handoffProject,
+        let prompt = TaskHandoffPrompt.copyableContext(for: item, project: project)
+      else { return }
       NSPasteboard.general.clearContents()
       guard NSPasteboard.general.setString(prompt, forType: .string) else {
-        model.error = "The task prompt could not be copied to the clipboard."
+        model.error = "The task context could not be copied to the clipboard."
         return
       }
       promptCopied = true
     }
 
     private func launchCodex() {
-      guard let project = handoffProject, !project.directory.isEmpty,
-        let prompt = codexHandoffPrompt
-      else { return }
+      guard let project = handoffProject else { return }
+      guard !project.directory.isEmpty else {
+        model.error = "Choose a repository folder in Project settings before launching Codex."
+        return
+      }
+      guard let prompt = codexHandoffPrompt else {
+        model.error = "This task prompt could not be prepared."
+        return
+      }
       var components = URLComponents()
       components.scheme = "codex"
       components.host = "threads"

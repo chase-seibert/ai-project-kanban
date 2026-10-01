@@ -650,3 +650,66 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   project.directory = "/tmp/other"
   #expect(throws: BoardError.self) { try BoardReducer.apply(.editProject(project), to: library) }
 }
+
+@Test func prioritiesSortBeforeUnsetAndPreserveRankWithinGroups() throws {
+  let project = Project(name: "Priority")
+  var highLater = WorkItem(projectID: project.id, title: "High later")
+  highLater.priority = .high
+  highLater.rank = 3
+  var highFirst = WorkItem(projectID: project.id, title: "High first")
+  highFirst.priority = .high
+  highFirst.rank = 1
+  var medium = WorkItem(projectID: project.id, title: "Medium")
+  medium.priority = .medium
+  var low = WorkItem(projectID: project.id, title: "Low")
+  low.priority = .low
+  let unset = WorkItem(projectID: project.id, title: "Unset")
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [unset, low, highLater, medium, highFirst]
+
+  #expect(
+    library.items(in: project.id).map(\.title) == [
+      "High first", "High later", "Medium", "Low", "Unset",
+    ])
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 1, library: library)
+  let roundTrip = try JSONDecoder().decode(SyncSnapshot.self, from: JSONEncoder().encode(snapshot))
+  #expect(roundTrip.tasks.first(where: { $0.id == highFirst.id })?.priority == .high)
+  #expect(try roundTrip.replica().tasks.first(where: { $0.id == highFirst.id })?.priority == .high)
+
+  var changed = highFirst
+  changed.priority = .low
+  let updated = try BoardReducer.apply(.editTask(changed, expectedRevision: 0), to: library)
+  #expect(updated.tasks.first(where: { $0.id == highFirst.id })?.priority == .low)
+  #expect(updated.tasks.first(where: { $0.id == highFirst.id })?.revision == 1)
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.editTask(changed, expectedRevision: 0), to: updated)
+  }
+
+  let phoneEdit = SyncEnvelope(
+    libraryID: UUID(), deviceID: UUID(), expectedRevision: 0,
+    command: .editTask(id: highFirst.id, title: "Renamed", notes: "Phone edit"))
+  let phoneMutation = try SyncCommandValidator.mutation(for: phoneEdit, in: library)
+  let phoneUpdated = try BoardReducer.apply(phoneMutation, to: library)
+  #expect(phoneUpdated.tasks.first(where: { $0.id == highFirst.id })?.priority == .high)
+
+  let encoded = try JSONEncoder().encode(unset)
+  var oldRecord = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+  oldRecord.removeValue(forKey: "priority")
+  let legacyData = try JSONSerialization.data(withJSONObject: oldRecord)
+  let decoded = try JSONDecoder().decode(WorkItem.self, from: legacyData)
+  #expect(decoded.priority == nil)
+}
+
+@Test func reorderCannotCrossPriorityGroups() throws {
+  let project = Project(name: "Priority")
+  var high = WorkItem(projectID: project.id, title: "High")
+  high.priority = .high
+  let medium = WorkItem(projectID: project.id, title: "Medium")
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [high, medium]
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.reorder(high.id, before: medium.id, expectedRevision: 0), to: library)
+  }
+}

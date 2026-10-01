@@ -105,6 +105,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   public var stage: WorkflowStage
   public var rank: Int
   public var completed: Bool
+  public var priority: TaskPriority?
   public var revision: Int
   public var createdAt: Date
   public var updatedAt: Date
@@ -117,6 +118,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
     stage = item.stage
     rank = item.rank
     completed = item.completed
+    priority = item.priority
     revision = item.revision
     createdAt = item.createdAt
     updatedAt = item.updatedAt
@@ -209,6 +211,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       item.notes = $0.notes
       item.rank = $0.rank
       item.completed = $0.completed
+      item.priority = $0.priority
       item.revision = $0.revision
       item.createdAt = $0.createdAt
       item.updatedAt = $0.updatedAt

@@ -1,0 +1,60 @@
+#if os(macOS)
+  import Foundation
+
+  enum TaskHandoffPrompt {
+    static func make(for task: WorkItem, project: Project) -> String {
+      let readablePlanPath = task.planPath.flatMap { path in
+        hasReadablePlan(path: path, project: project) ? path : nil
+      }
+      let taskBrief: String
+      if let readablePlanPath {
+        taskBrief = """
+          Read and follow the existing task plan at the project-relative path `\(readablePlanPath)`.
+          Use the task title and notes below as identifying context.
+          """
+      } else {
+        taskBrief = """
+          No readable saved plan is attached. Execute the task described by its title and notes below.
+          """
+      }
+      let notes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+      return """
+        Execute this existing task in the repository opened in this Codex Desktop session. Follow this repository's AGENTS.md instructions. Use the StageChase MCP server (`stagechase`) to read and update the task; do not start or manage another Codex session.
+
+        First call `read_task` with the exact project and task IDs below and verify the returned IDs match. Then inspect the task context and work on it.
+
+        \(taskBrief)
+
+        Project name: \(project.name)
+        Project ID (`project_id`): \(project.id.uuidString.lowercased())
+        Task ID (`task_id`): \(task.id.uuidString.lowercased())
+        Task title: \(task.title)
+        Task notes:
+        \(notes.isEmpty ? "(No additional notes.)" : notes)
+
+        When work actually begins, call `begin_task` with a fresh `operation_id`, and keep its returned `run_id` and task revision. Report concise progress through `report_task_update` when useful, always passing the latest task revision and saving the revision returned. On successful implementation, call `finish_task` with status `succeeded` and a concise final message, passing the latest revision; then call `set_task_completed` with `completed: true`, using the task revision returned by `finish_task` and a fresh operation ID. Do not move the task to another column. If work fails, call `finish_task` with `failed` or `cancelled` as appropriate and leave the task incomplete. If work needs user input, report that outcome with `report_task_update` status `needsInput` and leave it incomplete. Use a fresh operation ID for each write; on revision conflict reread the task before deciding what to do. If the MCP is unavailable, do not claim the task was updated or completed.
+        """
+    }
+
+    static func copyableContext(for task: WorkItem, project: Project) -> String? {
+      if let path = task.planPath,
+        let url = try? PlanFileStore.resolve(
+          projectDirectory: project.directory, relativePath: path),
+        let text = try? String(contentsOf: url, encoding: .utf8),
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      {
+        return text
+      }
+      return make(for: task, project: project)
+    }
+
+    private static func hasReadablePlan(path: String, project: Project) -> Bool {
+      guard
+        let url = try? PlanFileStore.resolve(
+          projectDirectory: project.directory, relativePath: path),
+        let contents = try? String(contentsOf: url, encoding: .utf8)
+      else { return false }
+      return !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+  }
+#endif

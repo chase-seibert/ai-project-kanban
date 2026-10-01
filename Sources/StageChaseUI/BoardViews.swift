@@ -41,6 +41,7 @@ struct BoardView: View {
             ForEach(WorkflowStage.allCases) { stage in
               Button {
                 withAnimation { focusedStage = stage }
+                model.boardFocusedStage = stage
               } label: {
                 Label(stage.title, systemImage: stage.symbol).stageFont(
                   .subheadline, weight: .semibold
@@ -70,6 +71,7 @@ struct BoardView: View {
           .frame(minWidth: geometry.size.width, alignment: .topLeading)
         }
         .scrollPosition(id: $focusedStage, anchor: .leading)
+        .onChange(of: model.boardFocusedStage) { _, value in focusedStage = value }
         #if os(iOS)
           .scrollTargetBehavior(.viewAligned)
         #endif
@@ -77,6 +79,29 @@ struct BoardView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Palette.canvas)
+    #if os(macOS)
+      .background(BoardKeyboardMonitor(model: model))
+      .confirmationDialog(
+        "Delete this task and its run history?",
+        isPresented: Binding(
+          get: { model.taskPendingDeletionID != nil },
+          set: { if !$0 { model.taskPendingDeletionID = nil } }),
+        titleVisibility: .visible
+      ) {
+        Button("Delete task", role: .destructive) {
+          guard let taskID = model.taskPendingDeletionID,
+            let item = model.library.tasks.first(where: { $0.id == taskID })
+          else { return }
+          Task {
+            if await model.perform(.deleteTask(item.id, expectedRevision: item.revision)) {
+              model.selectedTaskID = nil
+              model.boardSelectedTaskID = nil
+            }
+            model.taskPendingDeletionID = nil
+          }
+        }
+      }
+    #endif
   }
   private func laneWidth(_ width: CGFloat) -> CGFloat {
     #if os(macOS)
@@ -341,11 +366,19 @@ struct TaskCard: View {
     Button {
       #if os(macOS)
         model.selectedTaskID = item.id
+        model.boardSelectedTaskID = item.id
+        model.boardFocusedStage = item.stage
       #else
         model.sheet = .task(item.id)
       #endif
     } label: {
       VStack(alignment: .leading, spacing: 10) {
+        if let priority = item.priority {
+          Label("\(priority.rawValue) · \(priority.title)", systemImage: "flag.fill")
+            .stageFont(.caption, weight: .semibold)
+            .foregroundStyle(priority == .high ? .red : priority == .medium ? .orange : .secondary)
+            .accessibilityLabel("Priority: \(priority.title)")
+        }
         Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
           .strikethrough(
             item.completed
@@ -368,7 +401,7 @@ struct TaskCard: View {
         .background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
         .overlay(
           RoundedRectangle(cornerRadius: 12).stroke(
-            model.selectedTaskID == item.id
+            model.boardSelectedTaskID == item.id || model.selectedTaskID == item.id
               ? Color.accentColor.opacity(0.65) : .primary.opacity(0.07))
         )
         .shadow(color: .black.opacity(0.035), radius: 3, y: 2)
@@ -382,6 +415,7 @@ struct TaskCard: View {
           $0.id == id && $0.projectID == item.projectID
         })
       else { return false }
+      guard source.priority == item.priority || source.stage != item.stage else { return false }
       if source.stage == item.stage {
         Task {
           await model.perform(.reorder(id, before: item.id, expectedRevision: source.revision))
@@ -393,6 +427,7 @@ struct TaskCard: View {
     }
     .contextMenu {
       let ordered = model.library.items(in: item.projectID, stage: item.stage, completed: true)
+        .filter { $0.priority == item.priority }
       if let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0 {
         Button("Move up in \(item.stage.title)", systemImage: "arrow.up") {
           let previous = ordered[index - 1]
@@ -428,6 +463,7 @@ struct TaskCard: View {
         }
       }
     }
+    .accessibilityLabel("\(item.priority.map { "\($0.title) priority, " } ?? "")\(item.title)")
     .accessibilityHint("Open task details. Drag to another column or use the move menu.")
   }
 }

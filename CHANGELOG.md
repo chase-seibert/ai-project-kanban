@@ -27,6 +27,12 @@
   plan path when available; successful MCP-reported work marks that task
   complete without changing its stage.
 
+## 2026-10-01
+
+- Added optional task priorities, priority-first ordering within columns, sync
+  snapshot support, and keyboard navigation and task actions on Mac. Added Task
+  and Navigate menus that list shortcuts, plus shortcut hints on task actions.
+
 ## 2026-09-30
 
 - Added a Mac-wide automatic-invocation setting and task-level Codex Desktop

@@ -71,13 +71,20 @@ never start, stop, retry, or approve Codex work.
 
 - Save the plan as a readable, nonempty project-relative Markdown file at
   `to-do/<lowercase-task-UUID>.md`, unless the user specified another path.
-- Call `attach_task_plan` with the project/task IDs, `plan_path`, current
-  revision, and a fresh operation ID. This only attaches an existing readable
-  plan; it does not move or complete the task or start Codex.
-- After the plan is attached, call `finish_task` with status `succeeded` and a
-  concise summary. Then call `move_task` to move the task to `planned`, using
-  the latest revision returned by `finish_task` and another fresh operation ID.
-  Leave the completion flag false.
+- Creating a new plan or revising an attached plan is successful planning once
+  the readable plan has been saved and attached. After either operation,
+  explicitly move the task to `planned` and leave its completion flag false,
+  unless the user directs otherwise.
+- If this session called `begin_task`, finish that external run with status
+  `succeeded` after saving the plan and before changing the task. The server
+  rejects task edits while the run is active. Use the revision returned by
+  `finish_task` for the next write.
+- Call `attach_task_plan` with the project/task IDs, `plan_path`, latest task
+  revision, and a fresh operation ID. This attaches an existing readable plan;
+  it does not move or complete the task or start Codex. Then call `move_task`
+  with stage `planned`, using the latest revision returned by
+  `attach_task_plan` and another fresh operation ID. On a revision conflict,
+  reread the task before retrying.
 - If the plan cannot be saved or attached, or the work needs user input, leave
   the task incomplete and do not move it to `planned`. Report the limitation
   through `report_task_update` with status `needsInput` when appropriate.
@@ -97,9 +104,10 @@ never start, stop, retry, or approve Codex work.
 
 - Do not move or complete tasks during other work unless the user explicitly
   asks for that board change. Stage and completion are separate fields.
-- A successful plan moves only to `planned`; successful implementation marks
-  complete without changing its stage. Do not infer either transition from an
-  unrelated task prompt or background status.
+- Creating or revising and attaching a plan moves the task to `planned` and
+  leaves it incomplete; successful implementation marks it complete without
+  changing its stage. Do not infer either transition from an unrelated task
+  prompt or background status.
 - If `attach_task_plan` is unavailable, do not claim the plan is attached or
   move the task to `planned`. Report that the server needs the plan-attachment
   tool.

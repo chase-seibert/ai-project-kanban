@@ -28,6 +28,11 @@ import UniformTypeIdentifiers
   var library = Library()
   var selectedProjectID: UUID?
   var selectedTaskID: UUID?
+  var boardSelectedTaskID: UUID?
+  var boardFocusedStage: WorkflowStage = .inbox
+  var taskPendingDeletionID: UUID?
+  var launchTaskOnSelectionID: UUID?
+  var saveTaskEditRequestedID: UUID?
   var error: String?
   var loadError: String?
   var ready = false
@@ -585,6 +590,15 @@ import UniformTypeIdentifiers
       return true
     }
     return await perform(.createTask(item))
+  }
+
+  func setPriority(_ priority: TaskPriority?, for id: UUID) async {
+    guard let item = library.tasks.first(where: { $0.id == id }), item.priority != priority else {
+      return
+    }
+    var updated = item
+    updated.priority = priority
+    _ = await perform(.editTask(updated, expectedRevision: item.revision))
   }
 
   func sheetDidDismiss() {

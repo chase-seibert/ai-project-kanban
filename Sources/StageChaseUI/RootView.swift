@@ -43,10 +43,10 @@ struct RootView: View {
             .toolbar {
               ToolbarItemGroup {
                 Button {
-                  model.sheet = .newTask(.inbox)
+                  model.sheet = .newTask(model.boardFocusedStage)
                 } label: {
-                  Label("New task", systemImage: "plus")
-                }.disabled(model.selectedProject == nil).help("New task (⌘N)")
+                  Label("New task (⌘T)", systemImage: "plus")
+                }.disabled(model.selectedProject == nil).help("New task in the focused column")
                 Button {
                   model.selectedTaskID = nil
                   model.showActivity.toggle()
