@@ -357,6 +357,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     else {
       throw BoardError.invalid("Dirty checkout isolation failed")
     }
-    print("PASS: dirty checkout isolated, original edits preserved, plan copied, task column unchanged")
+    print(
+      "PASS: dirty checkout isolated, original edits preserved, plan copied, task column unchanged")
   }
 }

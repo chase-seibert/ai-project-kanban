@@ -474,9 +474,10 @@ struct AgentApproval {
         Do not commit, push, publish, deploy, send messages, or delete unrelated files. Report changed files and verification results.
         """
     }
-    let planInstruction = item.planPath.map {
-      "If a plan exists at \($0), read it and use it as context. If it is missing, continue from the task details."
-    } ?? "No plan is attached. Continue from the task details."
+    let planInstruction =
+      item.planPath.map {
+        "If a plan exists at \($0), read it and use it as context. If it is missing, continue from the task details."
+      } ?? "No plan is attached. Continue from the task details."
     return common + """
 
       \(planInstruction) Preserve all unrelated work.
@@ -516,7 +517,8 @@ struct AgentApproval {
     if let relative = item.planPath {
       let plan = try safePlan(relative, root: projectRoot)
       planRelativePath = relative
-      planData = FileManager.default.fileExists(atPath: plan.path)
+      planData =
+        FileManager.default.fileExists(atPath: plan.path)
         ? try Data(contentsOf: plan) : nil
     } else {
       planRelativePath = nil

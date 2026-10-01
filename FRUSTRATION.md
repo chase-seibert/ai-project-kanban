@@ -9,3 +9,7 @@
 - This Xcode installation has DeviceHub under Contents/Applications, not Simulator.app. The Makefile resolves that location instead of assuming an app named Simulator.
 - Mac screen locking intermittently blocks UI control. Do not claim a PID proves visible UI or substitute an imagined screenshot.
 - The standalone `runner-test` compile enumerates app sources instead of using the Xcode target, so adding a Mac service referenced by `AppModel` also requires adding it to that source list.
+
+## 2026-10-01
+
+- A nested `codex exec` could not reach StageChase's loopback MCP endpoint from its sandbox, even after allowing workspace writes. The StageChase settings UI showed the listener as stopped on a later check; restarting it and making a direct local MCP request worked. Avoid repeated nested CLI attempts: verify the listener is active and use the MCP connection in the current session, or report that the tools are unavailable.

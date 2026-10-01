@@ -191,6 +191,91 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   repository = nil
 }
 
+@Test func mcpMutationReceiptIsAtomicDurableAndRejectsOperationReuse() async throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChaseMCP-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let storeURL = root.appendingPathComponent("Library.sqlite")
+  var repository: LibraryRepository? = try LibraryRepository(url: storeURL)
+  let project = Project(name: "MCP test")
+  _ = try await repository!.apply(.createProject(project))
+  let operationID = UUID()
+  var task = WorkItem(projectID: project.id, title: "One MCP task")
+  task.id = operationID
+  let first = try await repository!.applyMCP(
+    .createTask(task), operationID: operationID, fingerprint: "same-request")
+  #expect(!first.replayed)
+  #expect(first.library.tasks.count == 1)
+  repository = nil
+
+  repository = try LibraryRepository(url: storeURL)
+  let replay = try await repository!.applyMCP(
+    .createTask(task), operationID: operationID, fingerprint: "same-request")
+  #expect(replay.replayed)
+  #expect(replay.library.tasks.count == 1)
+  await #expect(throws: (any Error).self) {
+    try await repository!.applyMCP(
+      .createTask(task), operationID: operationID, fingerprint: "changed-request")
+  }
+  repository = nil
+}
+
+@Test func mcpMoveDoesNotQueueCodexAndLatestUpdatePreservesBoardState() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  var project = Project(name: "MCP")
+  project.directory = "/tmp/mcp-fixture"
+  project.automationEnabled = true
+  _ = try await repository.apply(.createProject(project))
+  let createID = UUID()
+  var task = WorkItem(projectID: project.id, title: "MCP acceptance")
+  task.id = createID
+  _ = try await repository.applyMCP(
+    .createTask(task), operationID: createID, fingerprint: "create")
+
+  let moveID = UUID()
+  let moved = try await repository.applyMCP(
+    .move(task.id, .implementation, expectedRevision: 0),
+    operationID: moveID, fingerprint: "move")
+  #expect(moved.library.tasks[0].stage == .implementation)
+  #expect(moved.library.runs.isEmpty)
+
+  let updateID = UUID()
+  let updated = try await repository.applyMCP(
+    .reportTaskUpdate(task.id, "Build is ready for review", expectedRevision: 1),
+    operationID: updateID, fingerprint: "report")
+  #expect(updated.library.tasks[0].stage == .implementation)
+  #expect(!updated.library.tasks[0].completed)
+  #expect(updated.library.tasks[0].latestCodexUpdate == "Build is ready for review")
+  #expect(updated.library.tasks[0].revision == 2)
+  #expect(updated.library.runs.isEmpty)
+}
+
+@Test func externalCodexRunBecomesStaleInsteadOfInterruptedAfterRestart() async throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChaseExternal-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let storeURL = root.appendingPathComponent("Library.sqlite")
+  var repository: LibraryRepository? = try LibraryRepository(url: storeURL)
+  let project = Project(name: "External")
+  _ = try await repository!.apply(.createProject(project))
+  let task = WorkItem(projectID: project.id, title: "Desktop session")
+  _ = try await repository!.apply(.createTask(task))
+  var run = AgentRun(task: task, kind: .task)
+  run.source = .codexDesktop
+  run.status = .running
+  _ = try await repository!.apply(.beginExternalRun(run))
+  repository = nil
+
+  repository = try LibraryRepository(url: storeURL)
+  let restored = try await repository!.load()
+  #expect(restored.runs.first?.status == .stale)
+  #expect(restored.runs.first?.source == .codexDesktop)
+  #expect(restored.runs.first?.summary.contains("unverified") == true)
+  repository = nil
+}
+
 @Test func taskIsolationAndQuickCaptureInEveryStage() throws {
   let a = Project(name: "A")
   let b = Project(name: "B")

@@ -38,6 +38,15 @@ private struct StoredSyncState: Codable, Sendable {
   var receipts: [UUID: StoredSyncReceipt] = [:]
 }
 
+private struct StoredMCPState: Codable, Sendable {
+  var receipts: [UUID: String] = [:]
+}
+
+public struct MCPApplyResult: Sendable {
+  public var library: Library
+  public var replayed: Bool
+}
+
 public struct SyncLibraryState: Sendable {
   public var libraryID: UUID
   public var sequence: UInt64
@@ -50,6 +59,7 @@ public actor LibraryRepository {
   private let container: ModelContainer
   private var cached: Library?
   private var syncState: StoredSyncState?
+  private var mcpState: StoredMCPState?
   private let legacyURL: URL?
   private let recoverActiveRuns: Bool
   public init(
@@ -86,6 +96,8 @@ public actor LibraryRepository {
       case "metadata":
         if entry.key == "sync-state" {
           syncState = try decoder.decode(StoredSyncState.self, from: entry.payload)
+        } else if entry.key == "mcp-state" {
+          mcpState = try decoder.decode(StoredMCPState.self, from: entry.payload)
         }
       default:
         throw BoardError.invalid("Unknown record in the library. Your data has not been changed.")
@@ -108,8 +120,14 @@ public actor LibraryRepository {
     if recoverActiveRuns {
       for index in library.runs.indices
       where [.running, .needsInput, .queued].contains(library.runs[index].status) {
-        library.runs[index].status = .interrupted
-        library.runs[index].summary = "Runner stopped. Review the session, then retry explicitly."
+        if library.runs[index].source == .codexDesktop {
+          library.runs[index].status = .stale
+          library.runs[index].summary =
+            "Codex Desktop state is unverified after restart. Begin a new tracking record if continuing."
+        } else {
+          library.runs[index].status = .interrupted
+          library.runs[index].summary = "Runner stopped. Review the session, then retry explicitly."
+        }
         recovered = true
       }
     }
@@ -131,6 +149,37 @@ public actor LibraryRepository {
     cached = library
     syncState = nextSyncState
     return library
+  }
+
+  /// Commits a local MCP mutation and its replay receipt in the same SwiftData save.
+  public func applyMCP(
+    _ command: Mutation, operationID: UUID, fingerprint: String
+  ) throws -> MCPApplyResult {
+    let current = try load()
+    var state = mcpState ?? StoredMCPState()
+    if let prior = state.receipts[operationID] {
+      guard prior == fingerprint else {
+        throw BoardError.invalid("This operation ID was already used for different content.")
+      }
+      return MCPApplyResult(library: current, replayed: true)
+    }
+    let updated = try BoardReducer.apply(command, to: current)
+    state.receipts[operationID] = fingerprint
+    if state.receipts.count > 2_000 {
+      // Stable deterministic eviction bounds metadata growth without exposing the map order.
+      for key in state.receipts.keys.sorted(by: { $0.uuidString < $1.uuidString })
+        .prefix(state.receipts.count - 2_000)
+      {
+        state.receipts.removeValue(forKey: key)
+      }
+    }
+    var nextSyncState = syncState ?? StoredSyncState()
+    nextSyncState.sequence &+= 1
+    try persist(updated, syncState: nextSyncState, mcpState: state)
+    cached = updated
+    syncState = nextSyncState
+    mcpState = state
+    return MCPApplyResult(library: updated, replayed: false)
   }
 
   public func syncStateSnapshot() throws -> SyncLibraryState {
@@ -248,7 +297,9 @@ public actor LibraryRepository {
     return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 
-  private func persist(_ library: Library, syncState: StoredSyncState? = nil) throws {
+  private func persist(
+    _ library: Library, syncState: StoredSyncState? = nil, mcpState: StoredMCPState? = nil
+  ) throws {
     let context = ModelContext(container)
     context.autosaveEnabled = false
     let encoder = JSONEncoder()
@@ -284,6 +335,9 @@ public actor LibraryRepository {
     if cached == nil { try upsert(1, key: "schema", kind: "metadata", project: nil) }
     if let state = syncState ?? self.syncState {
       try upsert(state, key: "sync-state", kind: "metadata", project: nil)
+    }
+    if let state = mcpState ?? self.mcpState {
+      try upsert(state, key: "mcp-state", kind: "metadata", project: nil)
     }
     try sync(
       library.projects, previous: cached?.projects ?? [], prefix: "p:", kind: "project",

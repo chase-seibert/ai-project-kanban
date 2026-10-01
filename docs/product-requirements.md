@@ -97,6 +97,18 @@ open.
 - Manual handoffs, status refreshes, and Codex outcomes do not move a task or
   start work from phone polling or replica updates.
 
+## Codex Desktop task tools
+
+- As a user, I want Codex Desktop to list, read, and create project tasks, so I
+  can work from the repository already open in that session.
+- As a user, I want explicit, revision-checked moves and completion changes to
+  appear in StageChase, so task state stays in the local library.
+- As a user, I want Codex to report a concise latest session update, so the
+  task detail shows recent progress without copying a conversation transcript.
+- The Mac-only MCP listener is opt-in and loopback-only. Tool calls never start,
+  resume, retry, stop, or approve Codex work. Completion remains independent of
+  the five fixed workflow stages.
+
 ## Plan feedback
 
 - As a user, I want to type or dictate feedback on a saved plan and explicitly

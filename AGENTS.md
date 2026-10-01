@@ -37,7 +37,10 @@ custom columns, automatic completion, public cloud hosting, or user-facing
 CLI tools without an explicit product decision. Polling/synchronization must
 not start or manage Codex. Automatic turns require a confirmed stage transition
 with both automatic-invocation settings enabled; a manual turn starts only when
-the user opens a task handoff in Codex Desktop and starts work there.
+the user opens a task handoff in Codex Desktop and starts work there. An
+opt-in loopback MCP endpoint also allows direct task reads and explicit task
+writes; MCP calls must never start or manage a Codex turn. Require project/task
+IDs and expected revisions for existing-task writes.
 
 The implementation includes multi-project boards, a Mac Codex runner behind
 AgentConnection, and an experimental local Wi-Fi sync path. Preserve
@@ -45,6 +48,17 @@ idempotence, revision checks, visible activity, explicit approvals, and
 failed-run retry state. Sync has not passed device-level acceptance; distinguish
 build/test coverage from verified Mac–iPhone behavior. The phone must never
 start, approve, stop, or retry Mac Codex work through polling or replica updates.
+
+## Codex Desktop MCP task workflow
+
+When the StageChase MCP connection is available, use `list_projects` and
+`list_tasks` to find tasks by stable IDs, then `read_task` before implementation.
+Call `begin_task` only after the user asks to start work. Report concise progress
+with `report_task_update`; call `finish_task` with the final summary when the
+work ends. A successful code change does not itself complete or move the
+StageChase task. Call `move_task` or `set_task_completed` only when the user
+explicitly asks for that board-state change, and always use the latest task
+revision. MCP tools update Project Chase but never start or manage a Codex turn.
 
 ## Instructions
 - When finishing a prompt session, rebuild and relaunch either the mac app or ios app or both depeneding on the change.
@@ -63,6 +77,7 @@ start, approve, stop, or retry Mac Codex work through polling or replica updates
 - [Automations](docs/automations.md)
 - [Task delegation](docs/task-delegation.md)
 - [Shared project guide](docs/create-shared-cowork-project.md)
+- [StageChase MCP instructions for project agents](docs/stagechase-mcp-agent-snippet.md)
 
 Update documentation and `CHANGELOG.md` when durable behavior changes. Read
 `docs/automations.md` before adding automation and update `tasks/tasks.md` when

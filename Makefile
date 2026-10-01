@@ -16,7 +16,7 @@ DEVELOPMENT_TEAM ?= 96NAC4VTEN
 runner-test:
 	mkdir -p build/verification
 	chmod +x Tests/Integration/fake-codex.py
-	xcrun swiftc -swift-version 6 -module-cache-path build/verification/module-cache -parse-as-library Sources/StageChaseCore/*.swift Sources/StageChaseUI/*.swift Apps/StageChaseMac/CodexConnection.swift Apps/StageChaseMac/CodexRunner.swift Apps/StageChaseMac/SyncServer.swift Tests/Integration/RunnerSmoke.swift -o build/verification/runner-smoke
+	xcrun swiftc -swift-version 6 -module-cache-path build/verification/module-cache -parse-as-library Sources/StageChaseCore/*.swift Sources/StageChaseUI/*.swift Apps/StageChaseMac/CodexConnection.swift Apps/StageChaseMac/CodexRunner.swift Apps/StageChaseMac/MCPServer.swift Apps/StageChaseMac/SyncServer.swift Tests/Integration/RunnerSmoke.swift -o build/verification/runner-smoke
 	build/verification/runner-smoke "$(CURDIR)/Tests/Integration/fake-codex.py"
 
 codex-check:

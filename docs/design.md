@@ -65,3 +65,8 @@ project; Shift-Cmd-A opens activity; Cmd +/-/0 adjusts persisted semantic text
 size. Cmd-Z/Shift-Cmd-Z undo/redo manual task creation, edits, moves, completion,
 and deletion without agent history. Agent side effects are never undone or
 restarted. Reordering currently has no undo action. Deletion requires confirmation.
+
+Mac Settings → Connection also exposes an opt-in Codex Desktop MCP endpoint.
+It lists and reads project tasks and supports task creation, explicit stage
+moves, and completion changes through the Mac library. The endpoint binds to
+loopback; task moves do not prompt for or launch automated runs.

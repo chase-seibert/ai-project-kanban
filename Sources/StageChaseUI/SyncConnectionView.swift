@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if os(macOS)
+  import AppKit
+#endif
+
 struct SyncConnectionView: View {
   @Environment(AppModel.self) private var model
 
@@ -77,6 +81,36 @@ struct SyncConnectionView: View {
           }
           Button("Enable local Wi-Fi sync") { Task { await model.startLocalSync() } }
             .buttonStyle(.borderedProminent)
+        }
+      }
+      Section("Codex Desktop task tools") {
+        LabeledContent("Server", value: model.mcpServer?.status ?? "Off")
+        Button("Copy Codex disconnect command") {
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString("codex mcp remove stagechase", forType: .string)
+        }
+        if let endpoint = model.mcpServer?.endpoint {
+          LabeledContent("Loopback endpoint", value: endpoint).textSelection(.enabled)
+          Button("Copy Codex setup command") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(
+              "codex mcp add stagechase --url \"\(endpoint)\"", forType: .string)
+          }
+          Text(
+            "Run the copied command in Terminal to add this local server to Codex Desktop. Codex and the StageChase app must run on this Mac."
+          )
+          .stageFont(.caption).foregroundStyle(.secondary)
+          Button("Stop task server", role: .destructive) { model.stopMCPServer() }
+        } else {
+          Text(
+            "The local MCP server exposes project and task read/write tools while StageChase is open. Task moves only change the board; they never start Codex."
+          )
+          .stageFont(.caption).foregroundStyle(.secondary)
+          Button("Start task server") { model.startMCPServer() }
+            .buttonStyle(.borderedProminent)
+        }
+        if let error = model.mcpServer?.error {
+          Text(error).foregroundStyle(.red).stageFont(.callout)
         }
       }
     }

@@ -75,7 +75,8 @@ import UniformTypeIdentifiers
       preview
       ? UserDefaults(suiteName: "StageChase.Preview.\(UUID().uuidString)")!
       : preferences
-    autoInvokeCodex = self.preferences.object(forKey: Self.autoInvokeCodexPreferenceKey) as? Bool
+    autoInvokeCodex =
+      self.preferences.object(forKey: Self.autoInvokeCodexPreferenceKey) as? Bool
       ?? true
     #if os(macOS)
       if let saved = self.preferences.string(forKey: Self.planFormatPromptPreferenceKey) {
@@ -108,6 +109,7 @@ import UniformTypeIdentifiers
   #if os(macOS)
     var runner: CodexRunner?
     var syncServer: SyncServer?
+    var mcpServer: MCPServer?
   #endif
 
   #if os(iOS)
@@ -150,6 +152,11 @@ import UniformTypeIdentifiers
       #if os(macOS)
         runner = CodexRunner(model: self)
         if !isPreview, let repository {
+          if mcpServer == nil {
+            let server = MCPServer(repository: repository)
+            server.onLibraryChanged = { [weak self] library in self?.library = library }
+            mcpServer = server
+          }
           if syncServer == nil {
             let server = SyncServer(repository: repository)
             server.onLibraryChanged = { [weak self] library in self?.library = library }
@@ -217,6 +224,21 @@ import UniformTypeIdentifiers
       preferences.set(false, forKey: "localSyncEnabled")
       syncServer?.stop()
     }
+
+    func startMCPServer() {
+      guard !isPreview, let repository else {
+        error = "Load the Mac library before enabling the Codex task server."
+        return
+      }
+      if mcpServer == nil {
+        let server = MCPServer(repository: repository)
+        server.onLibraryChanged = { [weak self] library in self?.library = library }
+        mcpServer = server
+      }
+      mcpServer?.start()
+    }
+
+    func stopMCPServer() { mcpServer?.stop() }
   #endif
 
   #if os(iOS)
@@ -713,7 +735,8 @@ import UniformTypeIdentifiers
       error = "Automatic invocation is off. Use Run in Codex on the task for a manual handoff."
       return
     }
-    guard library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true else {
+    guard library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true
+    else {
       error = "Automatic runs are disabled for this project. Use Run in Codex for a manual handoff."
       return
     }

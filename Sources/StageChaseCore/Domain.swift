@@ -209,6 +209,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var completed = false
   public var revision = 0
   public var planPath: String?
+  public var latestCodexUpdate: String?
+  public var latestCodexUpdateAt: Date?
   public var modelOverride: CodexModelConfiguration?
   public var createdAt = Date()
   public var updatedAt = Date()
@@ -224,7 +226,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
 }
 
 public enum RunStatus: String, Codable, CaseIterable, Sendable {
-  case queued, readyForHandoff, running, needsInput, succeeded, failed, interrupted, cancelled
+  case queued, readyForHandoff, running, needsInput, succeeded, failed, interrupted, cancelled,
+    stale
   public var title: String {
     switch self {
     case .needsInput: "Needs your approval"
@@ -237,17 +240,20 @@ public enum RunStatus: String, Codable, CaseIterable, Sendable {
 }
 
 public enum RunKind: String, Codable, Sendable { case planning, implementation, task }
+public enum RunSource: String, Codable, Sendable { case stageChase, codexDesktop }
 
 public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var id = UUID()
   public var taskID: UUID
   public var projectID: UUID
   public var kind: RunKind
+  public var source: RunSource?
   public var status: RunStatus = .queued
   public var threadID: String?
   public var turnID: String?
   public var workDirectory: String?
   public var summary = "Waiting for the Mac runner"
+  public var latestMessage: String?
   public var error: String?
   public var steps: [ProgressStep] = []
   public var modelConfiguration: ResolvedCodexConfiguration?
@@ -342,10 +348,13 @@ public enum Mutation: Sendable {
   case editProject(Project)
   case createTask(WorkItem, configuration: ResolvedCodexConfiguration? = nil)
   case createManualRun(AgentRun)
+  case beginExternalRun(AgentRun)
   case editTask(WorkItem, expectedRevision: Int)
   case move(
     UUID, WorkflowStage, expectedRevision: Int, configuration: ResolvedCodexConfiguration? = nil)
   case complete(UUID, Bool, expectedRevision: Int)
+  case reportTaskUpdate(UUID, String, expectedRevision: Int)
+  case reportExternalRun(UUID, String, RunStatus, expectedTaskRevision: Int)
   case deleteTask(UUID, expectedRevision: Int)
   case restoreTask(UUID, WorkItem?, expectedRevision: Int?)
   case reorder(UUID, before: UUID, expectedRevision: Int)
@@ -445,6 +454,17 @@ public enum BoardReducer {
         Activity(
           "Prepared a Codex Desktop handoff.", projectID: run.projectID, taskID: run.taskID,
           runID: run.id))
+    case .beginExternalRun(let run):
+      guard run.kind == .task, run.source == .codexDesktop, run.status == .running,
+        state.tasks.contains(where: { $0.id == run.taskID && $0.projectID == run.projectID }),
+        !state.runs.contains(where: { $0.id == run.id }),
+        !state.runs.contains(where: { $0.taskID == run.taskID && $0.status.isActive })
+      else { throw BoardError.invalid("The external Codex Desktop tracking record is invalid.") }
+      state.runs.append(run)
+      state.activity.append(
+        Activity(
+          "Work tracked in Codex Desktop.", projectID: run.projectID, taskID: run.taskID,
+          runID: run.id))
     case .editTask(var item, let expectedRevision):
       let index = try taskIndex(item.id, expectedRevision)
       try ensureIdle(item.id)
@@ -480,6 +500,47 @@ public enum BoardReducer {
         Activity(
           complete ? "Task marked complete by you." : "Task reopened.",
           projectID: state.tasks[index].projectID, taskID: id))
+    case .reportTaskUpdate(let id, let message, let revision):
+      let index = try taskIndex(id, revision)
+      let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty, trimmed.count <= 2_000 else {
+        throw BoardError.invalid("The latest Codex update must contain 1 to 2,000 characters.")
+      }
+      state.tasks[index].latestCodexUpdate = trimmed
+      state.tasks[index].latestCodexUpdateAt = .now
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
+      state.activity.append(
+        Activity(
+          "Codex update · \(trimmed)", projectID: state.tasks[index].projectID,
+          taskID: id))
+    case .reportExternalRun(let runID, let message, let status, let taskRevision):
+      guard let runIndex = state.runs.firstIndex(where: { $0.id == runID }),
+        state.runs[runIndex].source == .codexDesktop
+      else { throw BoardError.missing }
+      guard [.running, .needsInput].contains(state.runs[runIndex].status) else {
+        throw BoardError.invalid(
+          "This external Codex session is no longer active. Begin a new tracking record.")
+      }
+      guard [.running, .needsInput, .succeeded, .failed, .interrupted, .cancelled].contains(status)
+      else { throw BoardError.invalid("That status is not valid for an external Codex session.") }
+      let run = state.runs[runIndex]
+      let index = try taskIndex(run.taskID, taskRevision)
+      let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty, trimmed.count <= 2_000 else {
+        throw BoardError.invalid("The latest Codex update must contain 1 to 2,000 characters.")
+      }
+      state.tasks[index].latestCodexUpdate = trimmed
+      state.tasks[index].latestCodexUpdateAt = .now
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
+      state.runs[runIndex].status = status
+      state.runs[runIndex].summary = trimmed
+      state.runs[runIndex].latestMessage = trimmed
+      state.runs[runIndex].updatedAt = .now
+      state.activity.append(
+        Activity(
+          "Codex Desktop · \(trimmed)", projectID: run.projectID, taskID: run.taskID, runID: runID))
     case .deleteTask(let id, let revision):
       _ = try taskIndex(id, revision)
       try ensureIdle(id)
@@ -608,10 +669,11 @@ public enum BoardReducer {
       state.runs[index].status = .succeeded
       state.runs[index].updatedAt = .now
       state.runs[index].summary =
-      run.kind == .planning
+        run.kind == .planning
         ? "Plan saved. Ready for your go-ahead."
-        : run.kind == .implementation ? "Implementation finished. Review the changes."
-        : "Codex Desktop task finished. Review the changes."
+        : run.kind == .implementation
+          ? "Implementation finished. Review the changes."
+          : "Codex Desktop task finished. Review the changes."
       state.activity.append(
         Activity(
           state.runs[index].summary, projectID: run.projectID, taskID: run.taskID, runID: run.id))

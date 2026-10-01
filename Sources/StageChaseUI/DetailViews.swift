@@ -378,6 +378,15 @@ struct TaskDetail: View {
           Divider()
           VStack(alignment: .leading, spacing: 12) {
             Label("Codex activity", systemImage: "sparkles").stageFont(.headline)
+            if let update = item.latestCodexUpdate {
+              Text("Latest Codex update").stageFont(.caption, weight: .semibold)
+                .foregroundStyle(.secondary)
+              Text(update).textSelection(.enabled)
+              if let date = item.latestCodexUpdateAt {
+                Text(date.formatted(date: .abbreviated, time: .shortened))
+                  .stageFont(.caption2).foregroundStyle(.secondary)
+              }
+            }
             if let run = model.library.latestRun(for: taskID) {
               RunDetail(run: run)
             } else {
@@ -387,8 +396,8 @@ struct TaskDetail: View {
                   model.isConnectedPhone
                     ? "Codex runs on Mac. Stage changes do not start or manage Codex work."
                     : model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
-                    ? "Confirmed moves can start Codex. Task placement stays under your control."
-                    : "Use Run in Codex to prepare a manual Desktop handoff. Task placement stays under your control."
+                      ? "Confirmed moves can start Codex. Task placement stays under your control."
+                      : "Use Run in Codex to prepare a manual Desktop handoff. Task placement stays under your control."
                 )
                 .stageFont(.callout).foregroundStyle(.secondary)
               #else
@@ -572,24 +581,27 @@ struct RunDetail: View {
         }
       #endif
       HStack {
-        if !model.isConnectedPhone, run.kind == .task,
-          [.failed, .interrupted, .cancelled, .succeeded].contains(run.status)
-        {
-          Button("Retry in Codex", systemImage: "arrow.clockwise") {
-            Task { await model.rerunInCodex(run.id) }
+        #if os(macOS)
+          if !model.isConnectedPhone, run.source != .codexDesktop, run.kind == .task,
+            [.failed, .interrupted, .cancelled, .succeeded].contains(run.status)
+          {
+            Button("Retry in Codex", systemImage: "arrow.clockwise") {
+              Task { await model.rerunInCodex(run.id) }
+            }
+          } else if !model.isConnectedPhone, run.source != .codexDesktop, model.autoInvokeCodex,
+            model.library.projects.first(where: { $0.id == run.projectID })?.automationEnabled
+              == true,
+            [.failed, .interrupted, .cancelled].contains(run.status)
+          {
+            Button(
+              run.modelConfiguration == nil ? "Review model and retry" : "Retry in same session",
+              systemImage: "arrow.clockwise"
+            ) {
+              Task { await model.retry(run.id) }
+            }
           }
-        } else if !model.isConnectedPhone, model.autoInvokeCodex,
-          model.library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true,
-          [.failed, .interrupted, .cancelled].contains(run.status)
-        {
-          Button(
-            run.modelConfiguration == nil ? "Review model and retry" : "Retry in same session",
-            systemImage: "arrow.clockwise"
-          ) {
-            Task { await model.retry(run.id) }
-          }
-        }
-        if !model.isConnectedPhone && run.status.isActive {
+        #endif
+        if !model.isConnectedPhone, run.source != .codexDesktop, run.status.isActive {
           Button("Stop run", systemImage: "stop.circle", role: .destructive) {
             Task { await model.stop(run.id) }
           }

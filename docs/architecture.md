@@ -41,6 +41,22 @@ opens a linked empty session, and copies the context without submitting a turn.
 The user starts work in Codex Desktop. A user-initiated Refresh status reads the
 linked session and updates only its run record.
 
+The Mac app can expose an opt-in, loopback-only MCP server at
+`Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same
+`LibraryRepository` as the board; no second process opens the SQLite library.
+Project/task reads are scoped by stable IDs. Create/move/complete writes use the
+normal reducer, persist bounded operation receipts and advance the phone-sync
+sequence in the same save. Existing-task updates require the current revision.
+External session records have a distinct source; `begin_task`,
+`report_task_update`, and `finish_task` only track work that Codex Desktop
+already started. They store one bounded latest message on the task/run, never a
+transcript or inferred thread ID. Restart marks an external active record stale
+rather than interrupted or resumable by StageChase.
+MCP stage moves pass no model configuration and never call `kickRunner()`,
+regardless of automatic-invocation preferences. Stop the endpoint in Settings
+to disconnect Codex Desktop; it binds to `127.0.0.1` and uses a per-install
+secret path component. Task move and completion remain distinct.
+
 Model precedence is task override, project override, then the Mac's global
 StageChase preference. The built-in default is Latest Luna with High reasoning.
 Latest Luna resolves from visible stable Luna IDs in the connected app-server

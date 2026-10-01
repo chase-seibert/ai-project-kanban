@@ -16,6 +16,7 @@ not yet verified.
 | Implementation success | Require structured success; update the run only. The user chooses the task column and completion state |
 | Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers a manual Desktop handoff |
 | Run in Codex from task detail | Persist task context, create an empty Codex Desktop session, copy the context, and open that session; the user starts the turn in Desktop |
+| Use the optional Codex Desktop MCP connection | Read/create tasks and explicitly move/complete them through the Mac library; MCP task calls never start or control a Codex turn |
 | Refresh manual Codex status | Read the linked session only after the user presses Refresh status; update its run record without changing the task |
 | Retry/rerun a manual task | Reuse the saved context in a fresh Desktop session and copy it again; the user starts the new turn |
 | Approval request in Ask me mode | Show Allow once / Deny and Needs Approval state |
@@ -32,6 +33,20 @@ not yet verified.
 | Phone move between stages | Apply the move without starting Codex; phone polling and replica updates never enqueue or invoke work |
 | Append plan feedback on Mac | Coordinate an explicit raw-text append to the saved Markdown plan; never enqueue or invoke the runner |
 | Phone plan feedback | Direct the user to the Mac, where project plan files are stored |
+
+The **Connection → Codex Desktop task tools** setting starts an opt-in MCP
+listener bound to `127.0.0.1`. Use the displayed `codex mcp add stagechase
+--url …` command to register it with the Codex Desktop configuration. The
+listener is available only while StageChase is open. MCP task creation defaults
+to Inbox; moves and completion are explicit, revision-checked, separate changes.
+The repository commits an operation receipt with each MCP write so a retry with
+the same operation ID cannot duplicate the change. Moving a task through MCP
+never enters the automatic-run path.
+`begin_task`, `report_task_update`, and `finish_task` record the session already
+open in Codex Desktop and a bounded latest message. They do not create or
+control a Desktop session; after a StageChase restart its external state is
+shown stale. If work is continuing, Codex begins a new tracking record before
+reporting again.
 
 Workspace-write sandboxing and default network restrictions remain enabled.
 Unknown requests are not silently approved. The agent is instructed not to

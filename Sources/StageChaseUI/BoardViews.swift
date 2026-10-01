@@ -387,6 +387,7 @@ struct RunBadge: View {
     case .succeeded: "checkmark.circle"
     case .failed, .interrupted: "exclamationmark.circle"
     case .cancelled: "stop.circle"
+    case .stale: "questionmark.circle"
     }
   }
   var color: Color {

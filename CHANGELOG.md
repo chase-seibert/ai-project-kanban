@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-01
+
+- Added an opt-in, loopback-only MCP task server for Codex Desktop. It lists
+  projects/tasks, reads tasks, creates Inbox tasks, and supports explicit,
+  revision-checked stage and completion changes through the local library.
+- Persisted bounded MCP operation receipts in the same save as task changes so
+  retried writes are idempotent and visible to normal board/phone sync refresh.
+- Added a Connection settings control and Codex CLI setup command. MCP task
+  operations never start StageChase's Codex runner. Added explicit external
+  session bookkeeping and a bounded latest update visible in task detail.
+
 ## 2026-09-30
 
 - Added a Mac-wide automatic-invocation setting and task-level Codex Desktop
