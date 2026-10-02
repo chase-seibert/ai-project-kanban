@@ -97,12 +97,57 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       .utf8)
   let decoded = try JSONDecoder().decode(Project.self, from: legacy)
   #expect(!decoded.usesWorktrees)
+  #expect(decoded.executionProfile == .workspaceAccessNoPrompts)
   #expect(!Project(name: "New").usesWorktrees)
 
   var enabled = decoded
   enabled.usesWorktrees = true
   let roundTrip = try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(enabled))
   #expect(roundTrip == enabled)
+}
+
+@Test func projectExecutionProfilesAreIndependentAndRunRetriesKeepTheirSnapshot() throws {
+  var restricted = Project(name: "Restricted", directory: "/tmp/restricted")
+  restricted.automationEnabled = true
+  var full = Project(name: "Full", directory: "/tmp/full")
+  full.automationEnabled = true
+  full.executionProfile = .fullAccessNoPrompts
+  var library = Library()
+  library.projects = [restricted, full]
+  let restrictedTask = WorkItem(projectID: restricted.id, title: "Restricted task", stage: .next)
+  let fullTask = WorkItem(projectID: full.id, title: "Full task", stage: .next)
+  library = try BoardReducer.apply(
+    .createTask(restrictedTask, configuration: fixtureModelConfiguration), to: library)
+  library = try BoardReducer.apply(
+    .createTask(fullTask, configuration: fixtureModelConfiguration), to: library)
+  #expect(library.runs[0].executionProfile == .workspaceAccessNoPrompts)
+  #expect(library.runs[1].executionProfile == .fullAccessNoPrompts)
+
+  var failedRun = library.runs[1]
+  failedRun.status = .failed
+  library = try BoardReducer.apply(.updateRun(failedRun), to: library)
+  var changedProject = full
+  changedProject.executionProfile = .workspaceAccessNoPrompts
+  library = try BoardReducer.apply(.editProject(changedProject), to: library)
+  library = try BoardReducer.apply(.retry(failedRun.id), to: library)
+  #expect(library.runs[1].executionProfile == .fullAccessNoPrompts)
+}
+
+@Test func legacyProjectAndRunRecordsDecodeToSafeExecutionProfile() throws {
+  let legacyProject = Data(
+    #"{"id":"00000000-0000-0000-0000-000000000001","name":"Legacy","directory":"/tmp/legacy","createdAt":0}"#
+      .utf8)
+  let project = try JSONDecoder().decode(Project.self, from: legacyProject)
+  #expect(project.executionProfile == .workspaceAccessNoPrompts)
+
+  let task = WorkItem(projectID: project.id, title: "Old run")
+  let run = AgentRun(task: task, kind: .implementation)
+  let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(run)) as! [String: Any]
+  var legacyRunObject = object
+  legacyRunObject.removeValue(forKey: "executionProfile")
+  let decoded = try JSONDecoder().decode(
+    AgentRun.self, from: JSONSerialization.data(withJSONObject: legacyRunObject))
+  #expect(decoded.executionProfile == nil)
 }
 
 @Test func deployedRevisionIsOptionalBackwardCompatibleProjectData() throws {
@@ -145,6 +190,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   project.automationEnabled = true
   project.usesWorktrees = true
   project.modelOverride = CodexModelConfiguration(selection: .model("private-model"))
+  project.executionProfile = .fullAccessNoPrompts
   var task = WorkItem(projectID: project.id, title: "Task", stage: .planned)
   task.planPath = "/Users/test/private-repo/plan.md"
   task.notes = "Keep the details"
@@ -164,6 +210,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.projects[0].automationEnabled)
   #expect(replica.projects[0].usesWorktrees)
   #expect(replica.projects[0].modelOverride == project.modelOverride)
+  #expect(replica.projects[0].executionProfile == .fullAccessNoPrompts)
   #expect(replica.tasks[0].notes == task.notes)
   #expect(replica.tasks[0].planPath == nil)
   #expect(replica.runs[0].status == run.status)

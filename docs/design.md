@@ -47,6 +47,13 @@ event records remain stored; open a run in Codex on Mac to inspect its session.
 On iPhone, StageChase tries the Codex thread URL and, if no app can open it,
 directs the user to continue on Mac and lets them copy the session ID. The phone
 cannot manage the Mac runner.
+Mac Project settings expose a per-project Codex execution profile. The safe
+default uses workspace-write and disables approval prompts. Full access is an
+explicit choice with filesystem and network scope explained beside the picker.
+Runs save the selected profile and retries reuse that snapshot. Profile values
+travel in project replicas as informational data only; phone views never invoke
+or manage Codex. Final runner summaries use ordinary readable prose.
+
 For an incomplete Planning task with a saved plan, the same context field accepts
 typed or system-dictated plan feedback. Leaving the field appends feedback;
 StageChase adds a `User feedback on the plan` heading, preserves the wording, and

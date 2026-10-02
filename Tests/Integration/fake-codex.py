@@ -14,6 +14,7 @@ turn_id = None
 pending = None
 pending_kind = None
 thread_policies = {}
+thread_sandboxes = {}
 thread_turns = {}
 thread_status = {}
 
@@ -55,7 +56,12 @@ def complete(params):
             content = "   \n\t" if "EMPTY_PLAN_FIXTURE" in prompt else "# Fixture plan\n\nImplement and verify the fixture.\n"
             destination.write_text(content)
     event("turn/plan/updated", plan=[{"step": "Verify the fixture", "status": "completed"}])
-    text = json.dumps({"outcome": "blocked" if blocked else "completed", "summary": "Fixture is blocked" if blocked else "Fixture verified"})
+    if "UNMARKED_FIXTURE" in prompt:
+        text = "Fixture looks finished, but has no explicit outcome marker."
+    elif "EMPTY_COMPLETED_FIXTURE" in prompt:
+        text = "Completed:   "
+    else:
+        text = "Blocked: Fixture is blocked" if blocked else "Completed: Fixture verified"
     event("item/completed", item={"type": "agentMessage", "text": text, "phase": "final_answer"})
     event("turn/completed", turn={"id": turn_id, "status": "completed"})
     thread_status[params["threadId"]] = "idle"
@@ -105,6 +111,7 @@ for line in sys.stdin:
         else:
             thread_id = params["threadId"]
         thread_policies[thread_id] = params.get("approvalPolicy")
+        thread_sandboxes[thread_id] = params.get("sandbox")
         result = {"thread": {"id": thread_id}}
     elif method == "thread/read":
         if params.get("threadId") == "fixture-read-failure":
@@ -132,31 +139,35 @@ for line in sys.stdin:
         if "NAME_FAILURE_FIXTURE" not in title and thread_names.get(params["threadId"]) != prefix + title:
             send({"id": request_id, "error": {"code": -32602, "message": "thread name does not have the expected prefix and task title"}})
             continue
-        if "APPROVAL_FIXTURE" in prompt or "AUTO_APPROVE_FIXTURE" in prompt or "UNSAFE_FIXTURE" in prompt or "DENY_FIXTURE" in prompt:
-            expected_policy = "on-request"
-        else:
-            expected_policy = "never"
+        expected_policy = "never"
         if params.get("approvalPolicy") != expected_policy:
             send({"id": request_id, "error": {"code": -32602, "message": "wrong approval policy"}})
             continue
         if thread_policies.get(params["threadId"]) != expected_policy:
             send({"id": request_id, "error": {"code": -32602, "message": "thread approval policy mismatch"}})
             continue
-        sandbox = params.get("sandboxPolicy", {})
-        if sandbox != {"type": "workspaceWrite", "writableRoots": [params["cwd"]], "networkAccess": False}:
-            send({"id": request_id, "error": {"code": -32602, "message": "sandbox was widened"}})
+        full_access = "FULL_ACCESS" in prompt
+        expected_thread_sandbox = "danger-full-access" if full_access else "workspace-write"
+        expected_turn_sandbox = {"type": "dangerFullAccess"} if full_access else {
+            "type": "workspaceWrite", "writableRoots": [params["cwd"]], "networkAccess": False
+        }
+        if thread_sandboxes.get(params["threadId"]) != expected_thread_sandbox or params.get("sandboxPolicy") != expected_turn_sandbox:
+            send({"id": request_id, "error": {"code": -32602, "message": "thread and turn sandbox did not match the project's execution profile"}})
+            continue
+        if "outputSchema" in params:
+            send({"id": request_id, "error": {"code": -32602, "message": "final response must be plain text"}})
             continue
         send({"id": request_id, "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
         event("turn/started", turn={"id": turn_id, "status": "inProgress"})
         event("item/completed", item={"type": "commandExecution", "command": "echo fixture", "aggregatedOutput": "fixture\n", "status": "completed"})
-        if "APPROVAL_FIXTURE" in prompt or "AUTO_APPROVE_FIXTURE" in prompt or "UNSAFE_FIXTURE" in prompt or "DENY_FIXTURE" in prompt:
+        if "APPROVAL_FIXTURE" in prompt or "UNSAFE_FIXTURE" in prompt:
             pending = params
             pending_kind = "command"
             approval_params = {"threadId": thread_id, "turnId": turn_id, "itemId": "command-item", "command": "echo fixture", "cwd": params["cwd"], "reason": "Fixture requires approval"}
             if "UNSAFE_FIXTURE" in prompt:
                 approval_params["networkApprovalContext"] = {"host": "example.invalid", "protocol": "https"}
             send({"id": "approval-command", "method": "item/commandExecution/requestApproval", "params": approval_params})
-        elif "STOP_FIXTURE" not in params["input"][0]["text"] and "CLOSE_FIXTURE" not in params["input"][0]["text"]:
+        elif "STOP_FIXTURE" not in prompt and "CLOSE_FIXTURE" not in prompt:
             complete(params)
         continue
     elif method == "turn/interrupt":
@@ -169,11 +180,7 @@ for line in sys.stdin:
         result = {}
     elif request_id in ("approval-command", "approval-file"):
         decision = message.get("result", {}).get("decision")
-        if request_id == "approval-command" and pending_kind == "command" and decision == "accept" and "AUTO_APPROVE_FIXTURE" in pending["input"][0]["text"]:
-            pending_kind = "file"
-            event("item/started", item={"type": "fileChange", "id": "file-item", "changes": [{"path": "fixture.txt", "diff": "+fixture"}]})
-            send({"id": "approval-file", "method": "item/fileChange/requestApproval", "params": {"threadId": thread_id, "turnId": turn_id, "itemId": "file-item", "reason": "Fixture file change"}})
-        elif decision == "accept":
+        if decision == "accept":
             complete(pending)
         else:
             event("turn/completed", turn={"id": turn_id, "status": "interrupted"})

@@ -122,6 +122,23 @@ struct ProjectEditor: View {
             )
             .stageFont(.caption).foregroundStyle(.secondary)
           }
+          Section("Codex execution profile") {
+            Picker("Permission profile", selection: $project.executionProfile) {
+              ForEach(CodexExecutionProfile.allCases) { profile in
+                Text(profile.title).tag(profile)
+              }
+            }
+            Text(
+              project.executionProfile == .workspaceAccessNoPrompts
+                ? "Runs use the workspace-write sandbox, restricted to this run's working folder, with approval prompts disabled."
+                : "Runs can read and write files outside this project and access the network. Choose this only when you trust the task and project. Approval prompts are disabled."
+            )
+            .stageFont(.caption).foregroundStyle(.secondary)
+            Text(
+              "This project choice is saved with each new run. Retries keep the profile saved on that run."
+            )
+            .stageFont(.caption).foregroundStyle(.secondary)
+          }
           Section("Codex model") {
             CodexModelOverrideEditor(
               configuration: $project.modelOverride,
@@ -155,7 +172,7 @@ struct ProjectEditor: View {
         }
     }
     #if os(macOS)
-      .frame(width: 560, height: 620)
+      .frame(width: 560, height: 700)
     #endif
   }
 }

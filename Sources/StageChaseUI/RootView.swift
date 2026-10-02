@@ -388,23 +388,6 @@ private struct GeneralSettingsForm: View {
             "Uses a dedicated app-server connection and your existing Codex sign-in. Does not read or display authentication secrets."
           ).stageFont(.caption).foregroundStyle(.secondary)
         }
-        Section("Approval mode") {
-          Picker(
-            "When Codex needs approval",
-            selection: Binding(
-              get: { model.approvalMode },
-              set: { model.setApprovalMode($0) })
-          ) {
-            ForEach(CodexApprovalMode.allCases) { mode in
-              Text(mode.title).tag(mode)
-            }
-          }
-          Text(approvalModeDescription)
-            .stageFont(.caption).foregroundStyle(.secondary)
-          if let error = model.approvalModeError {
-            Text(error).stageFont(.caption).foregroundStyle(.orange)
-          }
-        }
         Section("Default Codex model") {
           CodexModelFields(
             configuration: Binding(
@@ -488,14 +471,4 @@ private struct GeneralSettingsForm: View {
       }
   }
 
-  private var approvalModeDescription: String {
-    switch model.approvalMode {
-    case .approveForMe:
-      "Uses Codex’s built-in no-prompt policy inside StageChase’s existing workspace sandbox."
-    case .askMe:
-      "Show supported command and file-change requests here for a one-time decision."
-    case .autoApproveRequests:
-      "StageChase answers supported requests once. It cannot grant broader file access or network access."
-    }
-  }
 }

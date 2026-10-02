@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+- Add per-project Codex execution profiles with a safe workspace-write default,
+  explicit full-access opt-in, and per-run retry snapshots. Keep approval
+  prompts disabled for both profiles while leaving quota, sign-in, device,
+  service, input, and task failures visible.
+- Replace JSON-constrained runner outcomes with readable plain-text final
+  responses; only explicit `Completed:` messages and valid planning files can
+  finish successfully.
 - Keep manual task completion and reopening available while a Codex run is
   Waiting or active, and remove completion changes from MCP. Run updates
   preserve a user's Done state and manually selected column.

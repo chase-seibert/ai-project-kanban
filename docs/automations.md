@@ -8,13 +8,13 @@ not yet verified.
 | Action | Behavior |
 | --- | --- |
 | Open, poll, switch project, enable automation | Does not enqueue or start work |
-| Refresh model catalog or edit model or approval settings | Does not enqueue or start work |
-| Change a project's header settings | Saves that project's worktree preference or model override; does not enqueue or start work |
+| Refresh model catalog or edit model settings | Does not enqueue or start work |
+| Change a project's settings | Saves that project's worktree preference, model override, or execution profile; does not enqueue or start work |
 | Edit or reset the plan format prompt | Saves a Mac-local preference; does not enqueue work |
 | Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<normalized task-title>-<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
-| Planning success | Require structured success plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
+| Planning success | Require an explicit plain-text `Completed:` response plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
 | Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Use the project folder, or create a managed worktree for a dirty repository when that project's worktree setting is on; then invoke Codex. A plan is optional context |
-| Implementation success | Require structured success; update the run only. The user chooses the task column and completion state |
+| Implementation success | Require an explicit plain-text `Completed:` response; update the run only. The user chooses the task column and completion state |
 | Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers manual prompt copy and launch actions |
 | Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, starting with the exact task title and including stable IDs and a readable project-relative plan path when available |
 | Launch Codex from task detail | Open `codex://threads/new` with the repository path and same MCP prompt; let the user start the turn in Desktop. StageChase cannot rename these threads because the URL flow returns no thread ID |
@@ -23,9 +23,9 @@ not yet verified.
 | Use the optional Codex Desktop MCP connection | Read/create tasks and move them through the Mac library; users complete or reopen tasks in StageChase, and MCP task calls never start or control a Codex turn |
 | Refresh manual Codex status | Read the linked session only after the user presses Refresh status; update its run record without changing the task |
 | Retry/rerun a manual task | Reuse the saved context in a fresh Desktop session and copy it again; the user starts the new turn |
-| Approval request in Ask me mode | Show Allow once / Deny and Needs Approval state |
-| Approval request in Auto-approve requests mode | One-time accept only for supported command/file requests that do not ask for broader permissions |
-| Unsupported interaction | Fail visibly; retain session link for continuing in Codex |
+| Unexpected approval request | Fail visibly under the run's no-prompt policy; retain the session link for continuing in Codex |
+| Quota, sign-in/device authorization, unavailable service, or genuine user input | Preserve the specific failure/input explanation and leave the run retryable where appropriate |
+| `Blocked:` or unmarked final response | Keep the run failed and retryable; never infer completion from ambiguous prose |
 | Blocked/failed/disconnected | Keep task in its stage, preserve error and retry state |
 | Stop | Cancel active work; close the owned server and preserve files already changed |
 | Close Codex session | Interrupt active work as Interrupted, then confirm shutdown of the owned server; preserve finished outcomes, conversation history, working folder, and files |
@@ -58,26 +58,30 @@ Unknown requests are not silently approved. The agent is instructed not to
 commit, push, publish, deploy, or delete unrelated files. Review approvals and
 results; prompt restrictions are not an absolute enforcement boundary.
 
-## Approval mode
+## Codex execution profiles
 
-The Mac-only setting defaults to **Approve for me**. It uses Codex's built-in
-`approvalPolicy: never` while keeping `workspaceWrite`, the run's selected
-writable root, and `networkAccess: false`. Codex does not pause for ordinary
-approval prompts; the sandbox still limits file writes and network access.
+Each project defaults to **Workspace access, no prompts**. StageChase sends
+`approvalPolicy: never`, `sandbox: workspace-write`, and a matching
+`workspaceWrite` turn policy limited to the run's working folder with network
+access disabled. **Full access, no prompts** is a separate per-project opt-in;
+it sends `sandbox: danger-full-access` at thread start/resume and
+`dangerFullAccess` for the turn. This profile removes filesystem and network
+isolation. Both profiles disable ordinary Codex approval prompts, while the
+existing StageChase confirmation before automatic work remains required.
 
-**Ask me** keeps Codex's `on-request` policy and shows supported command and
-file-change approval requests in Activity for a one-time Allow once / Deny
-decision. **Auto-approve requests** also uses `on-request`, then StageChase
-responds `accept` once for each supported command or file-change request. It
-does not grant session-wide approval, a broader filesystem root, or network
-access. Unknown, overlapping, stale, mismatched, and permission-widening
-requests fail visibly instead of being automatically accepted.
+The profile is part of the shared project record and appears on phone replicas
+as informational data only. Only the Mac runner can execute tasks. Each new run
+stores its project's profile, and retries reuse that run snapshot after project
+settings change. Older projects decode to the restricted workspace profile;
+older runs acquire the project's current profile once when retried. Quota,
+sign-in or device authorization, unavailable service, user input, blocked work,
+and other task failures remain visible and are never reclassified as approval
+requests.
 
-StageChase snapshots the selected mode when a queued run starts. Settings
-changes apply to later runs and explicitly confirmed retries. The preference is
-stored in Mac-local UserDefaults and is excluded from library sync and exports.
-If a saved mode is malformed, Settings shows an error and the runner waits for
-the user to choose a valid mode.
+Runner final messages are plain text for readable Codex Desktop conversations.
+Only an explicit `Completed:` response can succeed; `Blocked:` and unmarked
+responses fail safely. Planning also requires a readable, nonempty plan at the
+reserved path.
 
 Mac Settings includes a bounded, editable plan-format prompt. Its default
 organizes planning output as user requirements, architecture and data model,

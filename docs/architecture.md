@@ -30,7 +30,7 @@
   command routes to the Settings sheet rather than a separate scene.
 - `Apps/StageChasePhone/`: iPhone scene using the shared UI and repository.
 - `Tests/`: reducer/persistence regressions and an offline process-level
-  app-server fixture for progress, completion, blocked work, approvals, and stop.
+  app-server fixture for progress, completion, blocked work, permission profiles, and stop.
 
 Xcode synchronized source groups compile shared files directly into each app.
 SwiftPM exposes StageChaseCore for tests. App targets do not import it separately.
@@ -138,11 +138,28 @@ run without a model snapshot asks for explicit confirmation before adopting a
 choice. The global preference is local to this Mac and is not part of library
 export/restore; project/task overrides and run snapshots are included.
 
+Each project stores a Mac-runner execution profile: workspace-write with no
+approval prompts, or `danger-full-access` with no approval prompts. Old project
+records default to workspace-write. Queued `AgentRun` records snapshot the
+effective profile, and retries keep it even if project settings later change.
+The profile is included in library exports and phone replicas as informational
+project data; iPhone has no runner controls and cannot start or manage Mac Codex
+work. Thread start/resume receives the sandbox mode, and each turn receives its
+matching `sandboxPolicy`; both use `approvalPolicy: never`. Full access removes
+filesystem and network isolation, so its picker states that scope explicitly.
+Quota, sign-in/device authorization, unavailable service, interactive input,
+blocked work, and task failures remain visible failure or input states.
+
+Runner turns request plain-text final responses. Only a response beginning
+`Completed:` can succeed, and planning additionally requires its readable,
+nonempty reserved plan. `Blocked:` and unmarked responses remain failed and
+retryable; no uncertain response becomes success.
+
 The editable plan-format instruction is a bounded Mac-local `UserDefaults`
 preference, separate from `Library` and run records. Missing or whitespace-only
 text resolves to the built-in template. `CodexRunner.prompt` appends it only to
-new planning turn input, under the fixed task, scope, approval, sandbox, and
-structured-result requirements. It does not alter implementation prompts,
+new planning turn input, under the fixed task, scope, permission-profile, and
+plain-text completion requirements. It does not alter implementation prompts,
 existing plan files, or an already-submitted turn; it is not an enforcement
 boundary.
 
@@ -150,7 +167,7 @@ When a confirmed Mac action queues planning, the task stores its plan destinatio
 in that same transaction. StageChase preserves an existing user-selected path;
 otherwise it reserves `to-do/<task-title-slug>-<lowercase task UUID>.md`. The
 planning prompt uses that saved path, and retries reuse it. A path reservation does not mean the plan
-exists: the planning run succeeds only after structured success and a readable,
+exists: the planning run succeeds only after an explicit plain-text `Completed:` response and a readable,
 non-whitespace file at the reserved destination. The task stays in its current
 column. Mac Open plan and feedback controls require a readable file and are
 available in any column. Phone stage moves do not reserve paths or enqueue work.

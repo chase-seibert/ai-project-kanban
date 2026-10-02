@@ -253,23 +253,24 @@ struct AgentApproval {
     guard !queuePausedForHandoff, closingRunID == nil, !draining, activeID == nil,
       let model, !model.isPreview, model.autoInvokeCodex
     else { return }
-    guard model.approvalModeError == nil else {
-      model.runnerMessage = model.approvalModeError!
-      return
-    }
     guard
       let run = model.library.runs.filter({ $0.status == .queued }).sorted(by: {
         $0.createdAt < $1.createdAt
       }).first
     else { return }
-    let approvalMode = model.approvalMode
+    let projectProfile =
+      model.library.projects.first(where: { $0.id == run.projectID })?.executionProfile
+      ?? .workspaceAccessNoPrompts
+    let profile = run.executionProfile ?? projectProfile
+    var runWithProfile = run
+    runWithProfile.executionProfile = profile
     draining = true
     activeID = run.id
-    approvalModeForActiveRun = approvalMode
+    approvalModeForActiveRun = .approveForMe
     finalOutcome = nil
     fileChangeDetails.removeAll()
     Task {
-      await start(run, approvalMode: approvalMode)
+      await start(runWithProfile, profile: profile)
       draining = false
       if activeID == nil, model.library.runs.first(where: { $0.id == run.id })?.status == .succeeded
       {
@@ -350,7 +351,7 @@ struct AgentApproval {
     }
   }
 
-  private func start(_ initial: AgentRun, approvalMode: CodexApprovalMode) async {
+  private func start(_ initial: AgentRun, profile: CodexExecutionProfile) async {
     guard let model,
       let item = model.library.tasks.first(where: { $0.id == initial.taskID }),
       let project = model.library.projects.first(where: { $0.id == initial.projectID }),
@@ -389,6 +390,12 @@ struct AgentApproval {
       }
       guard activeID == initial.id else { return }
       var run = currentRun() ?? initial
+      if run.executionProfile == nil {
+        run.executionProfile = profile
+        guard await model.perform(.updateRun(run)) else {
+          throw BoardError.invalid("Could not save the Codex execution profile for this run.")
+        }
+      }
       run.status = .running
       run.summary = "Preparing the workspace…"
       run.updatedAt = .now
@@ -409,15 +416,15 @@ struct AgentApproval {
           "thread/resume",
           [
             "threadId": thread, "cwd": directory.path,
-            "approvalPolicy": approvalMode.approvalPolicy,
-            "sandbox": "workspace-write", "model": configuration.modelID,
+            "approvalPolicy": "never",
+            "sandbox": profile.sandbox, "model": configuration.modelID,
           ])
       } else {
         result = try await connection.call(
           "thread/start",
           [
-            "cwd": directory.path, "approvalPolicy": approvalMode.approvalPolicy,
-            "sandbox": "workspace-write",
+            "cwd": directory.path, "approvalPolicy": "never",
+            "sandbox": profile.sandbox,
             "model": configuration.modelID,
           ])
       }
@@ -443,20 +450,10 @@ struct AgentApproval {
             ["type": "text", "text": try prompt(item: item, run: run), "text_elements": []]
           ],
           "cwd": directory.path,
-          "approvalPolicy": approvalMode.approvalPolicy,
+          "approvalPolicy": "never",
           "model": configuration.modelID,
           "effort": configuration.effort,
-          "sandboxPolicy": [
-            "type": "workspaceWrite", "writableRoots": [directory.path], "networkAccess": false,
-          ],
-          "outputSchema": [
-            "type": "object", "additionalProperties": false,
-            "properties": [
-              "outcome": ["type": "string", "enum": ["completed", "blocked"]],
-              "summary": ["type": "string"],
-            ],
-            "required": ["outcome", "summary"],
-          ],
+          "sandboxPolicy": profile.sandboxPolicy(writableRoot: directory.path),
         ])
       if activeID == initial.id, closingRunID != initial.id, var latest = currentRun(),
         let turn = resultTurn["turn"] as? [String: Any]
@@ -479,8 +476,8 @@ struct AgentApproval {
       You are working on a StageChase task in this project. Follow its AGENTS.md instructions.
       Details: \(item.notes)
       Do not commit, push, publish, deploy, send messages, or delete unrelated files. The user controls task completion and reopening in StageChase; preserve the current completion flag.
-      Keep progress updates concise and use the plan tool so StageChase can display progress. Ask for approval when required; never bypass sandbox restrictions.
-      Your final structured response must use outcome=completed only when the requested work and verification are finished; otherwise use outcome=blocked and explain what remains in summary.
+      Keep progress updates concise and use the plan tool so StageChase can display progress. If the run cannot proceed within its saved execution profile, stop and report it; do not broaden permissions or bypass sandbox restrictions.
+      End with a plain-text final response beginning with exactly “Completed:” followed by a concise summary only when the requested work and verification are finished. If anything blocks or remains incomplete, begin with “Blocked:” and explain what remains. Keep the summary readable in Codex Desktop. Quota exhaustion, sign-in or device authorization, unavailable service, and user input requirements are blockers; do not try to bypass them.
       """
     if run.kind == .planning {
       guard let planPath = item.planPath, !planPath.isEmpty else {
@@ -682,14 +679,26 @@ struct AgentApproval {
       } else if method == "item/completed", type == "agentMessage",
         let text = item["text"] as? String
       {
-        if let data = text.data(using: .utf8),
-          let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let outcome = result["outcome"] as? String
-        {
-          finalOutcome = outcome
-          run.summary = String((result["summary"] as? String ?? text).prefix(1600))
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let completionSummary =
+          trimmed.hasPrefix("Completed:")
+          ? String(
+            trimmed.dropFirst("Completed:".count).trimmingCharacters(in: .whitespacesAndNewlines))
+          : ""
+        if !completionSummary.isEmpty {
+          finalOutcome = "completed"
+          run.summary = String(completionSummary.prefix(1600))
+        } else if trimmed.hasPrefix("Completed:") {
+          finalOutcome = nil
+          run.summary = "Codex marked completion without a summary."
+        } else if trimmed.hasPrefix("Blocked:") {
+          finalOutcome = "blocked"
+          run.summary = String(
+            trimmed.dropFirst("Blocked:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+              .prefix(1600))
         } else {
-          run.summary = String(text.prefix(1600))
+          finalOutcome = nil
+          run.summary = String(trimmed.prefix(1600))
         }
         await model.perform(.updateRun(run))
         await log(String(text.prefix(16000)))

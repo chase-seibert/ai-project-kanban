@@ -129,6 +129,18 @@ open.
 
 ## Implementation automation
 
+- As a user, I want a separate Codex execution profile for each project, so
+  projects can use workspace access or explicitly opted-in full access without
+  approval prompts.
+- As a user, I want each run and retry to use its saved project profile, so
+  changing a project setting affects only newly confirmed runs.
+- As a user, I want full access to clearly explain that it removes filesystem
+  and network isolation, so I can make that choice knowingly.
+- As a user, I want quota exhaustion, sign-in/device authorization, unavailable
+  service, genuine input requests, blocked work, and task failures to remain
+  visible and retryable where appropriate.
+- As a user, I want Codex's final response to remain readable in Desktop, so
+  StageChase uses plain text and accepts only an explicit `Completed:` result.
 - As a user, I want Implementing runs to use a plan when one is available,
   while allowing implementation without a plan.
 - As a user, I want a per-project worktree toggle to choose between direct

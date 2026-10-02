@@ -186,6 +186,35 @@ public enum CodexApprovalMode: String, Codable, CaseIterable, Identifiable, Send
   }
 }
 
+/// Permission posture for Codex runs started by the Mac runner.
+/// Missing values in older project payloads decode to the restricted default.
+public enum CodexExecutionProfile: String, Codable, CaseIterable, Identifiable, Sendable {
+  case workspaceAccessNoPrompts
+  case fullAccessNoPrompts
+
+  public var id: String { rawValue }
+  public var title: String {
+    switch self {
+    case .workspaceAccessNoPrompts: "Workspace access, no prompts"
+    case .fullAccessNoPrompts: "Full access, no prompts"
+    }
+  }
+  public var sandbox: String {
+    switch self {
+    case .workspaceAccessNoPrompts: "workspace-write"
+    case .fullAccessNoPrompts: "danger-full-access"
+    }
+  }
+  public func sandboxPolicy(writableRoot: String) -> [String: Any] {
+    switch self {
+    case .workspaceAccessNoPrompts:
+      ["type": "workspaceWrite", "writableRoots": [writableRoot], "networkAccess": false]
+    case .fullAccessNoPrompts:
+      ["type": "dangerFullAccess"]
+    }
+  }
+}
+
 public struct ResolvedCodexConfiguration: Codable, Hashable, Sendable {
   public var selection: CodexModelSelection
   public var modelID: String
@@ -307,12 +336,13 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var automationEnabled = false
   public var usesWorktrees = false
   public var modelOverride: CodexModelConfiguration?
+  public var executionProfile: CodexExecutionProfile = .workspaceAccessNoPrompts
   public var deployedCommitHash: String?
   public var deployedAt: Date?
   public var createdAt = Date()
 
   private enum CodingKeys: String, CodingKey {
-    case id, name, directory, automationEnabled, usesWorktrees, modelOverride
+    case id, name, directory, automationEnabled, usesWorktrees, modelOverride, executionProfile
     case deployedCommitHash, deployedAt, createdAt
   }
 
@@ -329,6 +359,9 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     automationEnabled = try values.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
     usesWorktrees = try values.decodeIfPresent(Bool.self, forKey: .usesWorktrees) ?? false
     modelOverride = try values.decodeIfPresent(CodexModelConfiguration.self, forKey: .modelOverride)
+    executionProfile =
+      try values.decodeIfPresent(CodexExecutionProfile.self, forKey: .executionProfile)
+      ?? .workspaceAccessNoPrompts
     deployedCommitHash = try values.decodeIfPresent(String.self, forKey: .deployedCommitHash)
     deployedAt = try values.decodeIfPresent(Date.self, forKey: .deployedAt)
     createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -342,6 +375,7 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     try values.encode(automationEnabled, forKey: .automationEnabled)
     try values.encode(usesWorktrees, forKey: .usesWorktrees)
     try values.encodeIfPresent(modelOverride, forKey: .modelOverride)
+    try values.encode(executionProfile, forKey: .executionProfile)
     try values.encodeIfPresent(deployedCommitHash, forKey: .deployedCommitHash)
     try values.encodeIfPresent(deployedAt, forKey: .deployedAt)
     try values.encode(createdAt, forKey: .createdAt)
@@ -468,7 +502,7 @@ public enum RunStatus: String, Codable, CaseIterable, Sendable {
     stale
   public var title: String {
     switch self {
-    case .needsInput: "Needs your approval"
+    case .needsInput: "Needs your input"
     case .readyForHandoff: "Ready for Codex Desktop"
     case .succeeded: "Finished"
     default: rawValue.capitalized
@@ -496,18 +530,22 @@ public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var error: String?
   public var steps: [ProgressStep] = []
   public var modelConfiguration: ResolvedCodexConfiguration?
+  /// Snapshot of the project's permission profile when this run was queued.
+  /// Optional for decoding older runs; retries resolve the project's safe/current profile once.
+  public var executionProfile: CodexExecutionProfile?
   public var handoffContext: String?
   public var createdAt = Date()
   public var updatedAt = Date()
   public init(
     task: WorkItem, kind: RunKind, modelConfiguration: ResolvedCodexConfiguration? = nil,
-    usesWorktrees: Bool? = nil
+    usesWorktrees: Bool? = nil, executionProfile: CodexExecutionProfile? = nil
   ) {
     taskID = task.id
     projectID = task.projectID
     self.kind = kind
     self.modelConfiguration = modelConfiguration
     self.usesWorktrees = usesWorktrees
+    self.executionProfile = executionProfile
   }
 }
 
@@ -688,7 +726,8 @@ public enum BoardReducer {
       }
       let run = AgentRun(
         task: item, kind: item.section == .planning ? .planning : .implementation,
-        modelConfiguration: configuration, usesWorktrees: project.usesWorktrees)
+        modelConfiguration: configuration, usesWorktrees: project.usesWorktrees,
+        executionProfile: project.executionProfile)
       state.runs.append(run)
       state.activity.append(
         Activity(
@@ -937,9 +976,11 @@ public enum BoardReducer {
       }
       let taskIndex = try taskIndex(run.taskID)
       var task = state.tasks[taskIndex]
-      guard state.projects.contains(where: { $0.id == task.projectID }) else {
+      guard let project = state.projects.first(where: { $0.id == task.projectID }) else {
         throw BoardError.missing
       }
+      // Old run records acquire a safe profile exactly once, then keep that snapshot on retries.
+      state.runs[index].executionProfile = run.executionProfile ?? project.executionProfile
       if run.kind == .planning, task.planPath == nil {
         task.planPath = WorkItem.canonicalPlanPath(for: task.id, title: task.title)
         task.revision += 1

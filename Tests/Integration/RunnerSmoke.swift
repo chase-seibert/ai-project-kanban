@@ -112,40 +112,31 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     }
     for title in [
       "Plan fixture", "MISSING_PLAN_FIXTURE", "EMPTY_PLAN_FIXTURE", "BLOCKED_FIXTURE",
-      "APPROVAL_FIXTURE", "AUTO_APPROVE_FIXTURE",
-      "UNSAFE_FIXTURE", "DENY_FIXTURE", "STOP_FIXTURE", "CLOSE_FIXTURE", "NAME_FAILURE_FIXTURE",
+      "UNMARKED_FIXTURE", "EMPTY_COMPLETED_FIXTURE",
+      "APPROVAL_FIXTURE", "UNSAFE_FIXTURE", "FULL_ACCESS_FIXTURE",
+      "FULL_ACCESS_BLOCKED_FIXTURE", "STOP_FIXTURE",
+      "CLOSE_FIXTURE", "NAME_FAILURE_FIXTURE",
     ] {
       print("START: \(title)")
       fflush(nil)
-      switch title {
-      case "APPROVAL_FIXTURE", "DENY_FIXTURE": model.setApprovalMode(.askMe)
-      case "AUTO_APPROVE_FIXTURE", "UNSAFE_FIXTURE": model.setApprovalMode(.autoApproveRequests)
-      default: model.setApprovalMode(.approveForMe)
+      project.executionProfile =
+        title.contains("FULL_ACCESS")
+        ? .fullAccessNoPrompts : .workspaceAccessNoPrompts
+      guard await model.saveProject(project, isNew: false) else {
+        throw BoardError.invalid(model.error ?? "project profile")
       }
       let item = WorkItem(projectID: project.id, title: title, stage: .next)
       _ = await model.perform(.createTask(item, configuration: fixtureModelConfiguration))
       let reservedPath = WorkItem.canonicalPlanPath(for: item.id, title: item.title)
       guard model.library.tasks.first(where: { $0.id == item.id })?.planPath == reservedPath,
         let queuedRun = model.library.latestRun(for: item.id), queuedRun.taskID == item.id,
-        queuedRun.kind == .planning, queuedRun.status == .queued
+        queuedRun.kind == .planning, queuedRun.status == .queued,
+        queuedRun.executionProfile == project.executionProfile
       else {
         throw BoardError.invalid(
           "Planning path and queued run were not persisted together before start")
       }
       model.kickRunner()
-      if title == "APPROVAL_FIXTURE" {
-        try await wait { model.runner?.approval != nil }
-        try await wait { model.library.latestRun(for: item.id)?.status == .needsInput }
-        model.setApprovalMode(.autoApproveRequests)
-        guard model.runner?.approvalModeForActiveRun == .askMe else {
-          throw BoardError.invalid("Changing Settings changed the in-flight approval mode")
-        }
-        await model.runner?.answerApproval(allow: true)
-      }
-      if title == "DENY_FIXTURE" {
-        try await wait { model.runner?.approval != nil }
-        await model.runner?.answerApproval(allow: false)
-      }
       if title == "STOP_FIXTURE" {
         try await wait { model.library.latestRun(for: item.id)?.turnID != nil }
         await model.stop(model.library.latestRun(for: item.id)!.id)
@@ -193,9 +184,10 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       let run = model.library.latestRun(for: item.id)!
       let expected: RunStatus
       switch title {
-      case "BLOCKED_FIXTURE", "MISSING_PLAN_FIXTURE", "EMPTY_PLAN_FIXTURE": expected = .failed
-      case "UNSAFE_FIXTURE": expected = .failed
-      case "DENY_FIXTURE": expected = .failed
+      case "BLOCKED_FIXTURE", "FULL_ACCESS_BLOCKED_FIXTURE", "UNMARKED_FIXTURE",
+        "EMPTY_COMPLETED_FIXTURE", "MISSING_PLAN_FIXTURE", "EMPTY_PLAN_FIXTURE":
+        expected = .failed
+      case "APPROVAL_FIXTURE", "UNSAFE_FIXTURE": expected = .failed
       case "STOP_FIXTURE": expected = .cancelled
       case "CLOSE_FIXTURE": expected = .interrupted
       default: expected = .succeeded
@@ -238,26 +230,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       }
       print("PASS: \(title) → \(run.status.rawValue), task in \(expectedStage.rawValue)")
       if title == "APPROVAL_FIXTURE" {
-        guard
-          model.library.activity.contains(where: {
-            $0.runID == run.id && $0.message.contains("Permission approved")
-          })
-        else { throw BoardError.invalid("Ask me approval was not recorded") }
-      }
-      if title == "DENY_FIXTURE" {
-        guard
-          model.library.activity.contains(where: {
-            $0.runID == run.id && $0.message.contains("Permission denied once")
-          })
-        else { throw BoardError.invalid("Ask me decline was not recorded") }
-      }
-      if title == "AUTO_APPROVE_FIXTURE" {
-        let messages = model.library.activity.filter { $0.runID == run.id }.map(\.message)
-        guard messages.filter({ $0.contains("Automatically approved a supported") }).count == 2,
-          messages.contains(where: { $0.contains("command request once") }),
-          messages.contains(where: { $0.contains("file-change request once") })
-        else {
-          throw BoardError.invalid("Automatic command and file approvals were not both recorded")
+        guard run.error?.contains("no-prompt policy") == true else {
+          throw BoardError.invalid("An unexpected approval request was not reported clearly")
         }
       }
       if title == "UNSAFE_FIXTURE" {
@@ -269,6 +243,11 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         guard run.status == .succeeded, let threadID = run.threadID, !threadID.isEmpty else {
           throw BoardError.invalid("A best-effort session naming failure changed the run outcome")
         }
+      }
+      if title == "FULL_ACCESS_FIXTURE" || title == "FULL_ACCESS_BLOCKED_FIXTURE" {
+        guard run.executionProfile == .fullAccessNoPrompts,
+          run.status == (title == "FULL_ACCESS_FIXTURE" ? .succeeded : .failed)
+        else { throw BoardError.invalid("Full-access profile was not saved with its run") }
       }
       if title == "CLOSE_FIXTURE" {
         guard
@@ -397,15 +376,18 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     else { throw BoardError.invalid("Overlapping status refreshes were not safely coalesced") }
     print("PASS: unlinked and failed session refreshes preserve task and retry state")
     print("Offline runner integration checks passed; no real agent turns were started.")
-    var blocked = model.library.tasks.first { $0.title == "BLOCKED_FIXTURE" }!
+    var blocked = model.library.tasks.first { $0.title == "FULL_ACCESS_BLOCKED_FIXTURE" }!
     let previousRun = model.library.latestRun(for: blocked.id)!
     let runCount = model.library.runs.count
-    blocked.title = "Retry fixture"
+    blocked.title = "FULL_ACCESS_RETRY_FIXTURE"
     _ = await model.perform(.editTask(blocked, expectedRevision: blocked.revision))
+    project.executionProfile = .workspaceAccessNoPrompts
+    _ = await model.saveProject(project, isNew: false)
     await model.retry(previousRun.id)
     try await wait { model.library.latestRun(for: blocked.id)?.status.isActive == false }
     guard let retried = model.library.latestRun(for: blocked.id), retried.status == .succeeded,
       retried.id == previousRun.id, retried.threadID == previousRun.threadID,
+      retried.executionProfile == .fullAccessNoPrompts,
       model.library.runs.count == runCount
     else { throw BoardError.invalid("Retry duplicated or lost a run") }
     print("PASS: failed run retries in the same session without duplication")
