@@ -127,8 +127,10 @@ for line in sys.stdin:
         if not prompt.startswith("Task: "):
             send({"id": request_id, "error": {"code": -32602, "message": "task title is not first in prompt"}})
             continue
-        if thread_names.get(params["threadId"]) != prompt.splitlines()[0][len("Task: "):]:
-            send({"id": request_id, "error": {"code": -32602, "message": "thread name does not match task title"}})
+        title = prompt.splitlines()[0][len("Task: "):]
+        prefix = "Plan: " if "Plan only; do not implement application code." in prompt else "Code: "
+        if "NAME_FAILURE_FIXTURE" not in title and thread_names.get(params["threadId"]) != prefix + title:
+            send({"id": request_id, "error": {"code": -32602, "message": "thread name does not have the expected prefix and task title"}})
             continue
         if "APPROVAL_FIXTURE" in prompt or "AUTO_APPROVE_FIXTURE" in prompt or "UNSAFE_FIXTURE" in prompt or "DENY_FIXTURE" in prompt:
             expected_policy = "on-request"
@@ -160,6 +162,9 @@ for line in sys.stdin:
     elif method == "turn/interrupt":
         result = {}
     elif method == "thread/name/set":
+        if "NAME_FAILURE_FIXTURE" in params.get("name", ""):
+            send({"id": request_id, "error": {"code": -32000, "message": "fixture name set failure"}})
+            continue
         thread_names[params["threadId"]] = params["name"]
         result = {}
     elif request_id in ("approval-command", "approval-file"):

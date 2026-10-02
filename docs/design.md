@@ -55,9 +55,13 @@ setting are both enabled, moves into Planning or Implementing require confirmati
 including usage cost. The Mac setting can turn off automatic turns globally;
 task detail then offers Launch Codex using a StageChase
 MCP prompt. It starts with the exact task title and contains stable project/task IDs and a readable project-relative
-plan path when available. The new session is named with the task title alone.
-Launch opens a new Codex Desktop thread without
-submitting a turn. After success, that prompt directs Codex to move the task to
+plan path when available. Runner-created planning sessions are named
+`Plan: <task title>`; implementation and generic task handoff sessions use
+`Code: <task title>`. The colon and following space separate the prefix from
+the unchanged task title. Launch opens a new Codex Desktop thread without
+submitting a turn. That URL flow returns no thread ID, so StageChase cannot
+rename prompt-launched threads; Codex Desktop controls their displayed names.
+After success, that prompt directs Codex to move the task to
 Review through MCP and leave it incomplete. Enabling automation alone
 never starts work.
 Mac task detail also offers **Plan in Codex** or **Revise plan in Codex**

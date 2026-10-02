@@ -19,6 +19,15 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       TaskHandoffPrompt.make(for: promptTask, project: promptProject)
         .hasPrefix("Task: Readable prompt title\n\n")
     else { throw BoardError.invalid("Manual task prompt does not start with its exact title") }
+    let unusualTitle = "  Résumé: 東京!  "
+    guard
+      CodexRunner.sessionName(for: .planning, taskTitle: unusualTitle) == "Plan: \(unusualTitle)",
+      CodexRunner.sessionName(for: .implementation, taskTitle: unusualTitle)
+        == "Code: \(unusualTitle)",
+      CodexRunner.sessionName(for: .task, taskTitle: unusualTitle) == "Code: \(unusualTitle)"
+    else {
+      throw BoardError.invalid("Session name prefixes or task-title preservation are incorrect")
+    }
     let fixture = CommandLine.arguments[1]
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
       "stagechase-smoke-\(UUID())")
@@ -102,7 +111,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     for title in [
       "Plan fixture", "MISSING_PLAN_FIXTURE", "EMPTY_PLAN_FIXTURE", "BLOCKED_FIXTURE",
       "APPROVAL_FIXTURE", "AUTO_APPROVE_FIXTURE",
-      "UNSAFE_FIXTURE", "DENY_FIXTURE", "STOP_FIXTURE", "CLOSE_FIXTURE",
+      "UNSAFE_FIXTURE", "DENY_FIXTURE", "STOP_FIXTURE", "CLOSE_FIXTURE", "NAME_FAILURE_FIXTURE",
     ] {
       print("START: \(title)")
       fflush(nil)
@@ -252,6 +261,11 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       if title == "UNSAFE_FIXTURE" {
         guard run.error?.contains("broader access") == true else {
           throw BoardError.invalid("Unsafe request did not fail visibly")
+        }
+      }
+      if title == "NAME_FAILURE_FIXTURE" {
+        guard run.status == .succeeded, let threadID = run.threadID, !threadID.isEmpty else {
+          throw BoardError.invalid("A best-effort session naming failure changed the run outcome")
         }
       }
       if title == "CLOSE_FIXTURE" {
@@ -448,6 +462,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     guard let run = model.library.latestRun(for: implementation.id), run.status == .succeeded,
       let path = run.workDirectory, path != gitRoot.path,
       run.usesWorktrees == true,
+      run.threadID != nil,
       run.modelConfiguration == fixtureModelConfiguration
     else { throw BoardError.invalid("Missing isolated worktree") }
     let original = try String(contentsOf: readme, encoding: .utf8)

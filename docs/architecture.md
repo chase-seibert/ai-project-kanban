@@ -46,8 +46,9 @@ the user's explicit sign-off sets Done and the existing completion flag. With
 automatic invocation off,
 task detail offers a Launch Codex action using the generated prompt with
 stable project/task IDs and a readable project-relative plan path when
-available. Prompts start with the exact task title; manual and runner-created
-Codex sessions use the task title alone. Launch opens `codex://threads/new` with the project folder and
+available. Prompts start with the exact task title. Runner-created planning
+sessions use `Plan: <task title>`; implementation and generic task handoff
+sessions use `Code: <task title>`. Launch opens `codex://threads/new` with the project folder and
 prompt without submitting a turn. That prompt directs Codex to move successful
 implementation to Review through MCP after successful work, using the latest
 revision, while leaving the task incomplete. Failed or blocked work stays
@@ -100,7 +101,10 @@ After saving a readable nonempty plan, the external Codex session finishes its
 run, attaches the plan with the latest revision through `attach_task_plan`, and
 sets the incomplete task's status to Ready in Planning with the returned
 revision. Opening the prompt does not mutate task state; these actions are
-Mac-only.
+Mac-only. Prompt-launched threads do not return a thread ID to StageChase, so it
+cannot call `thread/name/set` for them; Codex Desktop controls their displayed
+names. Naming calls for threads StageChase can address remain best-effort and do
+not change run outcomes.
 
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same

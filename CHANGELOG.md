@@ -2,6 +2,10 @@
 
 ## 2026-10-01
 
+- Prefix runner-created Codex sessions with `Plan: ` for planning and `Code: `
+  for implementation and generic task handoffs. Prompt-launched Desktop threads
+  remain titled by Codex Desktop because StageChase receives no thread ID to rename.
+
 - Unified board-card status into one colored, icon-led capsule shared by Mac and
   iPhone, and removed the separate Codex run badge from cards. Run history stays
   visible in task detail and Activity.
@@ -24,7 +28,7 @@
   to Review and leave it incomplete for user review.
 - Generated plan filenames now use readable normalized task-title slugs with
   full task-ID suffixes; planning, implementation, and manual prompts start
-  with the task title, and Codex sessions use the task title alone.
+  with the task title.
 - Added Mac Git status in project headers and task details, including the
   current branch and commit hash, plus a task action that stages all project
   changes and commits with the task title as its message. Added an optional

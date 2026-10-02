@@ -145,8 +145,10 @@ open.
 - As a user, I want a Launch Codex action to open a new Codex Desktop thread
   with the repository path and StageChase MCP prompt.
 - As a user, I want generated task prompts to start with the exact task title
-  and Codex sessions to use that title alone, so the task stays clear in both
-  the prompt and Desktop session list.
+  so the task stays clear in the prompt. Runner-created planning sessions use
+  `Plan: <task title>`, while implementation and generic task handoff sessions
+  use `Code: <task title>`. Prompt-launched threads remain named by Codex
+  Desktop because the launch URL returns no thread ID for StageChase to rename.
 - As a user, I want the prompt to identify the project and task by stable IDs,
   include a readable project-relative plan path when one exists, and otherwise
   include the task title and notes.

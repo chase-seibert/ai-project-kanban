@@ -8,6 +8,11 @@ struct AgentApproval {
 }
 
 @MainActor @Observable final class CodexRunner {
+  static func sessionName(for kind: RunKind, taskTitle: String) -> String {
+    let prefix = kind == .planning ? "Plan" : "Code"
+    return "\(prefix): \(taskTitle)"
+  }
+
   private weak var model: AppModel?
   private let connection: any AgentConnection
   private var activeID: UUID?
@@ -160,7 +165,8 @@ struct AgentApproval {
       let threadID = thread["id"] as? String, !threadID.isEmpty
     else { throw BoardError.invalid("Codex returned no Desktop session ID.") }
     _ = try? await connection.call(
-      "thread/name/set", ["threadId": threadID, "name": task.title])
+      "thread/name/set",
+      ["threadId": threadID, "name": Self.sessionName(for: run.kind, taskTitle: task.title)])
     run.threadID = threadID
     run.workDirectory = root.path
     run.updatedAt = .now
@@ -426,7 +432,8 @@ struct AgentApproval {
         throw BoardError.invalid("Could not save the Codex session ID. The turn was not started.")
       }
       _ = try? await connection.call(
-        "thread/name/set", ["threadId": threadID, "name": item.title])
+        "thread/name/set",
+        ["threadId": threadID, "name": Self.sessionName(for: run.kind, taskTitle: item.title)])
       guard activeID == initial.id, closingRunID != initial.id else { return }
       let resultTurn = try await connection.call(
         "turn/start",
