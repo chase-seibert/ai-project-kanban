@@ -9,6 +9,9 @@
 - As a user, I want task status to be separate from section, so that each task
   shows whether it is in triage, planning, ready, building, waiting, error,
   quota, review, or done.
+- As a user, I want each board card to show one colored, icon-led task-status
+  badge, while saved-plan details stay in task detail and Codex run history
+  stays in task detail and Activity.
 - As a user, I want Waiting, Error, Quota, and Review tasks sorted first in that
   order within their section, so that attention-needed work is easy to find.
 - As a user, I want the Mac sections shown as three side-by-side columns with
@@ -16,6 +19,10 @@
   device retains a useful board layout.
 - As a user, I want to capture and edit tasks, so that ideas are useful before
   planning begins.
+- As a user, I want to edit a task title directly from its board card, so that
+  I can correct it without opening task detail. The title stays multiline, only
+  one card is editable at a time, and Return saves; Escape or Cancel discards
+  the edit. Opening another title resolves and closes the previous edit.
 - As a user, I want to paste an Apple Notes checklist into lane capture and
   create one task per unchecked item, so I can quickly bring a list into a board.
 - As a user, I want to move tasks between Inbox, Planning, and Implementing, so

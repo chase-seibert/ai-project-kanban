@@ -481,8 +481,42 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   library.runs = [run]
   library = try BoardReducer.apply(.finishRun(run.id, planPath: "to-do/plan.md"), to: library)
   #expect(library.tasks[0].stage == .next)
+  #expect(library.tasks[0].status == .ready)
   #expect(!library.tasks[0].completed)
   #expect(library.runs[0].status == .succeeded)
+}
+
+@Test func everyTaskStatusHasAnIconAndSemanticBadgeColor() {
+  let styles = TaskStatus.allCases.map(\.badgeStyle)
+  #expect(styles.count == 9)
+  #expect(styles.allSatisfy { !$0.symbol.isEmpty })
+  #expect(Set(styles.map(\.symbol)).count == TaskStatus.allCases.count)
+  #expect(TaskStatus.ready.badgeStyle.color == .green)
+  #expect(TaskStatus.review.badgeStyle.color == .green)
+  #expect(TaskStatus.done.badgeStyle.symbol == "checkmark.seal.fill")
+  #expect(TaskStatus.done.badgeStyle.color == .blue)
+  #expect(TaskStatus.quota.badgeStyle.color == .orange)
+}
+
+@Test func successfulImplementationNeedsExplicitSignoffForDone() throws {
+  let project = Project(name: "A")
+  let task = WorkItem(projectID: project.id, title: "Implement", stage: .implementation)
+  var run = AgentRun(
+    task: task, kind: .implementation, modelConfiguration: fixtureModelConfiguration)
+  run.status = .running
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  library.runs = [run]
+
+  library = try BoardReducer.apply(.finishRun(run.id, planPath: nil), to: library)
+  #expect(library.tasks[0].status == .review)
+  #expect(!library.tasks[0].completed)
+  #expect(library.runs[0].status == .succeeded)
+
+  library = try BoardReducer.apply(.complete(task.id, true, expectedRevision: 1), to: library)
+  #expect(library.tasks[0].status == .done)
+  #expect(library.tasks[0].completed)
 }
 
 @Test func retryPreservesSessionAndDoesNotDuplicateRun() throws {

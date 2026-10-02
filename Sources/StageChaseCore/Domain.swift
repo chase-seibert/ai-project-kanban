@@ -56,6 +56,19 @@ public enum WorkflowSection: String, Codable, CaseIterable, Identifiable, Sendab
 public enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
   case triage, planning, ready, building, waiting, error, quota, review, done
   public var id: String { rawValue }
+  public var badgeStyle: TaskStatusBadgeStyle {
+    switch self {
+    case .triage: TaskStatusBadgeStyle(symbol: "tray", color: .secondary)
+    case .planning: TaskStatusBadgeStyle(symbol: "sparkles", color: .purple)
+    case .ready: TaskStatusBadgeStyle(symbol: "checkmark.circle.fill", color: .green)
+    case .building: TaskStatusBadgeStyle(symbol: "hammer.fill", color: .indigo)
+    case .waiting: TaskStatusBadgeStyle(symbol: "pause.circle.fill", color: .orange)
+    case .error: TaskStatusBadgeStyle(symbol: "exclamationmark.circle.fill", color: .red)
+    case .quota: TaskStatusBadgeStyle(symbol: "gauge.with.dots.needle.67percent", color: .orange)
+    case .review: TaskStatusBadgeStyle(symbol: "eye.circle.fill", color: .green)
+    case .done: TaskStatusBadgeStyle(symbol: "checkmark.seal.fill", color: .blue)
+    }
+  }
   public var title: String {
     switch self {
     case .triage: "Triage"
@@ -94,6 +107,20 @@ public enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
     case .planning: .planning
     case .ready, .building, .waiting, .error, .quota, .review, .done: .implementing
     }
+  }
+}
+
+public enum TaskStatusBadgeColor: String, Codable, CaseIterable, Sendable {
+  case secondary, purple, blue, indigo, orange, red, green
+}
+
+public struct TaskStatusBadgeStyle: Hashable, Sendable {
+  public var symbol: String
+  public var color: TaskStatusBadgeColor
+
+  public init(symbol: String, color: TaskStatusBadgeColor) {
+    self.symbol = symbol
+    self.color = color
   }
 }
 

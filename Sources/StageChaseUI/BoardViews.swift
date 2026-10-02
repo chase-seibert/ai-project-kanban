@@ -30,6 +30,7 @@ enum Palette {
 struct BoardView: View {
   @Environment(AppModel.self) private var model
   @State private var focusedStage: WorkflowSection? = .inbox
+  @State private var editingTaskID: UUID?
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       BoardHeader()
@@ -57,7 +58,7 @@ struct BoardView: View {
         GeometryReader { geometry in
           HStack(alignment: .top, spacing: 14) {
             ForEach(WorkflowSection.allCases) { section in
-              BoardLane(section: section).frame(
+              BoardLane(section: section, editingTaskID: $editingTaskID).frame(
                 maxWidth: .infinity, maxHeight: .infinity, alignment: .top
               ).id(section)
             }
@@ -72,7 +73,7 @@ struct BoardView: View {
           ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 14) {
               ForEach(WorkflowSection.allCases) { stage in
-                BoardLane(section: stage).frame(
+                BoardLane(section: stage, editingTaskID: $editingTaskID).frame(
                   width: width, height: max(220, geometry.size.height - 20)
                 ).id(stage)
               }
@@ -202,6 +203,7 @@ struct BoardHeader: View {
 struct BoardLane: View {
   @Environment(AppModel.self) private var model
   let section: WorkflowSection
+  @Binding var editingTaskID: UUID?
   @State private var draft = ""
   @State private var adding = false
   @State private var targeted = false
@@ -231,7 +233,9 @@ struct BoardLane: View {
       Rectangle().fill(section.color.opacity(0.5)).frame(height: 2)
       ScrollView(.vertical) {
         LazyVStack(alignment: .leading, spacing: 10) {
-          ForEach(model.items(section)) { item in TaskCard(item: item) }
+          ForEach(model.items(section)) { item in
+            TaskCard(item: item, editingTaskID: $editingTaskID)
+          }
           if model.items(section).isEmpty && !adding {
             VStack(spacing: 8) {
               Image(systemName: section.symbol).stageFont(.title2).foregroundStyle(
@@ -371,18 +375,101 @@ struct BoardLane: View {
 struct TaskCard: View {
   @Environment(AppModel.self) private var model
   let item: WorkItem
+  @Binding var editingTaskID: UUID?
+  @State private var titleDraft = ""
+  @State private var savingTitle = false
+  @FocusState private var titleFieldFocused: Bool
+
+  private var isEditingTitle: Bool { editingTaskID == item.id }
+
   var body: some View {
-    Button {
-      model.markTaskChangesRead(item.id)
-      #if os(macOS)
-        model.selectedTaskID = item.id
-        model.boardSelectedTaskID = item.id
-        model.boardFocusedStage = item.section
-      #else
-        model.sheet = .task(item.id)
-      #endif
-    } label: {
-      VStack(alignment: .leading, spacing: 10) {
+    Group {
+      if isEditingTitle {
+        cardContents
+      } else {
+        cardContents
+          .draggable("stagechase-task:\(item.id.uuidString)")
+          .dropDestination(for: String.self) { values, _ in
+            guard let value = values.first, value.hasPrefix("stagechase-task:"),
+              let id = UUID(uuidString: String(value.dropFirst("stagechase-task:".count))),
+              let source = model.library.tasks.first(where: {
+                $0.id == id && $0.projectID == item.projectID
+              })
+            else { return false }
+            guard source.priority == item.priority || source.section != item.section else {
+              return false
+            }
+            if source.section == item.section {
+              Task {
+                await model.perform(
+                  .reorder(id, before: item.id, expectedRevision: source.revision))
+              }
+            } else {
+              model.requestMove(source, to: item.section)
+            }
+            return true
+          }
+          .contextMenu {
+            Button("Edit title", systemImage: "pencil") { beginTitleEditing() }
+            Divider()
+            let ordered = model.library.items(
+              in: item.projectID, section: item.section, completed: true
+            )
+            .filter { $0.priority == item.priority }
+            if let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0 {
+              Button("Move up in \(item.section.title)", systemImage: "arrow.up") {
+                let previous = ordered[index - 1]
+                Task {
+                  await model.perform(
+                    .reorder(item.id, before: previous.id, expectedRevision: item.revision))
+                }
+              }
+            }
+            if let index = ordered.firstIndex(where: { $0.id == item.id }),
+              index + 1 < ordered.count
+            {
+              Button("Move down in \(item.section.title)", systemImage: "arrow.down") {
+                let next = ordered[index + 1]
+                Task {
+                  await model.perform(
+                    .reorder(next.id, before: item.id, expectedRevision: next.revision))
+                }
+              }
+            }
+            if !ordered.isEmpty { Divider() }
+            ForEach(WorkflowSection.allCases.filter { $0 != item.section }) { stage in
+              Button {
+                model.requestMove(item, to: stage)
+              } label: {
+                Label("Move to \(stage.title)", systemImage: stage.symbol)
+              }
+            }
+            if !model.isConnectedPhone {
+              Divider()
+              Button(
+                item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle"
+              ) {
+                Task {
+                  await model.perform(
+                    .complete(item.id, !item.completed, expectedRevision: item.revision))
+                }
+              }
+            }
+          }
+      }
+    }
+    .onChange(of: editingTaskID) { oldValue, newValue in
+      if oldValue == item.id, newValue != item.id {
+        resolveTitleEditing()
+      } else if newValue == item.id {
+        titleFieldFocused = true
+      }
+    }
+  }
+
+  private var cardContents: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      if isEditingTitle {
         if let change = model.unreadTaskChangeKind(for: item.id) {
           Label(change.badgeTitle, systemImage: "circle.fill")
             .stageFont(.caption, weight: .semibold)
@@ -390,104 +477,193 @@ struct TaskCard: View {
             .accessibilityIdentifier("unread-task-\(item.id.uuidString)")
         }
         if let priority = item.priority {
-          Label("\(priority.rawValue) · \(priority.title)", systemImage: "flag.fill")
-            .stageFont(.caption, weight: .semibold)
-            .foregroundStyle(priority == .high ? .red : priority == .medium ? .orange : .secondary)
-            .accessibilityLabel("Priority: \(priority.title)")
+          priorityLabel(priority)
         }
-        Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
-          .strikethrough(
-            item.completed
-          )
-        Label(
-          item.status.title,
-          systemImage: item.status == .done ? "checkmark.circle.fill" : "circle.fill"
-        )
-        .stageFont(.caption, weight: .medium).foregroundStyle(
-          item.status.isAttentionState ? .orange : .secondary
-        )
-        .frame(maxWidth: .infinity, alignment: .leading).fixedSize(
-          horizontal: false, vertical: true)
-        if !item.notes.isEmpty {
-          Text(item.notes).stageFont(.subheadline).foregroundStyle(.secondary).lineLimit(3)
-        }
-        if let run = model.library.latestRun(for: item.id) {
-          RunBadge(run: run)
-        } else if item.planPath != nil {
-          Label("Plan attached", systemImage: "doc.text").stageFont(.caption).foregroundStyle(.blue)
-        }
-        if item.completed {
-          Label("Completed by you", systemImage: "checkmark.circle.fill").stageFont(.caption)
-            .foregroundStyle(.green)
-        }
-      }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-          RoundedRectangle(cornerRadius: 12).stroke(
-            model.boardSelectedTaskID == item.id || model.selectedTaskID == item.id
-              ? Color.accentColor.opacity(0.65) : .primary.opacity(0.07))
-        )
-        .shadow(color: .black.opacity(0.035), radius: 3, y: 2)
-    }
-    .buttonStyle(.plain)
-    .draggable("stagechase-task:\(item.id.uuidString)")
-    .dropDestination(for: String.self) { values, _ in
-      guard let value = values.first, value.hasPrefix("stagechase-task:"),
-        let id = UUID(uuidString: String(value.dropFirst("stagechase-task:".count))),
-        let source = model.library.tasks.first(where: {
-          $0.id == id && $0.projectID == item.projectID
-        })
-      else { return false }
-      guard source.priority == item.priority || source.section != item.section else { return false }
-      if source.section == item.section {
-        Task {
-          await model.perform(.reorder(id, before: item.id, expectedRevision: source.revision))
+        HStack(spacing: 6) {
+          TextField("Task title", text: $titleDraft, axis: .vertical)
+            .textFieldStyle(.roundedBorder)
+            .lineLimit(1...4)
+            .focused($titleFieldFocused)
+            .disabled(savingTitle)
+            .onSubmit { saveTitle() }
+            .accessibilityLabel("Task title")
+            .accessibilityHint("Press Return to save the title.")
+          Button {
+            saveTitle()
+          } label: {
+            Image(systemName: "checkmark")
+          }
+          .buttonStyle(.borderless)
+          .help("Save title (Return)")
+          .accessibilityLabel("Save title")
+          .disabled(savingTitle)
+          Button {
+            cancelTitleEditing()
+          } label: {
+            Image(systemName: "xmark")
+          }
+          .buttonStyle(.borderless)
+          .help("Cancel title edit (Escape)")
+          .accessibilityLabel("Cancel title edit")
+          .disabled(savingTitle)
         }
       } else {
-        model.requestMove(source, to: item.section)
-      }
-      return true
-    }
-    .contextMenu {
-      let ordered = model.library.items(in: item.projectID, section: item.section, completed: true)
-        .filter { $0.priority == item.priority }
-      if let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0 {
-        Button("Move up in \(item.section.title)", systemImage: "arrow.up") {
-          let previous = ordered[index - 1]
-          Task {
-            await model.perform(
-              .reorder(item.id, before: previous.id, expectedRevision: item.revision))
-          }
-        }
-      }
-      if let index = ordered.firstIndex(where: { $0.id == item.id }), index + 1 < ordered.count {
-        Button("Move down in \(item.section.title)", systemImage: "arrow.down") {
-          let next = ordered[index + 1]
-          Task {
-            await model.perform(.reorder(next.id, before: item.id, expectedRevision: next.revision))
-          }
-        }
-      }
-      if !ordered.isEmpty { Divider() }
-      ForEach(WorkflowSection.allCases.filter { $0 != item.section }) { stage in
         Button {
-          model.requestMove(item, to: stage)
+          openDetails()
         } label: {
-          Label("Move to \(stage.title)", systemImage: stage.symbol)
-        }
-      }
-      if !model.isConnectedPhone {
-        Divider()
-        Button(item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle") {
-          Task {
-            await model.perform(
-              .complete(item.id, !item.completed, expectedRevision: item.revision))
+          VStack(alignment: .leading, spacing: 10) {
+            if let change = model.unreadTaskChangeKind(for: item.id) {
+              Label(change.badgeTitle, systemImage: "circle.fill")
+                .stageFont(.caption, weight: .semibold)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityIdentifier("unread-task-\(item.id.uuidString)")
+            }
+            if let priority = item.priority {
+              priorityLabel(priority)
+            }
           }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open task details for \(item.title)")
+
+        Button {
+          beginTitleEditing()
+        } label: {
+          Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
+            .strikethrough(item.completed)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Click to edit title")
+        .accessibilityLabel("Edit title: \(item.title)")
+        .accessibilityHint("Press Return to save the title.")
+
+        Button {
+          openDetails()
+        } label: {
+          VStack(alignment: .leading, spacing: 10) {
+            TaskStatusBadge(status: item.status)
+            if !item.notes.isEmpty {
+              Text(item.notes).stageFont(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+            }
+            if item.completed {
+              Label("Completed by you", systemImage: "checkmark.circle.fill").stageFont(.caption)
+                .foregroundStyle(.green)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open task details for \(item.title)")
       }
+    }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
+      .background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
+      .overlay(
+        RoundedRectangle(cornerRadius: 12).stroke(
+          model.boardSelectedTaskID == item.id || model.selectedTaskID == item.id
+            ? Color.accentColor.opacity(0.65) : .primary.opacity(0.07))
+      )
+      .shadow(color: .black.opacity(0.035), radius: 3, y: 2)
+      #if os(macOS)
+        .onExitCommand { cancelTitleEditing() }
+      #endif
+  }
+
+  private func priorityLabel(_ priority: TaskPriority) -> some View {
+    Label("\(priority.rawValue) · \(priority.title)", systemImage: "flag.fill")
+      .stageFont(.caption, weight: .semibold).foregroundStyle(
+        priority == .high ? .red : priority == .medium ? .orange : .secondary
+      )
+      .accessibilityLabel("Priority: \(priority.title)")
+  }
+
+  private func openDetails() {
+    model.markTaskChangesRead(item.id)
+    #if os(macOS)
+      model.selectedTaskID = item.id
+      model.boardSelectedTaskID = item.id
+      model.boardFocusedStage = item.section
+    #else
+      model.sheet = .task(item.id)
+    #endif
+  }
+
+  private func beginTitleEditing() {
+    titleDraft = item.title
+    editingTaskID = item.id
+  }
+
+  private func cancelTitleEditing() {
+    guard !savingTitle else { return }
+    titleDraft = item.title
+    if editingTaskID == item.id { editingTaskID = nil }
+  }
+
+  private func resolveTitleEditing() {
+    guard !savingTitle else { return }
+    let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty, title != item.title else {
+      titleDraft = item.title
+      return
     }
-    .accessibilityLabel("\(item.priority.map { "\($0.title) priority, " } ?? "")\(item.title)")
-    .accessibilityHint("Open task details. Drag to another section or use the move menu.")
+    saveTitle()
+  }
+
+  private func saveTitle() {
+    guard !savingTitle else { return }
+    let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty else {
+      model.error = "Give this task a title."
+      titleFieldFocused = true
+      return
+    }
+    guard title != item.title else {
+      cancelTitleEditing()
+      return
+    }
+    guard var updated = model.library.tasks.first(where: { $0.id == item.id }) else {
+      model.error = "This task no longer exists."
+      return
+    }
+    updated.title = title
+    savingTitle = true
+    Task {
+      let saved = await model.perform(.editTask(updated, expectedRevision: updated.revision))
+      savingTitle = false
+      if saved && editingTaskID == item.id { editingTaskID = nil }
+    }
+  }
+}
+
+struct TaskStatusBadge: View {
+  let status: TaskStatus
+
+  var body: some View {
+    let style = status.badgeStyle
+    let tint = color(for: style.color)
+    Label(status.title, systemImage: style.symbol)
+      .stageFont(.caption, weight: .semibold)
+      .foregroundStyle(tint)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 4)
+      .background(tint.opacity(0.1), in: Capsule())
+      .accessibilityLabel("Status: \(status.title)")
+  }
+
+  private func color(for color: TaskStatusBadgeColor) -> Color {
+    switch color {
+    case .secondary: .secondary
+    case .purple: .purple
+    case .blue: .blue
+    case .indigo: .indigo
+    case .orange: .orange
+    case .red: .red
+    case .green: .green
+    }
   }
 }
 

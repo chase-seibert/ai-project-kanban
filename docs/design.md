@@ -6,13 +6,22 @@ Switching projects clears task selection and search.
 
 The board has three sections in order: Inbox, Planning, and Implementing. Mac
 shows them as three side-by-side columns with independently vertical-scrolling
-task lists; iPhone keeps horizontally paged columns. Tasks show a
-separate status badge. Waiting, Error, Quota, and Review sort ahead of ordinary
-statuses in that order, then priority and the user's stable rank decide order.
+task lists; iPhone keeps horizontally paged columns. Each card shows one
+colored, icon-led task-status capsule; plan and Codex run details stay out of
+cards, with saved plans and the latest run available in task detail and run
+history in Activity. Status capsules use the same styling on Mac and iPhone.
+Waiting, Error, Quota, and Review sort ahead of ordinary statuses in that order,
+then priority and the user's stable rank decide order.
 Section headers offer named + buttons and inline multiline capture. Cards drag
-between sections or onto another card to reorder within a section. The card menu
-offers an accessible move alternative; task detail keeps its primary actions
-focused on launch, planning, and user sign-off.
+between sections or onto another card to reorder within a section. Click a card
+title to edit it inline, or use the card menu's **Edit title** action; other card
+content opens task detail. The title editor stays multiline and only one card
+can be edited at a time; opening another title saves and closes the prior editor
+when its draft is nonempty and changed. Return saves through the
+revision-checked task edit, while Escape or Cancel discards the draft. A failed
+save leaves the current editor open with its draft intact. Drag and reorder
+behavior is unchanged. Task detail keeps its primary actions focused on launch,
+planning, and user sign-off.
 Lane capture accepts a pasted Apple Notes checklist when every nonblank line is
 an unchecked `- [ ] item` entry (also `* [ ]`, `+ [ ]`, `☐`, and `□`). It creates
 one task per checklist entry and strips the checkbox marker; ordinary text still

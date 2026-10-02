@@ -64,6 +64,9 @@ Waiting, Error, and Quota from `AgentRun`; a successful plan sets Ready, and a
 successful implementation sets Review. Only an explicit user completion action
 sets Done and the legacy `completed` flag. Waiting, Error, Quota, and Review sort
 first within a section in that order, followed by priority and stable rank.
+The shared board card renders one status capsule from an exhaustive
+`TaskStatusBadgeStyle` mapping. Saved-plan details and Codex run outcomes remain
+in task detail, with run history also in Activity, rather than appearing on cards.
 
 Legacy `stage` values remain encoded for the local MCP and older phone clients:
 Inbox maps to Inbox/Triage; Next maps to Planning/Planning; Planned maps to

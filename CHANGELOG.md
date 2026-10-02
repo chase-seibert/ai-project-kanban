@@ -2,6 +2,16 @@
 
 ## 2026-10-01
 
+- Unified board-card status into one colored, icon-led capsule shared by Mac and
+  iPhone, and removed the separate Codex run badge from cards. Run history stays
+  visible in task detail and Activity.
+- Set Ready and Review to green, Done to blue, and Quota to orange.
+
+- Added inline task-title editing from board cards. Click the title itself or
+  choose **Edit title** from the card menu, type in the multiline focused field,
+  and press Return to save; Escape or Cancel discards the draft. Opening another
+  title resolves and closes the current editor. Other card content opens task
+  details.
 - Consolidated the macOS app into one resizable primary window. Settings and the
   existing board tools now stay in that window, and the standard Settings menu
   command and Command-comma open the in-window Settings sheet.
