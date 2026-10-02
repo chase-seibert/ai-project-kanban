@@ -513,6 +513,7 @@ public enum RunStatus: String, Codable, CaseIterable, Sendable {
 
 public enum RunKind: String, Codable, Sendable { case planning, implementation, task }
 public enum RunSource: String, Codable, Sendable { case stageChase, codexDesktop }
+public enum LiveTurnState: String, Codable, Sendable { case unknown, busy, waiting, idle, stale }
 
 public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var id = UUID()
@@ -523,6 +524,8 @@ public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   public var status: RunStatus = .queued
   public var threadID: String?
   public var turnID: String?
+  /// Live state is set only after resuming the exact thread; nil on older records means unknown.
+  public var liveState: LiveTurnState?
   public var workDirectory: String?
   public var usesWorktrees: Bool?
   public var summary = "Waiting for the Mac runner"
@@ -826,7 +829,7 @@ public enum BoardReducer {
           "Prepared a Codex Desktop handoff.", projectID: run.projectID, taskID: run.taskID,
           runID: run.id))
     case .beginExternalRun(let run):
-      guard run.kind == .task, run.source == .codexDesktop, run.status == .running,
+      guard run.source == .codexDesktop, run.status == .running,
         state.tasks.contains(where: { $0.id == run.taskID && $0.projectID == run.projectID }),
         !state.runs.contains(where: { $0.id == run.id })
       else { throw BoardError.invalid("The external Codex Desktop tracking record is invalid.") }
@@ -956,6 +959,11 @@ public enum BoardReducer {
       state.tasks[index].revision += 1
       state.tasks[index].updatedAt = .now
       state.runs[runIndex].status = status
+      if status == .needsInput {
+        state.runs[runIndex].liveState = .waiting
+      } else if [.succeeded, .failed, .interrupted, .cancelled].contains(status) {
+        state.runs[runIndex].liveState = .idle
+      }
       if !state.tasks[index].completed {
         state.tasks[index].status = Self.taskStatus(for: status, message: trimmed)
       }

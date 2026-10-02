@@ -100,7 +100,7 @@ for line in sys.stdin:
                 "nextCursor": None,
             }
     elif method in ("thread/start", "thread/resume"):
-        if params.get("model") != "gpt-6.10-luna":
+        if method == "thread/start" and params.get("model") != "gpt-6.10-luna":
             send({"id": request_id, "error": {"code": -32602, "message": "missing or wrong thread model"}})
             continue
         if method == "thread/start":
@@ -110,9 +110,18 @@ for line in sys.stdin:
             thread_status[thread_id] = "idle"
         else:
             thread_id = params["threadId"]
+        if thread_id == "fixture-read-failure":
+            send({"id": request_id, "error": {"code": -32000, "message": "fixture read failure"}})
+            continue
+        if thread_id == "fixture-slow-read":
+            time.sleep(0.2)
         thread_policies[thread_id] = params.get("approvalPolicy")
         thread_sandboxes[thread_id] = params.get("sandbox")
-        result = {"thread": {"id": thread_id}}
+        result = {"thread": {
+            "id": thread_id,
+            "status": {"type": thread_status.get(thread_id, "idle")},
+            "turns": thread_turns.get(thread_id, []),
+        }}
     elif method == "thread/read":
         if params.get("threadId") == "fixture-read-failure":
             send({"id": request_id, "error": {"code": -32000, "message": "fixture read failure"}})
@@ -124,6 +133,8 @@ for line in sys.stdin:
             "status": {"type": thread_status.get(params["threadId"], "idle")},
             "turns": thread_turns.get(params["threadId"], []),
         }}
+    elif method == "thread/list":
+        result = {"data": []}
     elif method == "turn/start":
         if params.get("model") != "gpt-6.10-luna" or params.get("effort") != "high":
             send({"id": request_id, "error": {"code": -32602, "message": "missing or wrong turn model/effort"}})

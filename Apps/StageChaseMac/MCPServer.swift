@@ -215,7 +215,11 @@ import Network
       guard let task = library.tasks.first(where: { $0.id == taskID && $0.projectID == projectID })
       else { throw BoardError.missing }
       let operationID = try uuid("operation_id", arguments)
-      var run = AgentRun(task: task, kind: .task)
+      let kindName = try optionalString("activity_kind", arguments, max: 32) ?? "task"
+      guard let kind = RunKind(rawValue: kindName) else {
+        throw BoardError.invalid("activity_kind must be planning, implementation, or task.")
+      }
+      var run = AgentRun(task: task, kind: kind)
       run.id = operationID
       run.source = .codexDesktop
       run.status = .running
@@ -432,11 +436,12 @@ extension MCPServer {
       ]),
     tool(
       "begin_task",
-      "Record that work began in the already-open Codex Desktop session. This never starts a session or turn.",
+      "Record that planning or execution work began in the already-open Codex Desktop session. activity_kind is optional for older clients and defaults to task. This never starts a session or turn.",
       [
         "type": "object",
         "properties": [
           "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
+          "activity_kind": ["type": "string", "enum": ["planning", "implementation", "task"]],
         ],
         "required": ["project_id", "task_id", "operation_id"], "additionalProperties": false,
       ]),

@@ -25,9 +25,22 @@ private struct PendingPhone: Sendable {
   var status: SyncPairingStatus
 }
 
+private final class SyncConnectionDeadline: @unchecked Sendable {
+  private let workItem: DispatchWorkItem
+
+  init(connection: NWConnection, queue: DispatchQueue, timeout: TimeInterval) {
+    let workItem = DispatchWorkItem { connection.cancel() }
+    self.workItem = workItem
+    queue.asyncAfter(deadline: .now() + timeout, execute: workItem)
+  }
+
+  func cancel() { workItem.cancel() }
+}
+
 /// Mac-owned listener. All command effects pass through LibraryRepository; polling is read-only.
 @MainActor @Observable final class SyncServer {
   static let port: NWEndpoint.Port = 47_928
+  private static let requestTimeout: TimeInterval = 60
   private static let keychainService = "com.cseibert.StageChase.sync"
   private let repository: LibraryRepository
   private var listener: NWListener?
@@ -265,6 +278,8 @@ private struct PendingPhone: Sendable {
     let connectionQueue = DispatchQueue(label: "com.cseibert.StageChase.sync-connection")
     let server = self
     let startedAt = Date()
+    let requestDeadline = SyncConnectionDeadline(
+      connection: connection, queue: connectionQueue, timeout: Self.requestTimeout)
     connection.stateUpdateHandler = { state in
       if case .ready = state {
         Self.receiveFrame(connection, buffer: Data()) { result in
@@ -293,6 +308,7 @@ private struct PendingPhone: Sendable {
               failureDetail = caught.localizedDescription
               reply = .error("Synchronization request could not be processed.")
             }
+            requestDeadline.cancel()
             let bytes = (try? SyncFrame.encode(reply)) ?? Data()
             let outcome: String
             let detail: String

@@ -645,6 +645,29 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   repository = nil
 }
 
+@Test func externalPlanningRunRetainsItsKindAndLiveState() throws {
+  let project = Project(name: "Desktop planning")
+  let task = WorkItem(projectID: project.id, title: "Plan this")
+  var run = AgentRun(task: task, kind: .planning)
+  run.source = .codexDesktop
+  run.status = .running
+  run.threadID = "desktop-thread"
+  run.turnID = "desktop-turn"
+  run.liveState = .busy
+  var initial = Library()
+  initial.projects = [project]
+  initial.tasks = [task]
+  let library = try BoardReducer.apply(.beginExternalRun(run), to: initial)
+  let saved = try #require(library.runs.first)
+  #expect(saved.kind == .planning)
+  #expect(saved.threadID == "desktop-thread")
+  #expect(saved.liveState == .busy)
+
+  let legacyData = try JSONEncoder().encode(AgentRun(task: task, kind: .task))
+  let legacy = try JSONDecoder().decode(AgentRun.self, from: legacyData)
+  #expect(legacy.liveState == nil)
+}
+
 @Test func externalCodexStartSupersedesOnlySameTaskStageChaseRunAndIgnoresLateUpdates() async throws
 {
   let repository = try LibraryRepository(inMemory: true)

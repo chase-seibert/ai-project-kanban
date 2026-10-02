@@ -17,9 +17,39 @@ builds are Apple Development signed. Device deployment builds, installs, then
 launches sequentially, even with parallel make. Simulator builds skip signing.
 The launcher supports traditional Simulator locations and this Xcode's DeviceHub.
 
-On this host sandboxed compiler invocations can block SwiftData/SwiftUI macros.
-Retry the same target with approved host access before treating it as a source
-error. Codex's runtime workspace sandbox remains enabled independently.
+### Codex build permissions
+
+On this host sandboxed SwiftPM manifests and SwiftData/SwiftUI compiler macros
+can fail with `sandbox_apply: Operation not permitted`. Run build and check
+targets with approved host access from the first invocation. In Codex's
+`exec_command`, request `sandbox_permissions: "require_escalated"` and use a
+single target with the literal checkout path, for example:
+
+```sh
+make -C /Users/cseibert/projects/ai-project-kanban build
+make -C /Users/cseibert/projects/ai-project-kanban test
+```
+
+The project `.codex/config.toml` keeps workspace sandboxing as the default.
+`.codex/rules/apple-build.rules` permits `build`, `sim-build`, `lint`, `test`,
+`sync-test`, `runner-test`, and `codex-check` to run with host access in this
+trusted checkout. Setup, cleanup, launch, provisioning, installation, and
+deployment still use normal approval. Restart Codex after installing or
+changing these rules. Existing sessions may still require ordinary approval;
+managed restrictions take precedence. If host execution is denied, report the
+check as blocked rather than retrying through another mechanism.
+
+Rules match command prefixes, so these permissions trust the Makefile and the
+code/scripts its targets execute with host access. Use one listed target per
+command without appended options or variable overrides. Other invocations need
+separate review. The rules intentionally name this checkout's absolute path:
+worktrees and relocated clones need approval for their own path, and must never
+redirect their builds into the original checkout. `make format` and ordinary
+file edits remain under workspace permissions.
+
+See the [Codex rules documentation](https://learn.chatgpt.com/docs/agent-configuration/rules)
+for loading rules and the [configuration documentation](https://learn.chatgpt.com/docs/config-file/config-basic)
+for precedence and project trust.
 
 ## Data
 

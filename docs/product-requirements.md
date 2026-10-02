@@ -207,6 +207,19 @@ Phone confirmation for automated transitions remains open.
   requests, and explain when a plan or linked session is unavailable.
 - Manual handoffs, status refreshes, and Codex outcomes do not move a task or
   start work from phone polling or replica updates.
+- As a user, I want external `begin_task` to distinguish planning from task
+  execution while older callers default to generic task activity, so the task
+  history keeps those workflows separate.
+- As a user, I want to explicitly link the same-project Codex Desktop thread
+  where I pasted a prompt, so StageChase tracks that exact session instead of
+  guessing from its title or task text.
+- As a user, I want the linked task card to show a spinner and the latest short
+  Codex message only while a confirmed turn is busy, so waiting, finished, or
+  disconnected sessions are not shown as processing.
+- As a user, I want plan runs and task execution runs shown in separate task
+  detail sections, so planning progress is not confused with implementation.
+- Linking or reconnecting observes an existing thread only; it never submits,
+  interrupts, or closes a turn.
 
 ## Manual plan handoff
 

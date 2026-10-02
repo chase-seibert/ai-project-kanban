@@ -7,6 +7,14 @@ struct AgentApproval {
   let message: String
 }
 
+struct DesktopThreadCandidate: Identifiable, Hashable {
+  let id: String
+  let name: String
+  let preview: String
+  let status: String
+  let updatedAt: Date?
+}
+
 @MainActor @Observable final class CodexRunner {
   static func sessionName(for kind: RunKind, taskTitle: String) -> String {
     let prefix = kind == .planning ? "Plan" : "Code"
@@ -22,6 +30,7 @@ struct AgentApproval {
   private var queuePausedForHandoff = false
   private var closingRunID: UUID?
   private var ownedThreads = Set<String>()
+  private var observedDesktopRuns: [String: UUID] = [:]
   private var connectionGeneration: UInt64 = 0
   private var handlingCompletion = false
   private var eventQueue: [(UInt64, String, [String: Any])] = []
@@ -33,6 +42,7 @@ struct AgentApproval {
   private let executableOverride: String?
   private let worktreeRootOverride: URL?
   var approval: AgentApproval?
+  var isBusy: Bool { activeID != nil }
   init(
     model: AppModel, executableOverride: String? = nil,
     connection: any AgentConnection = CodexConnection(), worktreeRootOverride: URL? = nil
@@ -53,6 +63,7 @@ struct AgentApproval {
         self.ownedThreads.removeAll()
         self.connectedExecutable = nil
         self.connectionGeneration &+= 1
+        await self.markObservedSessionsStale()
         await self.fail(message)
       }
     }
@@ -78,7 +89,10 @@ struct AgentApproval {
   private func connect(executable path: String) async throws {
     let wasConnected = connection.connected
     try await connection.connect(executable: path)
-    if !wasConnected { connectionGeneration &+= 1 }
+    if !wasConnected {
+      connectionGeneration &+= 1
+      terminalTurnIDs.removeAll()
+    }
     connectedExecutable = path
   }
 
@@ -178,11 +192,11 @@ struct AgentApproval {
 
   func refreshDesktopStatus(runID: UUID) async throws {
     guard let model, var run = model.library.runs.first(where: { $0.id == runID }),
-      run.kind == .task, let threadID = run.threadID
+      let threadID = run.threadID
     else { throw BoardError.invalid("This task has no linked Codex Desktop session.") }
     try await connect(executable: executable())
     let response = try await connection.call(
-      "thread/read", ["threadId": threadID, "includeTurns": true])
+      "thread/resume", ["threadId": threadID, "excludeTurns": false])
     guard let thread = response["thread"] as? [String: Any] else {
       throw BoardError.invalid("Codex returned no session status.")
     }
@@ -192,38 +206,106 @@ struct AgentApproval {
     let latestTurnStatus = latestTurn?["status"] as? String
     let activitySummary = latestTurn.flatMap(Self.activitySummary(for:))
     if threadStatus == "active" || latestTurnStatus == "inProgress" {
-      run.status = .running
+      run.liveState = .busy
+      if run.source != .codexDesktop || [.stale, .needsInput].contains(run.status) {
+        run.status = .running
+      }
       run.summary =
         activitySummary.map { "Codex Desktop is running this task. \($0)" }
         ?? "Codex Desktop is running this task."
       run.error = nil
     } else {
+      run.liveState = .idle
       switch latestTurnStatus {
       case "completed":
-        run.status = .succeeded
+        if run.source != .codexDesktop { run.status = .succeeded }
         run.summary =
           activitySummary.map { "Codex Desktop finished. \($0)" }
           ?? "Codex Desktop finished. Review the changes."
         run.error = nil
       case "failed":
-        run.status = .failed
+        if run.source != .codexDesktop { run.status = .failed }
         run.summary =
           activitySummary.map { "Codex Desktop reported a failed run. \($0)" }
           ?? "Codex Desktop reported a failed run."
       case "interrupted":
-        run.status = .interrupted
+        if run.source != .codexDesktop { run.status = .interrupted }
         run.summary = "Codex Desktop run was interrupted."
       default:
-        run.status = .readyForHandoff
+        if run.source != .codexDesktop { run.status = .readyForHandoff }
         run.summary = "No completed Codex Desktop turn was found."
         run.error = nil
       }
     }
     run.turnID = turns.last?["id"] as? String
+    run.latestMessage = activitySummary.map { String($0.prefix(240)) }
     run.updatedAt = .now
     guard await model.perform(.updateRun(run)) else {
       throw BoardError.invalid("Could not save the refreshed Codex status.")
     }
+    if run.source == .codexDesktop { observedDesktopRuns[threadID] = run.id }
+  }
+
+  func desktopThreads(for runID: UUID) async throws -> [DesktopThreadCandidate] {
+    guard let model, let run = model.library.runs.first(where: { $0.id == runID }),
+      run.source == .codexDesktop,
+      let project = model.library.projects.first(where: { $0.id == run.projectID })
+    else { throw BoardError.invalid("This run cannot be linked to a Codex Desktop session.") }
+    try await connect(executable: executable())
+    let expectedDirectory = URL(fileURLWithPath: project.directory).standardizedFileURL
+      .resolvingSymlinksInPath().path
+    let response = try await connection.call(
+      "thread/list",
+      ["limit": 100, "sortKey": "recency_at", "sortDirection": "desc", "cwd": [expectedDirectory]])
+    let entries = response["data"] as? [[String: Any]] ?? []
+    return entries.compactMap { entry in
+      guard let id = entry["id"] as? String, !id.isEmpty else { return nil }
+      let cwd = (entry["cwd"] as? String).map {
+        URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path
+      }
+      guard cwd == expectedDirectory else { return nil }
+      let status = (entry["status"] as? [String: Any])?["type"] as? String ?? "unknown"
+      let timestamp = entry["updatedAt"] as? Double
+      return DesktopThreadCandidate(
+        id: id, name: entry["name"] as? String ?? "Codex session",
+        preview: String((entry["preview"] as? String ?? "").prefix(240)), status: status,
+        updatedAt: timestamp.map { Date(timeIntervalSince1970: $0) })
+    }
+  }
+
+  func linkDesktopSession(runID: UUID, threadID: String) async throws {
+    guard let model, var run = model.library.runs.first(where: { $0.id == runID }),
+      run.source == .codexDesktop
+    else { throw BoardError.invalid("This run cannot be linked to a Codex Desktop session.") }
+    if let existingRunID = observedDesktopRuns[threadID], existingRunID != runID {
+      throw BoardError.invalid("This Codex Desktop session is already linked to another task.")
+    }
+    try await connect(executable: executable())
+    let response = try await connection.call(
+      "thread/resume", ["threadId": threadID, "excludeTurns": false])
+    guard let thread = response["thread"] as? [String: Any],
+      thread["id"] as? String == threadID
+    else { throw BoardError.invalid("Codex did not resume the selected session.") }
+    let threadStatus = (thread["status"] as? [String: Any])?["type"] as? String
+    let turns = thread["turns"] as? [[String: Any]] ?? []
+    let latest = turns.last
+    let turnStatus = latest?["status"] as? String
+    run.threadID = threadID
+    run.turnID = latest?["id"] as? String
+    run.liveState = threadStatus == "active" || turnStatus == "inProgress" ? .busy : .idle
+    if run.liveState == .busy && [.stale, .needsInput].contains(run.status) {
+      run.status = .running
+    }
+    run.latestMessage = latest.flatMap(Self.activitySummary(for:)).map { String($0.prefix(240)) }
+    run.summary =
+      run.liveState == .busy
+      ? "Codex Desktop is processing this linked session."
+      : "Linked to Codex Desktop; waiting for the next confirmed live update."
+    run.updatedAt = .now
+    guard await model.perform(.updateRun(run)) else {
+      throw BoardError.invalid("Could not save the Codex Desktop session link.")
+    }
+    observedDesktopRuns[threadID] = runID
   }
 
   private static func activitySummary(for turn: [String: Any]) -> String? {
@@ -640,7 +722,7 @@ struct AgentApproval {
   }
 
   private func enqueueEvent(_ method: String, _ params: [String: Any]) {
-    guard activeID != nil else { return }
+    guard activeID != nil || !observedDesktopRuns.isEmpty else { return }
     // Retain completed public items, not private reasoning or token-by-token deltas.
     guard
       params["_requestID"] != nil
@@ -663,6 +745,13 @@ struct AgentApproval {
   }
 
   private func event(_ method: String, _ params: [String: Any]) async {
+    if let threadID = params["threadId"] as? String,
+      let externalRunID = observedDesktopRuns[threadID],
+      await updateObservedDesktopRun(
+        runID: externalRunID, threadID: threadID, method: method, params: params)
+    {
+      return
+    }
     if let id = params["_requestID"] {
       await handleRequest(id, method, params)
       return
@@ -678,7 +767,11 @@ struct AgentApproval {
     run.updatedAt = .now
     switch method {
     case "turn/started":
-      run.turnID = (params["turn"] as? [String: Any])?["id"] as? String
+      guard let turnID = (params["turn"] as? [String: Any])?["id"] as? String,
+        !terminalTurnIDs.contains(turnID)
+      else { return }
+      run.turnID = turnID
+      run.liveState = .busy
       run.summary = "Codex is working…"
       await model.perform(.updateRun(run))
     case "turn/plan/updated":
@@ -707,6 +800,7 @@ struct AgentApproval {
         let text = item["text"] as? String
       {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        run.latestMessage = String(trimmed.prefix(240))
         let completionSummary =
           trimmed.hasPrefix("Completed:")
           ? String(
@@ -750,6 +844,7 @@ struct AgentApproval {
         return
       }
       guard !handlingCompletion else { return }
+      run.liveState = .idle
       handlingCompletion = true
       defer { handlingCompletion = false }
       let turn = params["turn"] as? [String: Any] ?? [:]
@@ -795,6 +890,76 @@ struct AgentApproval {
         await fail(error?["message"] as? String ?? "Codex reported an error.")
       }
     default: break
+    }
+  }
+
+  private func updateObservedDesktopRun(
+    runID: UUID, threadID: String, method: String, params: [String: Any]
+  ) async -> Bool {
+    guard let model, var run = model.library.runs.first(where: { $0.id == runID }),
+      run.source == .codexDesktop, run.threadID == threadID
+    else { return false }
+    if params["_requestID"] != nil {
+      run.liveState = .waiting
+      run.summary = "Codex Desktop is waiting for your input."
+      run.latestMessage = run.summary
+      run.updatedAt = .now
+      _ = await model.perform(.updateRun(run))
+      return true
+    }
+    switch method {
+    case "turn/started":
+      guard let turnID = (params["turn"] as? [String: Any])?["id"] as? String,
+        !terminalTurnIDs.contains(turnID)
+      else { return true }
+      run.turnID = turnID
+      run.liveState = .busy
+      run.summary = "Codex Desktop is processing this linked session."
+    case "turn/completed":
+      let turn = params["turn"] as? [String: Any] ?? [:]
+      if let eventTurnID = turn["id"] as? String, let currentTurnID = run.turnID,
+        eventTurnID != currentTurnID
+      {
+        return true
+      }
+      let status = turn["status"] as? String ?? "unknown"
+      run.liveState = status == "needsInput" ? .waiting : .idle
+      run.summary =
+        status == "needsInput"
+        ? "Codex Desktop is waiting for your input."
+        : status == "completed"
+          ? "Codex Desktop finished this turn." : "Codex Desktop turn \(status)."
+    case "item/completed":
+      if let eventTurnID = params["turnId"] as? String,
+        let currentTurnID = run.turnID, eventTurnID != currentTurnID
+      {
+        return true
+      }
+      guard let item = params["item"] as? [String: Any], item["type"] as? String == "agentMessage",
+        let text = item["text"] as? String
+      else { return true }
+      let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !message.isEmpty { run.latestMessage = String(message.prefix(240)) }
+    case "error":
+      run.liveState = .stale
+      run.summary = "Codex Desktop activity could not be confirmed. Refresh the linked session."
+    default: return true
+    }
+    run.updatedAt = .now
+    _ = await model.perform(.updateRun(run))
+    return true
+  }
+
+  private func markObservedSessionsStale() async {
+    guard let model else { return }
+    for runID in Set(observedDesktopRuns.values) {
+      guard var run = model.library.runs.first(where: { $0.id == runID }),
+        run.source == .codexDesktop
+      else { continue }
+      run.liveState = .stale
+      run.summary = "Codex Desktop connection lost; live activity is unknown. Refresh to reconnect."
+      run.updatedAt = .now
+      _ = await model.perform(.updateRun(run))
     }
   }
 

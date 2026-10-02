@@ -2,7 +2,7 @@
 
 ## 2026-09-29
 
-- Sandboxed SwiftPM/Xcode invocation cannot run compiler macro plugins on this host. This first appeared as unrelated SwiftData PersistentModel errors. Rerunning the same build/test targets with host access fixes the environment; do not remove SwiftData macros to work around it.
+- Sandboxed SwiftPM/Xcode invocation cannot run compiler macro plugins on this host. This first appeared as unrelated SwiftData PersistentModel errors. Use approved host execution for build/check targets from the first attempt; see the Codex build permissions section in `AGENTS.md` and `.codex/rules/apple-build.rules`. Do not repeat the failing sandboxed attempt or remove SwiftData macros to work around it.
 - Swift 6 disallows sending JSON dictionaries containing Any through a continuation. The app-server transport now passes immutable JSON Data across the continuation and decodes on the main actor.
 - Approval requests originally raced progress notifications, allowing Running to overwrite Needs Approval. Both now share a serial queue, covered by the offline fixture.
 - The old iOS target lacked launch-screen configuration and used a letterboxed compatibility viewport. Generated UILaunchScreen/scene settings restore full-screen rendering, verified in screenshots.
@@ -22,6 +22,11 @@
 
 ## 2026-10-02
 
+- Recording the compiler sandbox failure here did not prevent repeated failed
+  first attempts because setup instructions still said to retry afterward.
+  Promote recurring workarounds into the default workflow: `AGENTS.md` now
+  requires approved host execution initially, and project Codex rules allow
+  the listed Makefile targets for this checkout after Codex restarts.
 - `make lint` reports pre-existing `swift-format` indentation and line-break
   findings in untouched `DetailViews.swift` and `BoardViews.swift`. The files
   changed for sync pass targeted strict formatting; avoid broad unrelated

@@ -1,0 +1,35 @@
+# This checkout's Apple builds/checks need host compiler/plugin access.
+# Prefix rules trust the Makefile and the code/scripts its targets execute.
+# Invoke exactly one target without extra options, variables, or targets.
+# Launch, cleanup, provisioning, installation, and deployment require normal approval.
+# Other checkout paths (including worktrees) need separate approval.
+prefix_rule(
+    pattern = [
+        ["make", "/usr/bin/make"],
+        "-C",
+        "/Users/cseibert/projects/ai-project-kanban",
+        ["lint", "test", "sync-test", "runner-test", "codex-check", "build", "sim-build"],
+    ],
+    decision = "allow",
+    justification = "Approved StageChase build/check targets need host access for SwiftPM manifests, compiler macros, and Mac development signing.",
+    match = [
+        "make -C /Users/cseibert/projects/ai-project-kanban build",
+        "make -C /Users/cseibert/projects/ai-project-kanban test",
+        "/usr/bin/make -C /Users/cseibert/projects/ai-project-kanban sim-build",
+    ],
+    not_match = [
+        "make build",
+        "make -C /tmp/another-project build",
+        "make -C /Users/cseibert/projects/ai-project-kanban format",
+        "make -C /Users/cseibert/projects/ai-project-kanban run",
+        "make -C /Users/cseibert/projects/ai-project-kanban clean",
+        "make -C /Users/cseibert/projects/ai-project-kanban sim-launch",
+        "make -C /Users/cseibert/projects/ai-project-kanban phone-build",
+        "make -C /Users/cseibert/projects/ai-project-kanban phone-install",
+        "make -C /Users/cseibert/projects/ai-project-kanban phone-launch",
+        "make -C /Users/cseibert/projects/ai-project-kanban phone-deploy",
+        "make -C /Users/cseibert/projects/ai-project-kanban arbitrary-target",
+        "swift test",
+        "xcodebuild -project StageChase.xcodeproj build",
+    ],
+)

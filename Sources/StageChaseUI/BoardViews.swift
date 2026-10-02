@@ -439,6 +439,11 @@ struct TaskCard: View {
   @FocusState private var titleFieldFocused: Bool
 
   private var isEditingTitle: Bool { editingTaskID == item.id }
+  private var latestRun: AgentRun? { model.library.latestRun(for: item.id) }
+  private var showsLiveActivity: Bool {
+    guard let run = latestRun else { return false }
+    return run.status == .running && run.liveState == .busy
+  }
 
   var body: some View {
     Group {
@@ -611,6 +616,16 @@ struct TaskCard: View {
             if item.completed {
               Label("Completed by you", systemImage: "checkmark.circle.fill").stageFont(.caption)
                 .foregroundStyle(.green)
+            }
+            if showsLiveActivity, let run = latestRun {
+              HStack(spacing: 6) {
+                ProgressView().controlSize(.small).scaleEffect(0.72)
+                Text(run.latestMessage ?? run.summary)
+                  .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .accessibilityElement(children: .combine)
+              .accessibilityLabel("Codex is running. \(run.latestMessage ?? run.summary)")
             }
           }
           .frame(maxWidth: .infinity, alignment: .leading)

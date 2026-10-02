@@ -494,6 +494,7 @@ private struct PhoneOutbox: Codable {
 }
 
 private final class NWOneShotExchange: @unchecked Sendable {
+  private static let timeout: TimeInterval = 60
   private let connection: NWConnection
   private let remoteAddress: String
   private let queue = DispatchQueue(label: "com.cseibert.StageChase.phone-sync")
@@ -519,7 +520,7 @@ private final class NWOneShotExchange: @unchecked Sendable {
             )),
           continuation)
       }
-      queue.asyncAfter(deadline: .now() + 10, execute: timeout)
+      queue.asyncAfter(deadline: .now() + Self.timeout, execute: timeout)
       connection.stateUpdateHandler = { [weak self] state in
         guard let self else { return }
         switch state {

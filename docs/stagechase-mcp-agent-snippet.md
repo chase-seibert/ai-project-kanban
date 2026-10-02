@@ -35,8 +35,11 @@ never start, stop, retry, or approve Codex work.
   `read_task` with the exact project and task IDs before planning or
   implementation. Verify the returned IDs match.
 - Call `begin_task` only when the user asks to start planning or implementation
-  in this already-open Codex session. Use a fresh UUID `operation_id`; retain
-  the returned `run_id` and latest task revision.
+  in this already-open Codex session. Set optional `activity_kind` to `planning`
+  for plan prompts or `implementation` for task execution; older clients may omit
+  it and default to `task`. Use a fresh UUID `operation_id`; retain the returned
+  `run_id` and latest task revision. Do not guess or invent a Desktop thread ID;
+  the user can link the exact session from task detail.
 - An explicit `begin_task` replaces an active StageChase-owned tracking record
   for the same task, preserving the old run as Superseded and making the new
   Codex Desktop record current. A concurrent active Codex Desktop session still

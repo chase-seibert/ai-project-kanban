@@ -51,6 +51,14 @@ planning run from any task section, reserves the plan path, and leaves placement
 unchanged. Both use the project's saved execution profile. The user-run actions
 **Launch Codex** and **Plan in Codex** open Codex Desktop with generated prompts
 without submitting turns.
+External `begin_task` records accept an optional `activity_kind` of `planning`,
+`implementation`, or `task`; old clients default to `task`. Because prompt
+opening does not return the Desktop thread ID, task detail offers an explicit
+same-project session picker. Choosing a session calls `thread/resume` to join
+that exact thread and observe notifications; `thread/read` alone is a snapshot,
+not a subscription. StageChase shows the card spinner and a short latest-message
+caption only while a confirmed turn is busy. Waiting, idle, or stale states stop
+the spinner. Linking does not submit, interrupt, or close an external turn.
 Prompts for Desktop handoff use stable project/task IDs and a readable
 project-relative plan path when available, and start with the exact task title.
 Runner-created planning
@@ -145,8 +153,10 @@ through the user's StageChase controls; MCP exposes no completion write.
 External session records have a distinct source; `begin_task`,
 `report_task_update`, and `finish_task` only track work that Codex Desktop
 already started. They store one bounded latest message on the task/run, never a
-transcript or inferred thread ID. Restart marks an external active record stale
-rather than interrupted or resumable by StageChase.
+transcript or inferred thread ID. A selected thread identity is stored only
+after the user chooses it. On restart, saved activity is unknown until the user
+refreshes/relinks and StageChase resumes that exact thread; disconnection marks
+the live state stale and stops the spinner.
 An explicit fresh `begin_task` supersedes an active StageChase-owned run for
 that same task, keeps its history, and becomes the latest run. This replaces
 tracking only: it does not stop the underlying runner process. Updates from a
@@ -341,7 +351,8 @@ Both apps have a Connection view with current request state, last result,
 pending count, saved endpoint, and a persistent, bounded exchange journal. The
 journal records timestamps, direction, framed request/response byte counts,
 elapsed time, endpoint, and outcome; it never records message bodies, task text,
-or credentials. Since transport uses one short TCP connection per request,
+or credentials. Each phone exchange and Mac request connection has a 60-second
+timeout. Since transport uses one short TCP connection per request,
 phone status reports the most recent reachability check rather than a permanent
 socket. The phone can update its saved Mac address without unpairing or dropping
 queued changes.

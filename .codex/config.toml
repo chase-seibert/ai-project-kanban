@@ -1,0 +1,2 @@
+# Keep ordinary commands sandboxed; approved Apple build/check targets use rules/.
+sandbox_mode = "workspace-write"

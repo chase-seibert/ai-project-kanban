@@ -2,6 +2,14 @@
 
 ## 2026-10-02
 
+- Add project Codex command rules and build instructions that request approved
+  host execution initially for Apple builds/checks, avoiding repeated known
+  compiler sandbox failures while keeping workspace sandboxing as the default.
+- Increase phone and Mac sync request timeouts to 60 seconds.
+- Track manually started Codex Desktop planning and execution in separate task
+  detail sections. Let the user link an exact same-project Desktop thread and
+  observe its live turn state and latest message; show a card spinner/caption
+  only for a confirmed busy turn, and stop it on waiting, idle, or disconnect.
 - Verify the Mac sync listener over loopback with a nonce and per-instance ID,
   and show whether this StageChase instance successfully receives requests on
   its registered port.

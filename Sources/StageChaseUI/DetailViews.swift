@@ -999,9 +999,22 @@ struct TaskDetail: View {
                   .stageFont(.caption2).foregroundStyle(.secondary)
               }
             }
-            if let run = model.library.latestRun(for: taskID) {
-              RunDetail(run: run)
-            } else {
+            let taskRuns = model.library.runs.filter { $0.taskID == taskID }
+            let planRuns = taskRuns.filter { $0.kind == .planning }.sorted {
+              $0.createdAt > $1.createdAt
+            }
+            let executionRuns = taskRuns.filter { $0.kind != .planning }.sorted {
+              $0.createdAt > $1.createdAt
+            }
+            if !planRuns.isEmpty {
+              Text("Plan activity").stageFont(.subheadline, weight: .semibold)
+              ForEach(planRuns) { RunDetail(run: $0) }
+            }
+            if !executionRuns.isEmpty {
+              Text("Task execution").stageFont(.subheadline, weight: .semibold)
+              ForEach(executionRuns) { RunDetail(run: $0) }
+            }
+            if taskRuns.isEmpty {
               Text("No agent has worked on this task.").stageFont(.subheadline, weight: .medium)
               #if os(iOS)
                 Text(
@@ -1304,6 +1317,9 @@ struct RunDetail: View {
     @State private var codexOpenFailed = false
     @State private var sessionIDCopied = false
   #endif
+  #if os(macOS)
+    @State private var isShowingSessionPicker = false
+  #endif
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {
@@ -1358,7 +1374,7 @@ struct RunDetail: View {
               NSPasteboard.general.clearContents()
               NSPasteboard.general.setString(thread, forType: .string)
             }.labelStyle(.iconOnly).help("Copy session ID")
-            if run.kind != .task {
+            if run.kind != .task, run.source != .codexDesktop {
               Button(closing ? "Closing…" : "Close Codex session", systemImage: "xmark.circle") {
                 Task { await model.closeCodexSession(run.id) }
               }
@@ -1370,7 +1386,19 @@ struct RunDetail: View {
             }
           }
         }
-        if run.kind == .task, run.threadID != nil {
+        if run.source == .codexDesktop {
+          Button(
+            run.threadID == nil ? "Link Codex Desktop session" : "Change linked session",
+            systemImage: "link"
+          ) {
+            isShowingSessionPicker = true
+          }
+          .disabled(model.runner?.isBusy == true)
+          .sheet(isPresented: $isShowingSessionPicker) {
+            DesktopSessionPicker(run: run)
+          }
+        }
+        if run.threadID != nil {
           Button(
             model.runStatusRefreshInFlight.contains(run.id) ? "Refreshing…" : "Refresh status",
             systemImage: "arrow.clockwise"
@@ -1446,6 +1474,80 @@ struct RunDetail: View {
     #endif
   }
 }
+
+#if os(macOS)
+  private struct DesktopSessionPicker: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let run: AgentRun
+    @State private var sessions: [DesktopThreadCandidate] = []
+    @State private var loading = true
+    @State private var errorMessage: String?
+    @State private var linkingID: String?
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 14) {
+        Text("Link Codex Desktop session").stageFont(.title3, weight: .bold)
+        Text(
+          "Choose the exact thread where you pasted this task's prompt. Linking resumes observation only; it does not submit a turn."
+        )
+        .stageFont(.callout).foregroundStyle(.secondary)
+        if loading { ProgressView("Loading sessions…") }
+        if let errorMessage { Text(errorMessage).foregroundStyle(.orange).textSelection(.enabled) }
+        ScrollView {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(sessions) { session in
+              Button {
+                linkingID = session.id
+                Task {
+                  do {
+                    try await model.runner?.linkDesktopSession(runID: run.id, threadID: session.id)
+                    dismiss()
+                  } catch { errorMessage = error.localizedDescription }
+                  linkingID = nil
+                }
+              } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                  HStack {
+                    Text(session.name).stageFont(.body, weight: .semibold)
+                    Spacer()
+                    Text(session.status.capitalized).stageFont(.caption).foregroundStyle(.secondary)
+                  }
+                  if !session.preview.isEmpty {
+                    Text(session.preview).stageFont(.caption).foregroundStyle(.secondary).lineLimit(
+                      2)
+                  }
+                  Text(session.id).stageFont(.caption2).foregroundStyle(.tertiary).textSelection(
+                    .enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(9)
+                .background(Palette.card, in: RoundedRectangle(cornerRadius: 8))
+              }
+              .buttonStyle(.plain)
+              .disabled(linkingID != nil)
+            }
+          }
+        }
+        if !loading && sessions.isEmpty && errorMessage == nil {
+          ContentUnavailableView("No sessions found", systemImage: "bubble.left.and.bubble.right")
+        }
+        HStack {
+          Spacer()
+          Button("Cancel") { dismiss() }
+        }
+      }
+      .padding(20)
+      .frame(minWidth: 460, minHeight: 360)
+      .task {
+        do { sessions = try await model.runner?.desktopThreads(for: run.id) ?? [] } catch {
+          errorMessage = error.localizedDescription
+        }
+        loading = false
+      }
+    }
+  }
+#endif
 
 struct ActivityPanel: View {
   @Environment(AppModel.self) private var model

@@ -172,8 +172,9 @@ public actor LibraryRepository {
       where [.running, .needsInput, .queued].contains(library.runs[index].status) {
         if library.runs[index].source == .codexDesktop {
           library.runs[index].status = .stale
+          library.runs[index].liveState = .stale
           library.runs[index].summary =
-            "Codex Desktop state is unverified after restart. Begin a new tracking record if continuing."
+            "Codex Desktop state is unverified after restart. Refresh or relink to confirm it."
         } else {
           library.runs[index].status = .interrupted
           library.runs[index].summary = "Runner stopped. Review the session, then retry explicitly."
