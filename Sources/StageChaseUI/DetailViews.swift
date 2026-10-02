@@ -689,7 +689,7 @@ struct TaskDetail: View {
               VStack(alignment: .leading, spacing: 10) {
                 Label("Codex on Mac", systemImage: "desktopcomputer").stageFont(.headline)
                 HStack {
-                  Button("Plan in Codex", systemImage: "sparkles") {
+                  Button("Plan with StageChase", systemImage: "sparkles") {
                     requestCodexAction(.plan, item: item)
                   }
                   .disabled(codexActionLoading || item.completed)
@@ -702,7 +702,7 @@ struct TaskDetail: View {
                       || model.library.latestRun(for: item.id)?.status.isActive == true)
                 }
                 Text(
-                  "Planning opens Codex Desktop on the Mac. Running opens the Mac confirmation first."
+                  "Both actions open the matching Mac confirmation before Codex starts. A run keeps the task in its current section."
                 )
                 .stageFont(.caption).foregroundStyle(.secondary)
                 if let message = model.phoneCodexActionMessage {

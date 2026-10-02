@@ -2,6 +2,14 @@
 
 ## 2026-10-02
 
+- Route each iPhone lane's + button to the shared Add Task sheet, remove the
+  phone overflow Add Task command and bottom lane capture row, and make task
+  title single taps open detail while double taps edit inline.
+- Add explicit paired-phone actions to request a confirmed planning or task
+  run on the Mac; show saved plan Markdown in
+  task detail and expose per-project Codex profile/model settings on iPhone.
+  Direct requests use sync protocol v2 and remain separate from background
+  polling and the offline board-edit queue.
 - Add a confirmed **Run with StageChase** task action that starts only the
   selected task through the Mac runner, independent of automatic-run settings;
   keep **Launch Codex** as the separate Desktop handoff.

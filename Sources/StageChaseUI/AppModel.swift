@@ -276,10 +276,14 @@ import UniformTypeIdentifiers
       }
       switch action {
       case .plan:
-        let prompt = PlanHandoffPrompt.make(
-          for: item, project: project, formatPrompt: resolvedPlanFormatPrompt)
-        try openCodexDesktop(prompt: prompt, projectDirectory: project.directory)
-        return "Plan request opened in Codex Desktop on the Mac."
+        guard !item.completed,
+          !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
+        else { throw BoardError.invalid("Finish the active run before requesting a new plan.") }
+        requestRunnerRun(item, kind: .planning)
+        guard pendingMove?.item.id == item.id, pendingMove?.runOnly == true else {
+          throw BoardError.invalid(error ?? "The Mac could not prepare this planning run.")
+        }
+        return "Planning confirmation is open in StageChase on the Mac. Confirm there to start Codex."
       case .run:
         guard [.planning, .implementing].contains(item.section), !item.completed,
           !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
@@ -293,21 +297,6 @@ import UniformTypeIdentifiers
           throw BoardError.invalid(error ?? "The Mac could not prepare this Codex run.")
         }
         return "Run confirmation is open in StageChase on the Mac. Confirm there to start Codex."
-      }
-    }
-
-    private func openCodexDesktop(prompt: String, projectDirectory: String) throws {
-      var components = URLComponents()
-      components.scheme = "codex"
-      components.host = "threads"
-      components.path = "/new"
-      components.queryItems = [
-        URLQueryItem(name: "path", value: projectDirectory),
-        URLQueryItem(name: "prompt", value: prompt),
-      ]
-      guard let url = components.url, NSWorkspace.shared.open(url) else {
-        throw BoardError.invalid(
-          "Codex Desktop could not open the task. Check its installation on the Mac.")
       }
     }
 
@@ -1008,7 +997,7 @@ import UniformTypeIdentifiers
       else { return }
       let pending = PendingMove(
         item: current, stage: current.stage, isNew: false, runKind: kind,
-        runOnly: true, configuration: nil, loading: true)
+        configuration: nil, loading: true)
       pendingMove = pending
       preparePendingMove(pending.id)
     #else

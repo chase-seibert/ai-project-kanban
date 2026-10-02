@@ -12,9 +12,12 @@ cards, with saved plans and the latest run available in task detail and run
 history in Activity. Status capsules use the same styling on Mac and iPhone.
 Waiting, Error, Quota, and Review sort ahead of ordinary statuses in that order,
 then priority and the user's stable rank decide order.
-Section headers offer named + buttons and inline multiline capture. Cards drag
-between sections or onto another card to reorder within a section. Click a card
-title to edit it inline, or use the card menu's **Edit title** action; other card
+Section headers offer named + buttons. On iPhone, + opens the same task sheet
+used by the task composer, and there is no extra Add task row at the bottom of a
+lane. Mac keeps inline multiline capture. Cards drag between sections or onto
+another card to reorder within a section. On Mac, click a card title to edit it
+inline, or use the card menu's **Edit title** action. On iPhone, a single title
+tap opens task detail and a double tap starts inline title editing. Other card
 content opens task detail. The title editor stays multiline and only one card
 can be edited at a time; opening another title saves and closes the prior editor
 when its draft is nonempty and changed. Return saves through the
@@ -52,18 +55,20 @@ event records remain stored; open a run in Codex on Mac to inspect its session.
 On iPhone, StageChase tries the Codex thread URL and, if no app can open it,
 directs the user to continue on Mac and lets them copy the session ID. The phone
 cannot manage the Mac runner.
-Mac Project settings expose a per-project Codex execution profile. The safe
+Mac and paired iPhone Project settings expose a per-project Codex execution profile. The safe
 default uses workspace-write and disables approval prompts. Full access is an
 explicit choice with filesystem and network scope explained beside the picker.
 Runs save the selected profile and retries reuse that snapshot. Profile values
-travel in project replicas as informational data only; phone views never invoke
-or manage Codex. Final runner summaries use ordinary readable prose.
+travel in project replicas. Phone changes affect future runs only; each new run
+still uses the Mac's existing confirmation. Final runner summaries use ordinary
+readable prose.
 
 For an incomplete Planning task with a saved plan, the same context field accepts
 typed or system-dictated plan feedback. Leaving the field appends feedback;
 StageChase adds a `User feedback on the plan` heading, preserves the wording, and
 keeps a failed draft available for retry.
-The phone directs the user to the Mac because project plan files are not synced.
+Project plan paths stay out of phone snapshots. A paired iPhone can request the
+bounded Markdown file on demand and display it inline in task detail.
 
 When the Mac-wide automatic invocation setting and the project automation
 setting are both enabled, moving into Planning or Implementing saves the new
@@ -98,10 +103,12 @@ task in place.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings
 shows progress, the saved endpoint, and timestamped framed exchange sizes and
-results without recording payloads. It offers supported task edits, stage moves, and
-ordering, while project creation/configuration, completion, delete, restore,
-and Codex controls stay on Mac. Automation-triggering moves show a Continue on
-Mac explanation. Local Wi-Fi pairing is present but still awaiting visible
+results without recording payloads. It offers supported task edits, stage moves,
+ordering, and project Codex profile/model edits. Task detail can explicitly ask
+the Mac to prepare a planning or task run; both actions use the existing Mac
+confirmation before Codex starts. Background refresh remains read-only with
+respect to Codex.
+Automation-triggering moves show a Continue on Mac explanation. Local Wi-Fi pairing is present but still awaiting visible
 device-level verification; the unpaired phone library remains separate.
 
 The Mac's Settings exposes a StageChase-wide Codex model and reasoning pair.
@@ -109,8 +116,8 @@ Project and task forms can inherit or override the pair. A run confirmation
 shows the actual resolved model, effort, and source; run history keeps that
 snapshot visible after settings change. The built-in preference is Latest Luna
 with High reasoning. Catalog discovery is a Settings/confirmation action and
-does not start a turn. The iPhone preserves saved overrides and run snapshots
-but does not expose Mac model controls or discover models.
+does not start a turn. The iPhone loads the desktop catalog when project settings
+are opened and can change the project's inherited or overridden model.
 
 The Mac project board header exposes that project's effective model and a
 compact override editor, plus a **Use worktrees** toggle. The model follows

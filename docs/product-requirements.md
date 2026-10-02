@@ -216,8 +216,33 @@ open.
   revision-checked MCP operations and set successful planning to Ready in
   Planning, while preserving task completion and never starting another Codex
   session.
-- Opening a plan prompt does not itself change task state. Plan handoff controls remain unavailable on iPhone and paired
-  phone replicas.
+- Opening a plan prompt does not itself change task state. A paired iPhone may
+  explicitly request a Mac plan prompt from task detail; background phone sync
+  never starts or manages Codex.
+
+## iPhone task controls and Codex settings
+
+- As a user, I want the + at the top of an iPhone section to open the shared
+  Add Task sheet for that section, so task creation works consistently across
+  sections. Remove Add Task from the overflow menu and remove the extra Add Task
+  row at the bottom of each phone lane.
+- As a user, I want a single tap on a task title to open task detail and a double
+  tap to edit the title inline, so opening a task is the default phone action.
+- As a user, I want task detail buttons to ask StageChase on my paired Mac to
+  prepare a planning run or a task run, so I can start either workflow from the
+  phone. The Mac verifies the task revision; both requests still require the
+  existing Mac confirmation before Codex starts.
+- As a user, I want to open a saved plan from phone task detail and read its
+  Markdown inline, so the plan is available without leaving the task. The phone
+  requests the bounded file contents only when I open it, and does not receive
+  the Mac's project path.
+- As a user, I want to change a project's Codex execution profile and model from
+  paired iPhone Project settings, so future confirmed Mac runs use my choices.
+  Existing run snapshots remain unchanged, and the full-access profile keeps its
+  filesystem and network warning visible.
+- Explicit phone controls may request these Mac actions over the authenticated
+  pairing. Background polling, replica updates, and queued board edits never
+  start or manage Codex.
 
 ## Unread task changes
 

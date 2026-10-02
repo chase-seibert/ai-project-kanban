@@ -232,8 +232,9 @@ original file bytes, and verifies the resulting file before reporting success.
 Each append adds a `User feedback on the plan` heading followed by the raw text.
 An identical retry at the end of the file is idempotent. Failed writes keep the
 editor draft. This file action does not mutate the task,
-create a run, or call the runner. Project plan paths are not part of phone sync;
-the phone directs users to append feedback on Mac.
+create a run, or call the runner. Project plan paths stay out of phone snapshots;
+the phone can request the bounded Markdown contents when the user opens a plan,
+while plan feedback remains a Mac action.
 
 After restart, active/queued runs become Interrupted and require explicit retry.
 Retry preserves run/session identity and working folder. Exactly-once execution
@@ -257,10 +258,16 @@ generated JSON schema was checked for exact request spellings.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Phone commands are a small allowlist (create/edit/move/
-reorder) with expected task revisions; clients cannot submit runs, activity,
-plan paths, project folders, rank values, or automation configuration. The Mac
-`LibraryRepository` remains the only authoritative writer. It stores a library
+sanitized snapshots. Queued phone edits remain a small allowlist (create/edit/
+move/reorder) with expected task revisions. A separate authenticated request
+path is used only after a visible phone action: it updates a project's Codex
+profile/model with compare-before-write values, reads a bounded saved plan,
+refreshes the desktop model catalog, or requests a plan/run action. These
+requests never enter background refresh or the offline edit queue. The Mac
+checks task revisions before acting; planning and run requests open the matching
+existing Mac confirmation before the runner starts. Plan
+reads resolve relative paths inside the configured project folder and return
+Markdown without exposing a Mac filesystem path. The Mac `LibraryRepository` remains the only authoritative writer. It stores a library
 identity, monotonic sequence, device high-water marks, and operation receipts in
 the existing SwiftData metadata rows, committing accepted edits and receipts in
 one save. A changed snapshot is returned when the phone cursor is stale; an
@@ -297,10 +304,12 @@ refresh runs every three seconds by default and can be disabled in the phone's
 Connection tab. Sync Now and board pull-to-refresh always perform an explicit
 sync; with automatic sync disabled, phone edits remain queued until then.
 Polling itself never invokes the runner. The Mac must be awake with StageChase
-open. Phone completion, deletion, undo, project configuration, and Codex run
-controls are hidden while paired. Phone stage moves do not include automation
-configuration and never enqueue or invoke Codex. Automatic Codex confirmation
-and manual Desktop handoff remain Mac-only.
+open. Phone completion, deletion, and undo remain hidden while paired. Phone
+stage moves do not include automation configuration and never enqueue or invoke
+Codex. Explicit task-detail buttons can ask the Mac to prepare a planning or
+implementation run; only confirmation on the Mac starts Codex. Project settings on phone can update the execution profile
+and model for future runs. Plan content is read from the Mac only when the user
+opens the plan in task details and is rendered as Markdown on the phone.
 
 This path is still experimental. Unit and build checks pass, but pairing and
 task propagation have not yet been visibly verified between Mac and iPhone.
@@ -317,9 +326,10 @@ and interrupts imported active runs.
 
 ## Not implemented or not yet verified
 
-Visible device-level pairing, add/edit/move/order propagation, outage recovery,
-and conflict resolution remain unverified. Phone-side automation confirmation
-and dependent-command conflict resolution are not implemented. Tailscale,
+Visible device-level pairing, add/edit/move/order propagation, explicit Codex
+requests, profile/model edits, on-demand plan reads, outage recovery, and conflict
+resolution remain unverified. Codex actions remain unavailable to background
+polling and replica updates. Tailscale,
 HTTPS, public hosting, multi-user sync, multiple Macs, background delivery,
 project archival, multi-process writers, history pagination, and rich
 interactive Codex questions are outside this surface.
