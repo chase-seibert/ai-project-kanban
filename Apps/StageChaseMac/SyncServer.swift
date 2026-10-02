@@ -15,6 +15,11 @@ private struct SavedDeviceRegistry: Codable, Sendable {
   var devices: [SavedDevice]
 }
 
+private struct StoredGitReceipt: Codable, Sendable {
+  var digest: String
+  var response: SyncDirectResponse
+}
+
 private struct PendingPhone: Sendable {
   var offer: SyncPairingOffer
   var status: SyncPairingStatus
@@ -32,6 +37,8 @@ private struct PendingPhone: Sendable {
   private var pairingKey = SyncCrypto.randomSecret()
   private var pairingExpiresAt = Date().addingTimeInterval(5 * 60)
   private var devices: [UUID: SavedDevice] = [:]
+  private var gitReceipts: [UUID: StoredGitReceipt] = [:]
+  private let gitService = GitService()
   private var pending: PendingPhone?
   private var activeConnections = 0
   private var pairingAttempts: [Date] = []
@@ -50,6 +57,7 @@ private struct PendingPhone: Sendable {
   var onPhoneModelCatalogRequest:
     (() async throws -> (CodexModelConfiguration, [CodexModelOption]))?
   private let networkEventsURL: URL
+  private let gitReceiptsURL: URL
   var activeConnectionCount: Int { activeConnections }
 
   init(repository: LibraryRepository) {
@@ -57,6 +65,12 @@ private struct PendingPhone: Sendable {
     let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
       .first!.appendingPathComponent("StageChase", isDirectory: true)
     networkEventsURL = base.appendingPathComponent("MacSyncNetworkEvents-v1.json")
+    gitReceiptsURL = base.appendingPathComponent("PhoneGitReceipts-v1.json")
+    if let data = try? Data(contentsOf: gitReceiptsURL),
+      let receipts = try? JSONDecoder.syncDecoder.decode([UUID: StoredGitReceipt].self, from: data)
+    {
+      gitReceipts = receipts
+    }
     do {
       networkEvents = try SyncNetworkEventJournal.load(from: networkEventsURL)
       let lastPhoneEvent = networkEvents.first { $0.direction == "Phone → Mac" }
@@ -69,6 +83,7 @@ private struct PendingPhone: Sendable {
     } catch let caught {
       eventLogError = "Previous connection log could not be read: \(caught.localizedDescription)"
     }
+    try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
   }
 
   static func hasSavedPhonePairing() -> Bool {
@@ -389,7 +404,9 @@ private struct PendingPhone: Sendable {
         }
         response = .command(result)
       case .direct(let direct):
-        response = .direct(try await handleDirect(direct, library: state.library))
+        do { response = .direct(try await handleDirect(direct, library: state.library)) } catch {
+          response = .direct(.rejected(sanitized(error, library: state.library)))
+        }
       }
       return .authenticated(try SyncCrypto.seal(response, key: device.key))
     }
@@ -442,7 +459,135 @@ private struct PendingPhone: Sendable {
       } catch {
         return .rejected(error.localizedDescription)
       }
+    case .gitStatus(_, let projectID, let taskID, let expectedRevision):
+      return try await gitStatus(
+        projectID: projectID, taskID: taskID, expectedRevision: expectedRevision,
+        library: library)
+    case .commitTask(let requestID, let projectID, let taskID, let expectedRevision):
+      return try await idempotentGitRequest(request, requestID: requestID) {
+        guard
+          let item = library.tasks.first(where: {
+            $0.id == taskID && $0.projectID == projectID && $0.revision == expectedRevision
+          }), let project = library.projects.first(where: { $0.id == projectID })
+        else { return .rejected("The task changed on the Mac. Refresh and try again.") }
+        guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          return .rejected("Choose a project folder on the Mac before requesting Git actions.")
+        }
+        let folder = taskFolder(taskID: taskID, project: project, library: library)
+        let result = try await gitService.commitAll(in: folder, taskTitle: item.title)
+        return .accepted(
+          "Committed \(result.hash.prefix(12)) · \(GitService.commitMessage(item.title))")
+      }
+    case .commitProject(let requestID, let projectID):
+      return try await idempotentGitRequest(request, requestID: requestID) {
+        guard let project = library.projects.first(where: { $0.id == projectID }),
+          let latestTask = library.latestCompletedTask(in: projectID)
+        else {
+          return .rejected("Complete a task in this project before committing project changes.")
+        }
+        guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          return .rejected("Choose a project folder on the Mac before requesting Git actions.")
+        }
+        let result = try await gitService.commitAll(
+          in: URL(fileURLWithPath: project.directory), taskTitle: latestTask.title)
+        return .accepted(
+          "Committed \(result.hash.prefix(12)) · \(GitService.commitMessage(latestTask.title))")
+      }
+    case .recordDeployedRevision(let requestID, let projectID):
+      return try await idempotentGitRequest(request, requestID: requestID) {
+        guard var project = library.projects.first(where: { $0.id == projectID }) else {
+          return .rejected("The project is no longer available.")
+        }
+        guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          return .rejected("Choose a project folder on the Mac before requesting Git actions.")
+        }
+        let status = try await gitService.status(in: URL(fileURLWithPath: project.directory))
+        guard let head = status.head else {
+          return .rejected("This repository has no commit to record as deployed.")
+        }
+        project.deployedCommitHash = head
+        project.deployedAt = .now
+        _ = try await repository.apply(.editProject(project))
+        let updated = try await repository.syncStateSnapshot()
+        onLibraryChanged?(updated.library)
+        return .accepted("Recorded deployed revision \(head.prefix(12)).")
+      }
     }
+  }
+
+  private func taskFolder(taskID: UUID, project: Project, library: Library) -> URL {
+    if let path = library.latestRun(for: taskID)?.workDirectory {
+      let url = URL(fileURLWithPath: path)
+      if url.standardizedFileURL.path
+        != URL(fileURLWithPath: project.directory).standardizedFileURL.path
+      {
+        return url
+      }
+    }
+    return URL(fileURLWithPath: project.directory)
+  }
+
+  private func sanitized(_ error: Error, library: Library) -> String {
+    var message = error.localizedDescription
+    let privatePaths =
+      library.projects.map(\.directory).filter { !$0.isEmpty }
+      + library.tasks.compactMap { library.latestRun(for: $0.id)?.workDirectory }
+    for path in privatePaths where !path.isEmpty {
+      message = message.replacingOccurrences(of: path, with: "[private path]")
+    }
+    return String(message.prefix(800))
+  }
+
+  private func gitStatus(
+    projectID: UUID, taskID: UUID?, expectedRevision: Int?, library: Library
+  ) async throws -> SyncDirectResponse {
+    guard let project = library.projects.first(where: { $0.id == projectID }),
+      !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      return .rejected("Choose a project folder on the Mac before requesting Git status.")
+    }
+    if let taskID {
+      guard
+        library.tasks.contains(where: {
+          $0.id == taskID && $0.projectID == projectID && $0.revision == expectedRevision
+        })
+      else { return .rejected("The task changed on the Mac. Refresh and try again.") }
+    } else if expectedRevision != nil {
+      return .rejected("The Git status request is invalid.")
+    }
+    let folder =
+      taskID.map { taskFolder(taskID: $0, project: project, library: library) }
+      ?? URL(fileURLWithPath: project.directory)
+    let status = try await gitService.status(in: folder)
+    return .gitStatus(
+      SyncGitStatus(
+        branch: status.branch, head: status.head, changedFileCount: status.changedFileCount,
+        stagedFileCount: status.stagedFileCount, unstagedFileCount: status.unstagedFileCount,
+        untrackedFileCount: status.untrackedFileCount, isEmptyRepository: status.isEmptyRepository))
+  }
+
+  private func idempotentGitRequest(
+    _ request: SyncDirectRequest, requestID: UUID,
+    action: () async throws -> SyncDirectResponse
+  ) async throws -> SyncDirectResponse {
+    let digest = try SHA256.hash(data: JSONEncoder.syncEncoder.encode(request))
+      .map { String(format: "%02x", $0) }.joined()
+    if let receipt = gitReceipts[requestID] {
+      guard receipt.digest == digest else {
+        return .rejected("This Git operation ID was already used for different content.")
+      }
+      return receipt.response
+    }
+    let response = try await action()
+    if case .rejected = response { return response }
+    gitReceipts[requestID] = StoredGitReceipt(digest: digest, response: response)
+    if gitReceipts.count > 2_000 {
+      for key in gitReceipts.keys.prefix(gitReceipts.count - 2_000) {
+        gitReceipts.removeValue(forKey: key)
+      }
+    }
+    try JSONEncoder.syncEncoder.encode(gitReceipts).write(to: gitReceiptsURL, options: .atomic)
+    return response
   }
 
   private var devicesLibraryID: UUID? {

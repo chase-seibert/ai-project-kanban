@@ -2,6 +2,16 @@
 
 ## 2026-10-02
 
+- Add paired iPhone completion/reopening and confirmed task deletion through
+  revision-checked sync protocol v3 commands. Add a visible board Refresh button
+  with sync progress/result feedback, while keeping pull-to-refresh.
+- Expose project/task Git status, confirmed commits, and deployed-revision
+  recording on iPhone. Git runs on the paired Mac through online-only direct
+  requests; commit receipts prevent replayed operation IDs from creating another
+  commit, and responses omit repository paths.
+- Keep Codex remote URL handoff as a copy-context fallback: official Codex
+  documentation describes Remote inside ChatGPT mobile but does not specify a
+  supported external URL contract for selecting its host/workspace.
 - Let an explicit Codex Desktop `begin_task` replace an active StageChase run
   for the same task, retain the old record as Superseded, and ignore late writes
   from that runner while preserving idempotent MCP operation receipts.

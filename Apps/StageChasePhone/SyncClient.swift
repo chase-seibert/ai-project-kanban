@@ -298,6 +298,10 @@ private struct PhoneOutbox: Codable {
     case .modelCatalog: "Refresh Codex model list"
     case .invokeCodex(_, _, _, let action):
       action == .plan ? "Plan in Codex" : "Run with StageChase"
+    case .gitStatus: "Read Git status"
+    case .commitTask: "Commit task changes"
+    case .commitProject: "Commit project changes"
+    case .recordDeployedRevision: "Record deployed revision"
     }
   }
 

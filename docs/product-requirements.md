@@ -108,6 +108,10 @@ open.
 - The deployed hash and timestamp are optional backward-compatible project
   fields. Phone replicas may display this checkpoint, but never receive local
   repository paths or status contents.
+- A paired iPhone can request project/task status and explicitly confirm task or
+  project commits, or record the deployed revision. These authenticated direct
+  requests run on the Mac, stay online-only, and return no filesystem paths.
+  Commit operation IDs are deduplicated on the Mac.
 
 ## Planned automation
 
@@ -249,6 +253,15 @@ open.
 - Explicit phone controls may request these Mac actions over the authenticated
   pairing. Background polling, replica updates, and queued board edits never
   start or manage Codex.
+- A paired iPhone can mark a task complete or reopen it with the latest task
+  revision, and can delete it after confirmation. The Mac rejects stale edits
+  and deletion during an active run. These actions do not start or manage Codex.
+- The iPhone board has an explicit Refresh control that reports progress and the
+  latest result. It uses the same queued-edit-first manual refresh as
+  pull-to-refresh.
+- No documented external Codex URL contract currently establishes how to select
+  a remote host/workspace and pass task context. Do not construct a remote URL;
+  keep task context copyable until Codex documents that contract.
 
 ## Unread task changes
 

@@ -9,63 +9,63 @@ import SwiftUI
 #endif
 
 struct CodexModelFields: View {
-    @Environment(AppModel.self) private var model
-    @Binding var configuration: CodexModelConfiguration
-    var catalog: [CodexModelOption]
-    private var selectedOption: CodexModelOption? {
-      try? CodexModelResolver.option(for: configuration.selection, catalog: catalog)
-    }
-    var body: some View {
-      Picker("Model", selection: $configuration.selection) {
-        Text("Latest Luna").tag(CodexModelSelection.latestLuna)
-        if case .model(let id) = configuration.selection,
-          !catalog.contains(where: { $0.id == id })
-        {
-          Text("Unavailable · \(id)").tag(CodexModelSelection.model(id))
-        }
-        ForEach(catalog.filter { !$0.hidden }) { model in
-          Text(model.displayName).tag(CodexModelSelection.model(model.id))
-        }
-      }
-      if let selectedOption {
-        Picker("Reasoning", selection: $configuration.effort) {
-          if !selectedOption.reasoningEfforts.contains(configuration.effort) {
-            Text("Unavailable · \(configuration.effort)").tag(configuration.effort)
-          }
-          ForEach(selectedOption.reasoningEfforts, id: \.self) { effort in
-            Text(effort.capitalized).tag(effort)
-          }
-        }
-      } else {
-        Text("Refresh the Codex model list to see supported reasoning choices.")
-          .stageFont(.caption).foregroundStyle(.secondary)
-      }
-      Button("Refresh model list") { Task { try? await model.refreshModelCatalog() } }
-        .disabled(model.modelCatalogLoading)
-    }
+  @Environment(AppModel.self) private var model
+  @Binding var configuration: CodexModelConfiguration
+  var catalog: [CodexModelOption]
+  private var selectedOption: CodexModelOption? {
+    try? CodexModelResolver.option(for: configuration.selection, catalog: catalog)
   }
+  var body: some View {
+    Picker("Model", selection: $configuration.selection) {
+      Text("Latest Luna").tag(CodexModelSelection.latestLuna)
+      if case .model(let id) = configuration.selection,
+        !catalog.contains(where: { $0.id == id })
+      {
+        Text("Unavailable · \(id)").tag(CodexModelSelection.model(id))
+      }
+      ForEach(catalog.filter { !$0.hidden }) { model in
+        Text(model.displayName).tag(CodexModelSelection.model(model.id))
+      }
+    }
+    if let selectedOption {
+      Picker("Reasoning", selection: $configuration.effort) {
+        if !selectedOption.reasoningEfforts.contains(configuration.effort) {
+          Text("Unavailable · \(configuration.effort)").tag(configuration.effort)
+        }
+        ForEach(selectedOption.reasoningEfforts, id: \.self) { effort in
+          Text(effort.capitalized).tag(effort)
+        }
+      }
+    } else {
+      Text("Refresh the Codex model list to see supported reasoning choices.")
+        .stageFont(.caption).foregroundStyle(.secondary)
+    }
+    Button("Refresh model list") { Task { try? await model.refreshModelCatalog() } }
+      .disabled(model.modelCatalogLoading)
+  }
+}
 
 struct CodexModelOverrideEditor: View {
-    @Binding var configuration: CodexModelConfiguration?
-    var inherited: CodexModelConfiguration
-    var inheritLabel: String
-    var catalog: [CodexModelOption]
-    private var inherits: Binding<Bool> {
-      Binding(
-        get: { configuration == nil },
-        set: { configuration = $0 ? nil : inherited })
+  @Binding var configuration: CodexModelConfiguration?
+  var inherited: CodexModelConfiguration
+  var inheritLabel: String
+  var catalog: [CodexModelOption]
+  private var inherits: Binding<Bool> {
+    Binding(
+      get: { configuration == nil },
+      set: { configuration = $0 ? nil : inherited })
+  }
+  var body: some View {
+    Toggle(inheritLabel, isOn: inherits)
+    Text("Inherited: \(inherited.summary)").stageFont(.caption).foregroundStyle(.secondary)
+    if !inherits.wrappedValue, configuration != nil {
+      CodexModelFields(
+        configuration: Binding(
+          get: { configuration ?? inherited },
+          set: { configuration = $0 }),
+        catalog: catalog)
     }
-    var body: some View {
-      Toggle(inheritLabel, isOn: inherits)
-      Text("Inherited: \(inherited.summary)").stageFont(.caption).foregroundStyle(.secondary)
-      if !inherits.wrappedValue, configuration != nil {
-        CodexModelFields(
-          configuration: Binding(
-            get: { configuration ?? inherited },
-            set: { configuration = $0 }),
-          catalog: catalog)
-      }
-    }
+  }
 }
 
 struct ProjectEditor: View {
@@ -203,23 +203,25 @@ struct ProjectEditor: View {
               }
             }.disabled(
               project.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving
-                || (!model.isConnectedPhone && project.automationEnabled && project.directory.isEmpty)
+                || (!model.isConnectedPhone && project.automationEnabled
+                  && project.directory.isEmpty)
                 || (model.isConnectedPhone && !isNew
                   && model.library.projects.first(where: { $0.id == project.id }).map {
                     $0.executionProfile == project.executionProfile
                       && $0.modelOverride == project.modelOverride
-                  } == true))
+                  } == true)
+            )
           }
         }
     }
     #if os(macOS)
       .frame(width: 560, height: 700)
     #endif
-      .task {
-        #if os(iOS)
-          if model.isConnectedPhone && !isNew { try? await model.refreshModelCatalog() }
-        #endif
-      }
+    .task {
+      #if os(iOS)
+        if model.isConnectedPhone && !isNew { try? await model.refreshModelCatalog() }
+      #endif
+    }
   }
 }
 
@@ -479,6 +481,104 @@ struct ProjectEditor: View {
   }
 #endif
 
+#if os(iOS)
+  struct PhoneGitControls: View {
+    @Environment(AppModel.self) private var model
+    let project: Project
+    let taskID: UUID?
+    var showDeployedAction = false
+    @State private var confirmingCommit = false
+
+    private var key: String { "\(project.id.uuidString):\(taskID?.uuidString ?? "project")" }
+    private var status: SyncGitStatus? { model.phoneGitStatuses[key] }
+    private var busy: Bool { model.phoneGitBusyProjects.contains(project.id) }
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack {
+          Label(
+            taskID == nil ? "Project Git" : "Task Git",
+            systemImage: "chevron.left.forwardslash.chevron.right"
+          )
+          .stageFont(.subheadline, weight: .semibold)
+          Spacer()
+          Button {
+            Task { await model.refreshPhoneGitStatus(projectID: project.id, taskID: taskID) }
+          } label: {
+            Image(systemName: "arrow.clockwise")
+          }
+          .disabled(busy)
+          .accessibilityLabel("Refresh Git status")
+        }
+        if let status {
+          Text(
+            "\(status.branch ?? "Detached HEAD") · \(status.head.map { String($0.prefix(12)) } ?? "No commits yet")"
+          )
+          .stageFont(.caption).textSelection(.enabled)
+          Text(
+            status.changedFileCount == 0
+              ? "Clean repository"
+              : "\(status.changedFileCount) changed · \(status.stagedFileCount) staged · \(status.unstagedFileCount) unstaged · \(status.untrackedFileCount) untracked"
+          )
+          .stageFont(.caption).foregroundStyle(.secondary)
+        } else if let error = model.phoneGitErrors[key] {
+          Text(error).stageFont(.caption).foregroundStyle(.orange)
+        } else {
+          Text("Git status has not been loaded.").stageFont(.caption).foregroundStyle(.secondary)
+        }
+        VStack(alignment: .leading, spacing: 6) {
+          Button(
+            taskID == nil ? "Commit project changes" : "Commit task changes",
+            systemImage: "checkmark.circle"
+          ) {
+            confirmingCommit = true
+          }
+          .disabled(busy || status?.changedFileCount == 0)
+          if showDeployedAction {
+            Button("Record deployed revision") {
+              Task { await model.recordPhoneDeployedRevision(projectID: project.id) }
+            }
+            .disabled(busy || status?.head == nil)
+          }
+        }
+        if let deployed = model.library.projects.first(where: { $0.id == project.id })?
+          .deployedCommitHash
+        {
+          Text("Deployed \(deployed.prefix(12))")
+            .stageFont(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        if let message = model.phoneGitMessages[project.id] {
+          Text(message).stageFont(.caption).foregroundStyle(.secondary)
+        }
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
+      .task(id: key) {
+        guard model.isConnectedPhone else { return }
+        await model.refreshPhoneGitStatus(projectID: project.id, taskID: taskID)
+      }
+      .confirmationDialog("Commit changes on the paired Mac?", isPresented: $confirmingCommit) {
+        Button("Commit changes", role: .destructive) {
+          Task {
+            if let taskID {
+              await model.commitPhoneTask(taskID: taskID)
+            } else {
+              await model.commitPhoneProject(projectID: project.id)
+            }
+          }
+        }
+      } message: {
+        Text(
+          taskID == nil
+            ? "Stage and commit all changes in the project's configured repository."
+            : "Stage and commit all changes in this task's recorded worktree, or the project repository when it has no separate worktree."
+        )
+      }
+    }
+  }
+#endif
+
 struct NewTaskEditor: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
@@ -540,6 +640,7 @@ struct TaskDetail: View {
     @State private var planLoadError: String?
     @State private var planLoading = false
     @State private var codexActionLoading = false
+    @State private var phoneContextCopied = false
   #endif
   #if os(macOS)
     @FocusState private var focusedEditor: TaskEditorField?
@@ -548,11 +649,11 @@ struct TaskDetail: View {
     }
   #endif
   var item: WorkItem? { model.library.tasks.first { $0.id == taskID } }
+  private var handoffProject: Project? {
+    guard let item else { return nil }
+    return model.library.projects.first { $0.id == item.projectID }
+  }
   #if os(macOS)
-    private var handoffProject: Project? {
-      guard let item else { return nil }
-      return model.library.projects.first { $0.id == item.projectID }
-    }
     private var codexHandoffPrompt: String? {
       guard let item, let project = handoffProject else { return nil }
       return TaskHandoffPrompt.make(for: item, project: project)
@@ -701,13 +802,35 @@ struct TaskDetail: View {
                       || ![.planning, .implementing].contains(item.section)
                       || model.library.latestRun(for: item.id)?.status.isActive == true)
                 }
+                Button("Copy task context for Codex Remote", systemImage: "doc.on.doc") {
+                  let context = [
+                    "Task: \(item.title)",
+                    "Project: \(handoffProject?.name ?? "Project")",
+                    "Project ID: \(item.projectID.uuidString.lowercased())",
+                    "Task ID: \(item.id.uuidString.lowercased())",
+                    item.notes.isEmpty ? nil : "Notes:\n\(item.notes)",
+                  ].compactMap { $0 }.joined(separator: "\n\n")
+                  UIPasteboard.general.string = context
+                  phoneContextCopied = true
+                }
+                .buttonStyle(.bordered)
+                Text(
+                  "Codex Remote does not publish a supported external URL contract for choosing a workspace. Paste this context into the intended remote chat."
+                )
+                .stageFont(.caption).foregroundStyle(.secondary)
+                if phoneContextCopied {
+                  Label("Task context copied", systemImage: "checkmark.circle.fill")
+                    .stageFont(.caption).foregroundStyle(.green)
+                }
                 Text(
                   "Both actions open the matching Mac confirmation before Codex starts. A run keeps the task in its current section."
                 )
                 .stageFont(.caption).foregroundStyle(.secondary)
                 if let message = model.phoneCodexActionMessage {
                   Text(message).stageFont(.callout)
-                    .foregroundStyle(message.localizedCaseInsensitiveContains("could not") ? .orange : .secondary)
+                    .foregroundStyle(
+                      message.localizedCaseInsensitiveContains("could not") ? .orange : .secondary
+                    )
                     .textSelection(.enabled)
                 }
               }
@@ -720,6 +843,12 @@ struct TaskDetail: View {
             if !model.isConnectedPhone, let project = handoffProject {
               Divider()
               ProjectGitStatusView(project: project, taskID: item.id)
+            }
+          #endif
+          #if os(iOS)
+            if model.isConnectedPhone, let project = handoffProject {
+              Divider()
+              PhoneGitControls(project: project, taskID: item.id)
             }
           #endif
           if draft != nil {
@@ -854,10 +983,8 @@ struct TaskDetail: View {
           }
           HStack {
             Spacer()
-            if !model.isConnectedPhone {
-              Button(item.completed ? "Reopen" : "Complete", systemImage: "checkmark.circle") {
-                setTaskCompleted(!item.completed)
-              }
+            Button(item.completed ? "Reopen" : "Complete", systemImage: "checkmark.circle") {
+              setTaskCompleted(!item.completed)
             }
           }
           Divider()
@@ -900,7 +1027,12 @@ struct TaskDetail: View {
             Button("Delete task (Delete)", role: .destructive) { deleting = true }
               .buttonStyle(.borderless)
               .disabled(model.planFeedbackInFlight.contains(taskID))
-          } else if let run = model.library.latestRun(for: taskID),
+          } else {
+            Divider()
+            Button("Delete task", role: .destructive) { deleting = true }
+              .disabled(model.planFeedbackInFlight.contains(taskID))
+          }
+          if model.isConnectedPhone, let run = model.library.latestRun(for: taskID),
             run.status.isActive || [.needsInput, .interrupted].contains(run.status)
           {
             Text("Continue on Mac to manage this Codex run.").stageFont(.callout)
@@ -1019,8 +1151,9 @@ struct TaskDetail: View {
       planLoading = true
       planLoadError = nil
       Task {
-        do { planMarkdown = try await model.readPlanFromMac(item) }
-        catch { planLoadError = error.localizedDescription }
+        do { planMarkdown = try await model.readPlanFromMac(item) } catch {
+          planLoadError = error.localizedDescription
+        }
         planLoading = false
       }
     }

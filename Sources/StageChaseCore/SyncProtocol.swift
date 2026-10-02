@@ -3,7 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
-  public static let version = 2
+  public static let version = 3
   public static let maximumMessageBytes = 1_048_576
   public static let maximumPairingSecretBytes = 64
 }
@@ -58,6 +58,8 @@ public enum SyncCommand: Codable, Equatable, Sendable {
   case editTask(id: UUID, title: String, notes: String)
   case moveTask(id: UUID, stage: WorkflowStage)
   case reorderTask(id: UUID, beforeID: UUID, orderDigest: String)
+  case completeTask(id: UUID, completed: Bool)
+  case deleteTask(id: UUID)
   case updateProjectCodexSettings(
     id: UUID, expectedProfile: CodexExecutionProfile,
     expectedModelOverride: CodexModelConfiguration?, profile: CodexExecutionProfile,
@@ -76,12 +78,41 @@ public enum SyncDirectRequest: Codable, Sendable {
   case modelCatalog
   case invokeCodex(
     requestID: UUID, taskID: UUID, expectedRevision: Int, action: SyncPhoneCodexAction)
+  case gitStatus(
+    requestID: UUID, projectID: UUID, taskID: UUID?, expectedRevision: Int?)
+  case commitTask(requestID: UUID, projectID: UUID, taskID: UUID, expectedRevision: Int)
+  case commitProject(requestID: UUID, projectID: UUID)
+  case recordDeployedRevision(requestID: UUID, projectID: UUID)
+}
+
+public struct SyncGitStatus: Codable, Equatable, Sendable {
+  public var branch: String?
+  public var head: String?
+  public var changedFileCount: Int
+  public var stagedFileCount: Int
+  public var unstagedFileCount: Int
+  public var untrackedFileCount: Int
+  public var isEmptyRepository: Bool
+
+  public init(
+    branch: String?, head: String?, changedFileCount: Int, stagedFileCount: Int,
+    unstagedFileCount: Int, untrackedFileCount: Int, isEmptyRepository: Bool
+  ) {
+    self.branch = branch
+    self.head = head
+    self.changedFileCount = changedFileCount
+    self.stagedFileCount = stagedFileCount
+    self.unstagedFileCount = unstagedFileCount
+    self.untrackedFileCount = untrackedFileCount
+    self.isEmptyRepository = isEmptyRepository
+  }
 }
 
 public enum SyncDirectResponse: Codable, Sendable {
   case plan(String)
   case modelCatalog(globalConfiguration: CodexModelConfiguration, options: [CodexModelOption])
   case accepted(String)
+  case gitStatus(SyncGitStatus)
   case rejected(String)
 }
 
@@ -141,6 +172,16 @@ public enum SyncCommandValidator {
         throw BoardError.conflict
       }
       return .reorder(id, before: beforeID, expectedRevision: revision)
+    case .completeTask(let id, let completed):
+      guard let revision = envelope.expectedRevision,
+        library.tasks.contains(where: { $0.id == id })
+      else { throw BoardError.missing }
+      return .complete(id, completed, expectedRevision: revision)
+    case .deleteTask(let id):
+      guard let revision = envelope.expectedRevision,
+        library.tasks.contains(where: { $0.id == id })
+      else { throw BoardError.missing }
+      return .deleteTask(id, expectedRevision: revision)
     case .updateProjectCodexSettings(
       let id, let expectedProfile, let expectedModelOverride, let profile, let modelOverride):
       guard envelope.expectedRevision == nil,

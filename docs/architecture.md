@@ -113,6 +113,25 @@ cannot call `thread/name/set` for them; Codex Desktop controls their displayed
 names. Naming calls for threads StageChase can address remain best-effort and do
 not change run outcomes.
 
+The paired iPhone uses sync protocol v3 for revision-checked completion and
+deletion commands. Deletion passes through the normal reducer, which rejects an
+active run; the phone confirms before enqueueing the command. A visible board
+Refresh calls the existing manual refresh flow, which sends queued edits before
+applying the latest snapshot and preserves the queue on failure. V2 clients are
+rejected with an unsupported-version result rather than partially applying v3
+commands.
+
+Phone Git status and writes are authenticated direct requests to the Mac and
+never enter the offline edit queue. Requests contain project/task IDs and an
+operation ID; GitService resolves the configured project folder or the task's
+recorded worktree on the Mac. The response includes bounded status fields and
+action text, never filesystem paths. The Mac persists receipts for successful
+commit and deployed-revision requests so a replay with the same operation ID
+returns its original result. Project deployed hash/time continue to travel in
+the existing replica fields. No external Codex URL contract for selecting a
+remote host/workspace is defined in the official documentation; phone task
+context remains copyable instead of constructing an unsupported remote URL.
+
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same
 `LibraryRepository` as the board; no second process opens the SQLite library.

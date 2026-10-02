@@ -36,6 +36,10 @@ import UniformTypeIdentifiers
   var saveTaskEditRequestedID: UUID?
   var error: String?
   var phoneCodexActionMessage: String?
+  var phoneGitStatuses: [String: SyncGitStatus] = [:]
+  var phoneGitErrors: [String: String] = [:]
+  var phoneGitMessages: [UUID: String] = [:]
+  var phoneGitBusyProjects: Set<UUID> = []
   var loadError: String?
   var ready = false
   var sheet: AppSheet?
@@ -322,6 +326,65 @@ import UniformTypeIdentifiers
   #endif
 
   #if os(iOS)
+    private func phoneGitKey(projectID: UUID, taskID: UUID?) -> String {
+      "\(projectID.uuidString):\(taskID?.uuidString ?? "project")"
+    }
+
+    func refreshPhoneGitStatus(projectID: UUID, taskID: UUID? = nil) async {
+      let key = phoneGitKey(projectID: projectID, taskID: taskID)
+      do {
+        guard
+          case .gitStatus(let status) = try await syncClient.requestDirect(
+            .gitStatus(
+              requestID: UUID(), projectID: projectID, taskID: taskID,
+              expectedRevision: taskID.flatMap { id in
+                library.tasks.first { $0.id == id }?.revision
+              }))
+        else { throw BoardError.invalid("The Mac returned an invalid Git status response.") }
+        phoneGitStatuses[key] = status
+        phoneGitErrors[key] = nil
+      } catch { phoneGitErrors[key] = error.localizedDescription }
+    }
+
+    func performPhoneGitAction(_ request: SyncDirectRequest, projectID: UUID) async {
+      guard !phoneGitBusyProjects.contains(projectID) else { return }
+      phoneGitBusyProjects.insert(projectID)
+      phoneGitMessages[projectID] = nil
+      defer { phoneGitBusyProjects.remove(projectID) }
+      do {
+        guard case .accepted(let message) = try await syncClient.requestDirect(request) else {
+          throw BoardError.invalid("The Mac returned an invalid Git action response.")
+        }
+        phoneGitMessages[projectID] = message
+        let taskID: UUID?
+        switch request {
+        case .commitTask(_, _, let id, _): taskID = id
+        default: taskID = nil
+        }
+        await refreshPhoneGitStatus(projectID: projectID, taskID: taskID)
+        if taskID != nil { await refreshPhoneGitStatus(projectID: projectID) }
+        await refreshFromMac(manual: true)
+      } catch { phoneGitMessages[projectID] = error.localizedDescription }
+    }
+
+    func commitPhoneTask(taskID: UUID) async {
+      guard let item = library.tasks.first(where: { $0.id == taskID }) else { return }
+      await performPhoneGitAction(
+        .commitTask(
+          requestID: UUID(), projectID: item.projectID, taskID: taskID,
+          expectedRevision: item.revision), projectID: item.projectID)
+    }
+
+    func commitPhoneProject(projectID: UUID) async {
+      await performPhoneGitAction(
+        .commitProject(requestID: UUID(), projectID: projectID), projectID: projectID)
+    }
+
+    func recordPhoneDeployedRevision(projectID: UUID) async {
+      await performPhoneGitAction(
+        .recordDeployedRevision(requestID: UUID(), projectID: projectID), projectID: projectID)
+    }
+
     func pairPhone() async {
       do {
         let libraryID = try await syncClient.pair()
@@ -574,6 +637,12 @@ import UniformTypeIdentifiers
             id: id, beforeID: before,
             orderDigest: SyncCommandValidator.orderDigest(
               projectID: item.projectID, stage: item.stage, in: library))
+          revision = expectedRevision
+        case .complete(let id, let completed, let expectedRevision):
+          wireCommand = .completeTask(id: id, completed: completed)
+          revision = expectedRevision
+        case .deleteTask(let id, let expectedRevision):
+          wireCommand = .deleteTask(id: id)
           revision = expectedRevision
         case .editProject(let project):
           guard let existing = library.projects.first(where: { $0.id == project.id }),

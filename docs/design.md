@@ -40,6 +40,11 @@ switcher. The board's bottom controls select Inbox, Planning, or Implementing
 and stay in sync with horizontal paging. Connection is a top-bar action; Activity
 and Settings remain available from the board's overflow menu. The phone board
 does not show the connection-status card above its tasks.
+Paired iPhone users can tap **Refresh** in the board header to request the latest
+Mac state; the button shows sync progress and the most recent result. Pull-to-
+refresh remains available. A paired project header also shows Mac-backed Git
+status, confirmed project commit, and deployed-revision actions. Task detail
+shows Git status and a confirmed task-worktree commit action.
 
 Mac task detail is an inspector; iPhone uses a sheet. Title, task context, saved
 plan, status, and manual completion share the model. Plans and Codex run state do
@@ -50,6 +55,9 @@ Codex run status and progress instead of a long chronological event timeline.
 The user can complete or reopen a task from task detail at any time, including
 while a Codex run is Waiting or active. Run outcomes never complete a task or
 overwrite its Done status; unsaved detail drafts remain available to save.
+On iPhone, completion and reopening use revision-checked queued edits. Task
+deletion requires an explicit confirmation and the Mac rejects deletion while
+a run is active.
 The Activity screen lists active runs; task detail keeps the latest run. Full
 event records remain stored; open a run in Codex on Mac to inspect its session.
 On iPhone, StageChase tries the Codex thread URL and, if no app can open it,

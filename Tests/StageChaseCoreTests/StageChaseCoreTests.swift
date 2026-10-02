@@ -344,6 +344,87 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(persisted.library.tasks[0].title == "Later")
 }
 
+@Test func phoneCompletionAndDeletionCommandsAreRevisionChecked() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Phone actions")
+  _ = try await repository.apply(.createProject(project))
+  let task = WorkItem(projectID: project.id, title: "Complete then delete")
+  _ = try await repository.apply(.createTask(task))
+  let state = try await repository.syncStateSnapshot()
+  let deviceID = UUID()
+  let complete = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: deviceID, clientSequence: 1,
+    expectedRevision: task.revision,
+    command: .completeTask(id: task.id, completed: true))
+  guard case .applied(_, let completed) = try await repository.applyRemote(complete) else {
+    Issue.record("Expected the explicit completion command to apply")
+    return
+  }
+  #expect(completed.tasks.first?.completed == true)
+  let staleDelete = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: deviceID, clientSequence: 2,
+    expectedRevision: task.revision, command: .deleteTask(id: task.id))
+  guard case .conflict = try await repository.applyRemote(staleDelete) else {
+    Issue.record("A stale delete must preserve the changed task")
+    return
+  }
+  let currentRevision = try #require(completed.tasks.first?.revision)
+  let delete = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: deviceID, clientSequence: 3,
+    expectedRevision: currentRevision, command: .deleteTask(id: task.id))
+  guard case .applied(_, let deleted) = try await repository.applyRemote(delete) else {
+    Issue.record("Expected a revision-matched confirmed delete command to apply")
+    return
+  }
+  #expect(deleted.tasks.isEmpty)
+}
+
+@Test func phoneDeleteRejectsAnActiveRunAndV2CommandsFailClearly() throws {
+  let project = Project(name: "Compatibility")
+  let task = WorkItem(projectID: project.id, title: "Busy task")
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  library.runs = [AgentRun(task: task, kind: .implementation)]
+  let deletion = SyncEnvelope(
+    libraryID: UUID(), deviceID: UUID(), expectedRevision: task.revision,
+    command: .deleteTask(id: task.id))
+  let mutation = try SyncCommandValidator.mutation(for: deletion, in: library)
+  #expect(throws: BoardError.self) { try BoardReducer.apply(mutation, to: library) }
+
+  var oldEnvelope = deletion
+  oldEnvelope.version = 2
+  #expect(throws: BoardError.self) {
+    try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
+  }
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
+  #expect(snapshot.version == 3)
+}
+
+@Test func directGitRequestsStayOutOfTheEditCommandProtocol() throws {
+  let taskID = UUID()
+  let projectID = UUID()
+  let request = SyncClientRequest.direct(
+    .commitTask(
+      requestID: UUID(), projectID: projectID, taskID: taskID, expectedRevision: 4))
+  let encoded = try JSONEncoder.syncEncoder.encode(request)
+  let text = String(decoding: encoded, as: UTF8.self)
+  #expect(text.contains("commitTask"))
+  #expect(!text.contains("/Users/"))
+  let decoded = try JSONDecoder.syncDecoder.decode(SyncClientRequest.self, from: encoded)
+  guard
+    case .direct(
+      .commitTask(
+        _, let decodedProjectID, let decodedTaskID, let revision)) = decoded
+  else {
+    Issue.record("Expected the direct Git request to round trip without becoming a queued command")
+    return
+  }
+  #expect(decodedProjectID == projectID)
+  #expect(decodedTaskID == taskID)
+  #expect(revision == 4)
+}
+
 @Test func newerPhoneTaskEditWinsAndEqualTimestampMacEditWinsDeterministically() async throws {
   let repository = try LibraryRepository(inMemory: true)
   let project = Project(name: "Ordering")

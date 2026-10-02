@@ -178,6 +178,23 @@ struct BoardHeader: View {
           #endif
         }
         Spacer(minLength: 6)
+        #if os(iOS)
+          Button {
+            Task { await model.refreshFromMac(manual: true) }
+          } label: {
+            if model.syncClient.isSyncing {
+              ProgressView().controlSize(.small)
+            } else {
+              Label("Refresh", systemImage: "arrow.clockwise")
+            }
+          }
+          .buttonStyle(.bordered)
+          .disabled(
+            !model.isConnectedPhone || model.syncClient.isSyncing
+              || model.syncClient.hasUnsavedEndpoint
+          )
+          .accessibilityIdentifier("board-refresh-from-mac")
+        #endif
         if !model.isConnectedPhone {
           Button {
             if let project = model.selectedProject { model.sheet = .editProject(project) }
@@ -186,6 +203,19 @@ struct BoardHeader: View {
           }.buttonStyle(.borderless).help("Project settings")
         }
       }.padding(12).background(Palette.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+      #if os(iOS)
+        if model.isConnectedPhone {
+          Text(model.syncClient.lastResultMessage).stageFont(.caption).foregroundStyle(.secondary)
+          if let error = model.syncClient.error {
+            Text(error).stageFont(.caption).foregroundStyle(.orange)
+          }
+        }
+      #endif
+      #if os(iOS)
+        if model.isConnectedPhone, let project = model.selectedProject {
+          PhoneGitControls(project: project, taskID: nil, showDeployedAction: true)
+        }
+      #endif
     }.padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
   }
   var automationTitle: String {
@@ -274,39 +304,39 @@ struct BoardLane: View {
             }.frame(maxWidth: .infinity).padding(.vertical, 30)
           }
           #if os(macOS)
-          if adding {
-            VStack(alignment: .leading, spacing: 10) {
-              TextField("What needs doing?", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain).lineLimit(2...5).focused($captureFocused)
-                .onSubmit { save() }
-                .onChange(of: draft) { _, _ in captureError = nil }
-              if let captureError {
-                Text(captureError).stageFont(.caption).foregroundStyle(.orange)
-              }
-              HStack {
-                Button("Cancel") {
-                  adding = false
-                  draft = ""
-                }.buttonStyle(.borderless)
-                Spacer()
-                Button(addButtonTitle) { save() }.buttonStyle(.borderedProminent).controlSize(
-                  .small
-                )
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
-              }
-            }.padding(12).background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
-              .overlay(RoundedRectangle(cornerRadius: 12).stroke(section.color.opacity(0.5)))
-          } else {
-            Button {
-              adding = true
-              captureFocused = true
-            } label: {
-              Label("Add task", systemImage: "plus").stageFont(.subheadline)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10).padding(
-                  .horizontal, 6)
-            }.buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(
-              "Quick add to \(section.title)")
-          }
+            if adding {
+              VStack(alignment: .leading, spacing: 10) {
+                TextField("What needs doing?", text: $draft, axis: .vertical)
+                  .textFieldStyle(.plain).lineLimit(2...5).focused($captureFocused)
+                  .onSubmit { save() }
+                  .onChange(of: draft) { _, _ in captureError = nil }
+                if let captureError {
+                  Text(captureError).stageFont(.caption).foregroundStyle(.orange)
+                }
+                HStack {
+                  Button("Cancel") {
+                    adding = false
+                    draft = ""
+                  }.buttonStyle(.borderless)
+                  Spacer()
+                  Button(addButtonTitle) { save() }.buttonStyle(.borderedProminent).controlSize(
+                    .small
+                  )
+                  .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
+                }
+              }.padding(12).background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(section.color.opacity(0.5)))
+            } else {
+              Button {
+                adding = true
+                captureFocused = true
+              } label: {
+                Label("Add task", systemImage: "plus").stageFont(.subheadline)
+                  .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10).padding(
+                    .horizontal, 6)
+              }.buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(
+                "Quick add to \(section.title)")
+            }
           #endif
         }.padding(.bottom, 12)
       }
@@ -469,15 +499,13 @@ struct TaskCard: View {
                 Label("Move to \(stage.title)", systemImage: stage.symbol)
               }
             }
-            if !model.isConnectedPhone {
-              Divider()
-              Button(
-                item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle"
-              ) {
-                Task {
-                  await model.perform(
-                    .complete(item.id, !item.completed, expectedRevision: item.revision))
-                }
+            Divider()
+            Button(
+              item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle"
+            ) {
+              Task {
+                await model.perform(
+                  .complete(item.id, !item.completed, expectedRevision: item.revision))
               }
             }
           }
@@ -564,7 +592,8 @@ struct TaskCard: View {
                 case .first: beginTitleEditing()
                 case .second: openDetails()
                 }
-              })
+              }
+            )
             .accessibilityLabel("Open task details for \(item.title); double tap to edit title")
         #else
           Button {
