@@ -14,12 +14,13 @@ not yet verified.
 | Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<normalized task-title>-<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
 | Planning success | Require an explicit plain-text `Completed:` response plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
 | Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Use the project folder, or create a managed worktree for a dirty repository when that project's worktree setting is on; then invoke Codex. A plan is optional context |
-| Confirm Run with StageChase from task detail | Queue and run only that task in its current Planning or Implementing section, using the saved project profile; this explicit action works even when automatic invocation or project automation is off |
-| Confirm Plan with StageChase from task detail | Queue a planning run from any section, reserve its plan path, and preserve the task's current section and completion state |
+| Confirm Run with StageChase from Mac task detail, or tap it on the paired phone | Queue and run only that task in its current Planning or Implementing section, using the saved project profile; this explicit action works even when automatic invocation or project automation is off |
+| Confirm Plan with StageChase from Mac task detail, or tap it on the paired phone | Queue a planning run from any section, reserve its plan path, and preserve the task's current section and completion state |
 | Implementation success | Require an explicit plain-text `Completed:` response; update the run only. The user chooses the task column and completion state |
 | Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers Run with StageChase, Plan with StageChase, and the two Codex Desktop handoffs |
-| Run with StageChase from task detail | Confirm the resolved model and effort, then start the selected queued run in the Mac runner without opening Codex Desktop or moving the task |
-| Plan with StageChase from task detail | Confirm the resolved model and effort, then start a planning run in the Mac runner without opening Codex Desktop or moving the task |
+| Run with StageChase from Mac task detail | Confirm the resolved model and effort, then start the selected queued run in the Mac runner without opening Codex Desktop or moving the task |
+| Plan with StageChase from Mac task detail | Confirm the resolved model and effort, then start a planning run in the Mac runner without opening Codex Desktop or moving the task |
+| Run or Plan with StageChase from paired phone | Treat the explicit phone tap as confirmation; resolve the Mac-local model and effort, then queue and start on Mac without a second desktop confirmation |
 | Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, starting with the exact task title and including stable IDs and a readable project-relative plan path when available |
 | Launch Codex from task detail | Open `codex://threads/new` with the repository path and same MCP prompt; let the user start the turn in Desktop. StageChase cannot rename these threads because the URL flow returns no thread ID |
 | Successful task-prompt work | After `finish_task` succeeds, move the task to Review through MCP using its latest revision; preserve the completion flag for the user's review |
@@ -152,7 +153,9 @@ resolves against visible stable Luna models in the connected `model/list`
 catalog and compares numeric version components. StageChase does not substitute
 another model or effort when the selected choice is unavailable or unsupported.
 
-The confirmation shows the resolved model and effort. StageChase stores that
+The Mac confirmation shows the resolved model and effort. A paired-phone action
+uses the user's tap as confirmation and resolves the same Mac-local choice
+before queuing. StageChase stores that
 pair, selection policy, and source with the queued run, then sends explicit
 `model` and `effort` fields to app-server. Existing runs keep their saved pair
 when defaults change. Older runs without a saved choice need a reviewed choice

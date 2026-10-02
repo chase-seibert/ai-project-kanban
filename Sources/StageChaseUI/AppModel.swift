@@ -263,14 +263,14 @@ import UniformTypeIdentifiers
       }
       server.onPhoneCodexAction = { [weak self] taskID, expectedRevision, action in
         guard let self else { throw BoardError.invalid("The StageChase model is unavailable.") }
-        return try self.handlePhoneCodexAction(
+        return try await self.handlePhoneCodexAction(
           taskID: taskID, expectedRevision: expectedRevision, action: action)
       }
     }
 
     private func handlePhoneCodexAction(
       taskID: UUID, expectedRevision: Int, action: SyncPhoneCodexAction
-    ) throws -> String {
+    ) async throws -> String {
       guard let item = library.tasks.first(where: { $0.id == taskID }),
         item.revision == expectedRevision,
         let project = library.projects.first(where: { $0.id == item.projectID }),
@@ -278,17 +278,19 @@ import UniformTypeIdentifiers
       else {
         throw BoardError.invalid("The task or its project folder changed. Refresh and try again.")
       }
+      guard !isPreview, runner != nil else {
+        throw BoardError.invalid("The StageChase Codex runner is unavailable.")
+      }
+
+      let kind: RunKind
+      let actionName: String
       switch action {
       case .plan:
         guard !item.completed,
           !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
         else { throw BoardError.invalid("Finish the active run before requesting a new plan.") }
-        requestRunnerRun(item, kind: .planning)
-        guard pendingMove?.item.id == item.id, pendingMove?.runOnly == true else {
-          throw BoardError.invalid(error ?? "The Mac could not prepare this planning run.")
-        }
-        return
-          "Planning confirmation is open in StageChase on the Mac. Confirm there to start Codex."
+        kind = .planning
+        actionName = "Planning"
       case .run:
         guard [.planning, .implementing].contains(item.section), !item.completed,
           !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
@@ -297,12 +299,33 @@ import UniformTypeIdentifiers
             "Move the task into Planning or Implementing and finish any active run before requesting Codex."
           )
         }
-        requestRunnerRun(item)
-        guard pendingMove?.item.id == item.id, pendingMove?.runOnly == true else {
-          throw BoardError.invalid(error ?? "The Mac could not prepare this Codex run.")
-        }
-        return "Run confirmation is open in StageChase on the Mac. Confirm there to start Codex."
+        kind = .implementation
+        actionName = "Run"
       }
+
+      // The authenticated, revision-checked phone command is the user's explicit
+      // confirmation. Resolve the Mac-local model choice, then queue and start it here.
+      try await refreshModelCatalog()
+      guard let current = library.tasks.first(where: { $0.id == taskID }),
+        current.revision == expectedRevision,
+        let currentProject = library.projects.first(where: { $0.id == current.projectID }),
+        !current.completed,
+        !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive }),
+        !currentProject.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else {
+        throw BoardError.invalid("The task changed while loading Codex settings. Refresh and try again.")
+      }
+      let configuration = try resolvedConfiguration(for: current)
+      guard await perform(
+        .runTaskNow(
+          current.id, expectedRevision: current.revision, kind: kind,
+          configuration: configuration)),
+        let run = library.latestRun(for: current.id), run.status == .queued
+      else {
+        throw BoardError.invalid(error ?? "The Mac could not queue this Codex run.")
+      }
+      kickRunner(runID: run.id)
+      return "\(actionName) started on the Mac (\(configuration.summary))."
     }
 
     func startMCPServer() {

@@ -584,18 +584,20 @@ struct TaskCard: View {
             )
             .accessibilityLabel("Open task details for \(item.title); double tap to edit title")
         #else
-          Button {
-            beginTitleEditing()
-          } label: {
-            Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
-              .strikethrough(item.completed)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .help("Click to edit title")
-          .accessibilityLabel("Edit title: \(item.title)")
-          .accessibilityHint("Press Return to save the title.")
+          Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
+            .strikethrough(item.completed)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(
+              TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
+                switch result {
+                case .first: beginTitleEditing()
+                case .second: openDetails()
+                }
+              }
+            )
+            .help("Click to open task details; double-click to edit title")
+            .accessibilityLabel("Open task details for \(item.title); double-click to edit title")
         #endif
 
         Button {

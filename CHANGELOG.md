@@ -2,6 +2,11 @@
 
 ## 2026-10-02
 
+- Make a single click on a Mac task title open task detail and a double-click
+  start inline title editing, matching the iPhone board interaction.
+- Treat paired-phone Run with StageChase and Plan with StageChase taps as the
+  user's confirmation, starting the selected task on Mac without opening a
+  second desktop confirmation.
 - Decode saved iPhone action queues with the same ISO-8601 date strategy used
   when writing them, preserving queued edits across app relaunches.
 - Highlight unread task changes with a subtle light-blue card background and

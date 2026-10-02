@@ -823,7 +823,7 @@ struct TaskDetail: View {
                     .stageFont(.caption).foregroundStyle(.green)
                 }
                 Text(
-                  "Both actions open the matching Mac confirmation before Codex starts. A run keeps the task in its current section."
+                  "Tapping either action starts it on the paired Mac. A run keeps the task in its current section."
                 )
                 .stageFont(.caption).foregroundStyle(.secondary)
                 if let message = model.phoneCodexActionMessage {

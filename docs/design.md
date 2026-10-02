@@ -15,9 +15,10 @@ then priority and the user's stable rank decide order.
 Section headers offer named + buttons. On iPhone, + opens the same task sheet
 used by the task composer, and there is no extra Add task row at the bottom of a
 lane. Mac keeps inline multiline capture. Cards drag between sections or onto
-another card to reorder within a section. On Mac, click a card title to edit it
-inline, or use the card menu's **Edit title** action. On iPhone, a single title
-tap opens task detail and a double tap starts inline title editing. Other card
+another card to reorder within a section. On Mac, a single click on a card title
+opens task detail and a double-click starts inline title editing; the card
+menu's **Edit title** action remains available. On iPhone, a single title tap
+opens task detail and a double tap starts inline title editing. Other card
 content opens task detail. The title editor stays multiline and only one card
 can be edited at a time; opening another title saves and closes the prior editor
 when its draft is nonempty and changed. Return saves through the
