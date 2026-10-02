@@ -377,6 +377,20 @@ struct ProjectEditor: View {
           )
           .accessibilityHint(
             "Stages and commits all repository changes without a file picker or message editor.")
+        } else {
+          Button {
+            Task { await model.commitProjectChanges(projectID: project.id) }
+          } label: {
+            if isBusy { ProgressView().controlSize(.small) }
+            Label("Commit all project changes", systemImage: "checkmark.circle")
+          }
+          .disabled(isBusy || currentProject.directory.isEmpty)
+          .help(
+            "Stage and commit every non-ignored change in this project's configured folder using the title of its most recently completed task."
+          )
+          .accessibilityHint(
+            "Stages and commits all changes in the configured project folder with the latest completed task title."
+          )
         }
         if showDeployedAction {
           Button("Record current HEAD as deployed") {

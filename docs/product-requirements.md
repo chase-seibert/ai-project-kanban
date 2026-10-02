@@ -64,6 +64,14 @@ open.
 - As a user, I want a direct task action to stage all non-ignored project
   changes and commit them with a single-line version of the task title, so I do
   not need to select files or write a separate message.
+- As a user, I want a project-header action to stage and commit all changes in
+  the configured project folder using the title of the most recently completed
+  task in that project, so I can save shared project work without opening a
+  task.
+- Completed tasks retain their completion time across later edits; older
+  completed records without a completion time use their update time as a
+  best-effort fallback. A project with no completed task cannot create a
+  project commit, and clean repositories do not create empty commits.
 - As a user, I want to record the current `HEAD` as a project's deployed
   revision, so I can compare the deployment checkpoint with current code.
 - Git status comes from the configured Mac project folder, or from the latest

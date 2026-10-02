@@ -662,6 +662,58 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       #"{"id":"00000000-0000-0000-0000-000000000002","projectID":"00000000-0000-0000-0000-000000000001","title":"Old task","notes":"","stage":"inbox","rank":0,"completed":false,"revision":0,"createdAt":0,"updatedAt":0}"#
         .utf8))
   #expect(task.modelOverride == nil)
+  #expect(task.completedAt == nil)
+}
+
+@Test func completedTaskTimestampTracksTransitionsAndProjectCommitRecency() throws {
+  let project = Project(name: "Commit timestamps")
+  let otherProject = Project(name: "Other project")
+  var older = WorkItem(projectID: project.id, title: "Older task")
+  older.id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+  older.completed = true
+  older.updatedAt = Date(timeIntervalSinceReferenceDate: 300)
+  older.completedAt = Date(timeIntervalSinceReferenceDate: 100)
+  var newer = WorkItem(projectID: project.id, title: "Newest completed task")
+  newer.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+  newer.completed = true
+  newer.updatedAt = Date(timeIntervalSinceReferenceDate: 200)
+  newer.completedAt = Date(timeIntervalSinceReferenceDate: 200)
+  var unrelated = WorkItem(projectID: otherProject.id, title: "Other project task")
+  unrelated.completed = true
+  unrelated.completedAt = Date(timeIntervalSince1970: 500)
+  let legacy = try JSONDecoder().decode(
+    WorkItem.self,
+    from: Data(
+      """
+      {"id":"00000000-0000-0000-0000-000000000003","projectID":"\(project.id.uuidString)","title":"Legacy completed task","completed":true,"createdAt":0,"updatedAt":150}
+      """.utf8))
+  #expect(legacy.completedAt == nil)
+
+  var library = Library()
+  library.projects = [project, otherProject]
+  library.tasks = [older, newer, unrelated, legacy]
+  #expect(library.latestCompletedTask(in: project.id)?.id == newer.id)
+  var tied = WorkItem(projectID: project.id, title: "Tie breaker")
+  tied.id = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
+  tied.completed = true
+  tied.completedAt = newer.completedAt
+  library.tasks.append(tied)
+  #expect(library.latestCompletedTask(in: project.id)?.id == tied.id)
+
+  let active = WorkItem(projectID: project.id, title: "New transition")
+  library.tasks.append(active)
+  library = try BoardReducer.apply(.complete(active.id, true, expectedRevision: 0), to: library)
+  let completedAt = try #require(library.tasks.first(where: { $0.id == active.id })?.completedAt)
+  var edited = try #require(library.tasks.first(where: { $0.id == active.id }))
+  edited.title = "Edited after completion"
+  library = try BoardReducer.apply(
+    .editTask(edited, expectedRevision: edited.revision), to: library)
+  #expect(library.tasks.first(where: { $0.id == active.id })?.completedAt == completedAt)
+
+  library = try BoardReducer.apply(
+    .complete(active.id, false, expectedRevision: edited.revision + 1), to: library)
+  #expect(library.tasks.first(where: { $0.id == active.id })?.completedAt == nil)
+  #expect(library.latestCompletedTask(in: project.id)?.id == tied.id)
 }
 
 @Test func legacyMigrationPreservesIdentitiesAndTaskContent() throws {

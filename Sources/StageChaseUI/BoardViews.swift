@@ -138,6 +138,9 @@ struct BoardHeader: View {
           Text("\(model.library.items(in: model.selectedProjectID ?? UUID()).count) open tasks")
             .stageFont(.subheadline).foregroundStyle(.secondary).padding(.top, 10)
         }
+        if let project = model.selectedProject {
+          ProjectGitStatusView(project: project, taskID: nil, showDeployedAction: true)
+        }
       #endif
       HStack(spacing: 8) {
         Image(

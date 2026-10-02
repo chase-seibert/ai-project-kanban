@@ -339,6 +339,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var modelOverride: CodexModelConfiguration?
   public var createdAt = Date()
   public var updatedAt = Date()
+  public var completedAt: Date?
   public init(projectID: UUID, title: String, stage: WorkflowStage = .inbox) {
     self.projectID = projectID
     self.title = title
@@ -350,6 +351,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, projectID, title, notes, stage, section, status, rank, completed, priority, revision
     case planPath, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt, updatedAt
+    case completedAt
   }
 
   public init(from decoder: Decoder) throws {
@@ -375,6 +377,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     modelOverride = try values.decodeIfPresent(CodexModelConfiguration.self, forKey: .modelOverride)
     createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+    completedAt = try values.decodeIfPresent(Date.self, forKey: .completedAt)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -396,6 +399,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     try values.encodeIfPresent(modelOverride, forKey: .modelOverride)
     try values.encode(createdAt, forKey: .createdAt)
     try values.encode(updatedAt, forKey: .updatedAt)
+    try values.encodeIfPresent(completedAt, forKey: .completedAt)
   }
 
   static func legacySection(for stage: WorkflowStage) -> WorkflowSection {
@@ -559,6 +563,14 @@ public struct Library: Codable, Equatable, Sendable {
   }
   public func latestRun(for task: UUID) -> AgentRun? {
     runs.filter { $0.taskID == task }.max { $0.createdAt < $1.createdAt }
+  }
+  public func latestCompletedTask(in project: UUID) -> WorkItem? {
+    tasks.filter { $0.projectID == project && $0.completed }.max {
+      let leftDate = $0.completedAt ?? $0.updatedAt
+      let rightDate = $1.completedAt ?? $1.updatedAt
+      if leftDate != rightDate { return leftDate < rightDate }
+      return $0.id.uuidString < $1.id.uuidString
+    }
   }
   public func validate() throws {
     guard formatVersion == 1 else {
@@ -754,13 +766,16 @@ public enum BoardReducer {
     case .complete(let id, let complete, let revision):
       let index = try taskIndex(id, revision)
       try ensureIdle(id)
+      let wasCompleted = state.tasks[index].completed
       state.tasks[index].completed = complete
       if complete {
+        if !wasCompleted { state.tasks[index].completedAt = .now }
         state.tasks[index].status = .done
         state.tasks[index].section = .implementing
         state.tasks[index].stage = .review
-      } else if state.tasks[index].status == .done {
-        state.tasks[index].status = .review
+      } else {
+        state.tasks[index].completedAt = nil
+        if state.tasks[index].status == .done { state.tasks[index].status = .review }
       }
       state.tasks[index].revision += 1
       state.tasks[index].updatedAt = .now

@@ -717,6 +717,29 @@ import UniformTypeIdentifiers
       }
     }
 
+    func commitProjectChanges(projectID: UUID) async {
+      guard let project = library.projects.first(where: { $0.id == projectID }) else { return }
+      guard !gitBusyProjectIDs.contains(projectID) else { return }
+      gitBusyProjectIDs.insert(projectID)
+      gitActionMessages[projectID] = nil
+      defer { gitBusyProjectIDs.remove(projectID) }
+      do {
+        guard !project.directory.isEmpty else { throw GitServiceError.missingFolder }
+        guard let latestTask = library.latestCompletedTask(in: projectID) else {
+          throw GitServiceError.command(
+            "Mark a task complete in this project before committing project changes.")
+        }
+        let result = try await gitService.commitAll(
+          in: URL(fileURLWithPath: project.directory), taskTitle: latestTask.title)
+        await refreshGitStatus(projectID: projectID)
+        gitActionMessages[projectID] =
+          "Committed \(result.hash.prefix(12)) · \(GitService.commitMessage(latestTask.title))"
+      } catch {
+        gitActionMessages[projectID] = error.localizedDescription
+        await refreshGitStatus(projectID: projectID)
+      }
+    }
+
     func recordDeployedRevision(projectID: UUID) async {
       guard !gitBusyProjectIDs.contains(projectID),
         var project = library.projects.first(where: { $0.id == projectID })

@@ -97,6 +97,13 @@ without a file selection or message editor. The detail copy makes clear that
 shared checkout files are not mapped to individual tasks. Git actions remain
 unavailable on iPhone.
 
+The project header's **Commit all project changes** action stages changes only
+in the configured project folder. Its message comes from the most recently
+completed task in the same project, so later edits to an older completed task
+do not change which title is selected. It is disabled while another Git action
+for that project is running and reports the resulting commit or the reason it
+could not commit.
+
 Mac Settings also exposes a multiline **Plan format prompt** editor with a
 reset-to-default action. Its default asks plans to start with user-story
 requirements, then cover architecture and data-model changes, basic test cases,

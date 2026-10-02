@@ -19,6 +19,10 @@
   current branch and commit hash, plus a task action that stages all project
   changes and commits with the task title as its message. Added an optional
   per-project deployed-revision checkpoint recorded from current `HEAD`.
+- Added a project-header action to commit all changes in the configured
+  project folder using the most recently completed task title. Tasks now retain
+  a backward-compatible completion timestamp so later edits do not change
+  which task supplies that message.
 - Added unread badges for task column and completion changes. Project badges count
   changed tasks, while task badges clear independently when a task is opened.
 - Added Mac-only Copy plan prompt and Plan in Codex task-detail actions. Their

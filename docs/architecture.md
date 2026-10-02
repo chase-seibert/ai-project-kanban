@@ -170,6 +170,17 @@ title as a single-line message. There is no file or message picker. The action i
 triggered by a Codex run, task transition, MCP request, or phone synchronization.
 An empty repository or clean worktree cannot create an empty task commit.
 
+The project header also offers an explicit **Commit all project changes** action.
+It always targets the configured project folder, even when a task has a separate
+recorded worktree, and uses the title of the most recently completed task in
+that project as the normalized one-line commit message. Completion time is
+stored separately from ordinary task edits. Older completed tasks without that
+timestamp use `updatedAt` as a best-effort recency value, with the
+lexicographically greatest task ID winning equal timestamps. A project without
+a completed task cannot use this action. Git actions share per-project busy
+state and feedback; Git status refreshes after success or failure. This remains
+a Mac-only user action.
+
 Each project optionally stores a deployed commit hash and recording timestamp
 in its normal Codable record. The Mac project controls record the current `HEAD`
 when the user confirms a deployment. This checkpoint is a manual reference;

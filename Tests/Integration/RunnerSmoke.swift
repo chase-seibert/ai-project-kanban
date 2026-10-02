@@ -92,6 +92,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     model.setApprovalMode(.approveForMe)
     await model.load()
     try await testTaskWorktreeCommit(model: model)
+    try await testProjectCommit(model: model)
     model.runner = CodexRunner(model: model, executableOverride: fixture)
     var project = Project(name: "Fixture", directory: folder.path)
     project.automationEnabled = true
@@ -589,6 +590,83 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     }
     print(
       "PASS: task commits target their recorded worktree while project Git status remains scoped to the checkout"
+    )
+  }
+
+  @MainActor static func testProjectCommit(model: AppModel) async throws {
+    let parent = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stagechase-project-commit-\(UUID().uuidString)", isDirectory: true)
+    let root = parent.appendingPathComponent("project", isDirectory: true)
+    let worktree = parent.appendingPathComponent("worktree", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: parent) }
+    _ = try runGit(["init", "-q"], at: root)
+    _ = try runGit(["config", "user.name", "StageChase Fixture"], at: root)
+    _ = try runGit(["config", "user.email", "fixture@example.invalid"], at: root)
+    try "base\n".write(
+      to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+    _ = try runGit(["add", "file.txt"], at: root)
+    _ = try runGit(["commit", "-m", "base"], at: root)
+    _ = try runGit(["worktree", "add", "--detach", worktree.path, "HEAD"], at: root)
+
+    let project = Project(name: "Project commit fixture", directory: root.path)
+    guard await model.saveProject(project, isNew: true) else {
+      throw BoardError.invalid(model.error ?? "Could not create the project commit fixture")
+    }
+    await model.commitProjectChanges(projectID: project.id)
+    guard model.gitActionMessages[project.id]?.contains("Mark a task complete") == true,
+      try runGit(["log", "-1", "--format=%s"], at: root) == Data("base\n".utf8)
+    else { throw BoardError.invalid("A project without a completed task created a commit") }
+
+    let older = WorkItem(projectID: project.id, title: "Older completed task")
+    guard await model.perform(.createTask(older)),
+      await model.perform(.complete(older.id, true, expectedRevision: older.revision))
+    else { throw BoardError.invalid(model.error ?? "Could not complete the older fixture task") }
+    try await Task.sleep(for: .milliseconds(5))
+    let latest = WorkItem(projectID: project.id, title: "Complete\n newest project task")
+    guard await model.perform(.createTask(latest)),
+      await model.perform(.complete(latest.id, true, expectedRevision: latest.revision))
+    else { throw BoardError.invalid(model.error ?? "Could not complete the latest fixture task") }
+    guard var olderAfterCompletion = model.library.tasks.first(where: { $0.id == older.id }) else {
+      throw BoardError.invalid("The older fixture task was not saved")
+    }
+    olderAfterCompletion.title = "Edited old completed task"
+    guard
+      await model.perform(
+        .editTask(olderAfterCompletion, expectedRevision: olderAfterCompletion.revision))
+    else { throw BoardError.invalid(model.error ?? "Could not edit the older completed task") }
+
+    var latestRun = AgentRun(task: latest, kind: .implementation)
+    latestRun.status = .succeeded
+    latestRun.workDirectory = worktree.path
+    model.library.runs.append(latestRun)
+    try "project folder change\n".write(
+      to: root.appendingPathComponent("project-only.txt"), atomically: true, encoding: .utf8)
+    try "worktree must stay dirty\n".write(
+      to: worktree.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+    guard model.taskUsesSeparateGitWorktree(taskID: latest.id) else {
+      throw BoardError.invalid("The project commit fixture did not attach a separate task worktree")
+    }
+    await model.commitProjectChanges(projectID: project.id)
+    let projectMessage = String(
+      decoding: try runGit(["log", "-1", "--format=%s"], at: root), as: UTF8.self
+    ).trimmingCharacters(in: .whitespacesAndNewlines)
+    let projectStatus = try await GitService().status(in: root)
+    let worktreeStatus = String(
+      decoding: try runGit(["status", "--porcelain"], at: worktree), as: UTF8.self)
+    guard projectMessage == "Complete newest project task", projectStatus.head != nil,
+      projectStatus.changedFileCount == 0,
+      model.gitStatuses[project.id]?.head == projectStatus.head,
+      !worktreeStatus.isEmpty,
+      model.gitActionMessages[project.id]?.contains("Complete newest project task") == true
+    else {
+      throw BoardError.invalid(
+        "Project commit did not use the latest completed title, refresh status, or target only the configured folder"
+      )
+    }
+    print(
+      "PASS: project commit uses the latest completed task title, refreshes status, and targets the configured folder instead of a task worktree"
     )
   }
 
