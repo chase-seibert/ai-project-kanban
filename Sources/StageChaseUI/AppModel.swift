@@ -313,14 +313,15 @@ import UniformTypeIdentifiers
         !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive }),
         !currentProject.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else {
-        throw BoardError.invalid("The task changed while loading Codex settings. Refresh and try again.")
+        throw BoardError.invalid(
+          "The task changed while loading Codex settings. Refresh and try again.")
       }
       let configuration = try resolvedConfiguration(for: current)
-      guard await perform(
+      let queued = await perform(
         .runTaskNow(
           current.id, expectedRevision: current.revision, kind: kind,
-          configuration: configuration)),
-        let run = library.latestRun(for: current.id), run.status == .queued
+          configuration: configuration))
+      guard queued, let run = library.latestRun(for: current.id), run.status == .queued
       else {
         throw BoardError.invalid(error ?? "The Mac could not queue this Codex run.")
       }
@@ -485,101 +486,95 @@ import UniformTypeIdentifiers
       syncClient.error = nil
       syncClient.recordDiagnostic("Sync started · \(pendingCount) pending change(s).")
       var acceptedCount = 0
+      var receivedSnapshot = false
       do {
         if forceFullSnapshot {
-          let queued = syncClient.outbox
-          syncClient.status = "Sending queued changes before full refresh…"
-          for envelope in queued {
-            switch try await syncClient.send(envelope) {
-            case .applied, .superseded:
-              acceptedCount += 1
-            case .conflict:
-              throw BoardError.conflict
-            case .rejected(let message):
-              throw BoardError.invalid(message)
-            }
-          }
           syncClient.status = "Receiving full snapshot from Mac…"
           guard let snapshot = try await syncClient.snapshot(cursor: 0, force: true) else {
             throw BoardError.invalid("The Mac did not return a full library snapshot.")
           }
-          try await apply(snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
-          try syncClient.acknowledge(queued.map(\.operationID))
+          try await apply(
+            snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+          receivedSnapshot = true
+          selectedTaskID = nil
+          search = ""
+          let discardedCount = try syncClient.discardOutbox()
           syncClient.lastSuccessfulSync = .now
-          syncClient.status = "Full refresh complete · \(syncClient.outbox.count) pending"
+          syncClient.status = "Full refresh complete"
           syncClient.error = nil
           syncClient.lastResultMessage =
-            "Full snapshot received from Mac. \(acceptedCount) queued edit(s) resolved; \(syncClient.outbox.count) change(s) remain pending."
+            "Full snapshot received from Mac. Discarded \(discardedCount) pending local change(s); no pending local changes remain."
           syncClient.recordDiagnostic(syncClient.lastResultMessage)
           return
         }
-        for envelope in syncClient.outbox where syncClient.conflictedOperationID == nil {
-          syncClient.status = "Sending pending change…"
-          switch try await syncClient.send(envelope) {
-          case .applied(_, let snapshot):
-            try await apply(
-              snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
-            try syncClient.acknowledge(envelope.operationID)
-            acceptedCount += 1
-          case .superseded(_, let snapshot):
-            try await apply(
-              snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
-            try syncClient.acknowledge(envelope.operationID)
-            acceptedCount += 1
-          case .conflict(let snapshot):
-            try await apply(
-              snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
-            try syncClient.markConflict(envelope.operationID)
-            error =
-              "This task changed on the Mac. Your draft is preserved; review it before retrying."
-            syncClient.status = "Conflict · change preserved"
-            syncClient.lastResultMessage = error ?? "The Mac reported a conflict."
-            syncClient.recordDiagnostic("Sync stopped · Mac reported a task revision conflict.")
-            return
-          case .rejected(let message):
-            try syncClient.markConflict(envelope.operationID)
-            error = message
-            syncClient.status = "Rejected · change preserved"
-            syncClient.lastResultMessage = message
-            syncClient.recordDiagnostic("Sync stopped · Mac rejected a pending change: \(message)")
-            return
+        while true {
+          while let envelope = syncClient.outbox.first {
+            syncClient.status = "Sending pending change…"
+            switch try await syncClient.send(envelope) {
+            case .applied(_, let snapshot):
+              try await apply(
+                snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+              try syncClient.acknowledge(envelope.operationID)
+              acceptedCount += 1
+            case .superseded(_, let snapshot):
+              try await apply(
+                snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+              try syncClient.acknowledge(envelope.operationID)
+              acceptedCount += 1
+            case .conflict(let snapshot):
+              try await apply(
+                snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+              try syncClient.acknowledge(envelope.operationID)
+              acceptedCount += 1
+              syncClient.recordDiagnostic(
+                "Resolved a conflicting phone edit with the latest Mac record.")
+            case .rejected(let message):
+              guard let snapshot = try await syncClient.snapshot(cursor: 0, force: true) else {
+                throw BoardError.invalid(
+                  "The Mac did not return its latest record after rejecting a queued change.")
+              }
+              try await apply(
+                snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+              try syncClient.acknowledge(envelope.operationID)
+              acceptedCount += 1
+              syncClient.recordDiagnostic(
+                "Resolved a rejected phone edit using the latest Mac record: \(message)")
+            }
           }
+          syncClient.status = "Refreshing project list…"
+          let cursor = try await replicaRepository.syncStateSnapshot().sequence
+          if let snapshot = try await syncClient.snapshot(cursor: cursor) {
+            try await apply(
+              snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+            receivedSnapshot = true
+          }
+          if syncClient.outbox.isEmpty { break }
         }
-        syncClient.status = "Refreshing project list…"
-        let cursor = try await replicaRepository.syncStateSnapshot().sequence
-        var receivedSnapshot = false
-        if let snapshot = try await syncClient.snapshot(cursor: cursor) {
-          try await apply(snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
-          receivedSnapshot = true
-        }
-        if syncClient.conflictedOperationID == nil { await applyPendingOverlay() }
         syncClient.lastSuccessfulSync = .now
-        if syncClient.conflictedOperationID != nil {
-          syncClient.status = "Conflict · change preserved"
-          syncClient.lastResultMessage =
-            "The Mac responded, but a queued change needs review and remains on this phone."
-        } else {
-          syncClient.status = "Reachable · last check succeeded"
-          let pendingText =
-            syncClient.outbox.isEmpty
-            ? "No pending changes remain."
-            : "\(syncClient.outbox.count) change(s) remain queued."
-          let snapshotText =
-            receivedSnapshot ? "Updated project data arrived. " : "No new project data. "
-          syncClient.lastResultMessage =
-            "Mac responded in \(Int(Date().timeIntervalSince(startedAt) * 1_000)) ms. \(acceptedCount) change(s) accepted. \(snapshotText)\(pendingText)"
-        }
+        syncClient.status = "Reachable · last check succeeded"
+        let pendingText =
+          syncClient.outbox.isEmpty
+          ? "No pending changes remain."
+          : "\(syncClient.outbox.count) newer change(s) remain queued."
+        let snapshotText =
+          receivedSnapshot ? "Updated project data arrived. " : "No new project data. "
+        syncClient.lastResultMessage =
+          "Mac responded in \(Int(Date().timeIntervalSince(startedAt) * 1_000)) ms. \(acceptedCount) queued change(s) resolved. \(snapshotText)\(pendingText)"
         syncClient.error = nil
         syncClient.recordDiagnostic(syncClient.lastResultMessage)
       } catch {
         syncClient.status =
           forceFullSnapshot
-          ? "Full refresh failed · \(syncClient.outbox.count) pending"
+          ? receivedSnapshot
+            ? "Full refresh incomplete · \(syncClient.outbox.count) pending"
+            : "Full refresh failed · \(syncClient.outbox.count) pending"
           : "Unreachable · \(syncClient.outbox.count) pending"
         syncClient.error = error.localizedDescription
         syncClient.lastResultMessage =
           forceFullSnapshot
-          ? "No full snapshot was received. The replica was kept; \(syncClient.outbox.count) pending change(s) remain saved on this phone."
+          ? receivedSnapshot
+            ? "The full Mac snapshot was applied, but the phone could not clear its outbox. \(syncClient.outbox.count) change(s) remain saved."
+            : "No full snapshot was received. The replica was kept; \(syncClient.outbox.count) pending change(s) remain saved on this phone."
           : "No successful exchange. \(syncClient.outbox.count) pending change(s) remain saved on this phone."
         syncClient.recordDiagnostic("Sync failed · \(error.localizedDescription)")
       }
@@ -607,9 +602,8 @@ import UniformTypeIdentifiers
           let mutation = try SyncCommandValidator.mutation(for: envelope, in: library)
           library = try BoardReducer.apply(mutation, to: library)
         } catch {
-          try? syncClient.markConflict(envelope.operationID)
-          self.error =
-            "A pending phone edit conflicts with the latest Mac state. Your queued edit is preserved."
+          // This is only an optimistic overlay. The authoritative sync request below
+          // decides which version wins and acknowledges the queued command.
           return
         }
       }
@@ -637,7 +631,8 @@ import UniformTypeIdentifiers
             id: item.id, projectID: item.projectID, title: item.title, notes: item.notes,
             stage: item.stage)
           revision = nil
-        case .editTask(let item, let expectedRevision):
+        case .editTask(let item, let expectedRevision),
+          .syncEditTask(let item, let expectedRevision):
           wireCommand = .editTask(id: item.id, title: item.title, notes: item.notes)
           revision = expectedRevision
         case .saveNotes(let id, let notes, let expectedRevision):
@@ -705,7 +700,7 @@ import UniformTypeIdentifiers
     case .createTask(let item, _):
       id = item.id
       name = "Add Task"
-    case .editTask(let item, _):
+    case .editTask(let item, _), .syncEditTask(let item, _):
       id = item.id
       name = "Edit Task"
     case .move(let value, _, _, _):

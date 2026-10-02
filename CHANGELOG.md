@@ -2,6 +2,15 @@
 
 ## 2026-10-02
 
+- Verify the Mac sync listener over loopback with a nonce and per-instance ID,
+  and show whether this StageChase instance successfully receives requests on
+  its registered port.
+- Resolve stale paired-phone task edits by latest edit time, acknowledge stale or
+  rejected outbox operations after applying the latest Mac snapshot, and drain
+  queued changes without leaving a conflict marker after successful sync.
+- Make **Refresh everything from Mac** replace the phone replica and discard all
+  pending local changes after the full snapshot succeeds; failed refreshes keep
+  the outbox.
 - Make a single click on a Mac task title open task detail and a double-click
   start inline title editing, matching the iPhone board interaction.
 - Treat paired-phone Run with StageChase and Plan with StageChase taps as the

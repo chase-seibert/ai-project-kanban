@@ -333,9 +333,10 @@ public actor LibraryRepository {
         updated = try BoardReducer.apply(mutation, to: current)
       } catch BoardError.conflict {
         guard let taskID = Self.lastWriteWinsTaskID(in: envelope.command),
-          let task = current.tasks.first(where: { $0.id == taskID }),
-          !current.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
-        else { throw BoardError.conflict }
+          let task = current.tasks.first(where: { $0.id == taskID })
+        else {
+          return try persistSuperseded(envelope, digest: digest, current: current, state: &state)
+        }
         let incomingTime = min(envelope.editedAt, Date.now.addingTimeInterval(300))
         let currentPhoneVersion = state.phoneTaskVersions[taskID]
         let incomingWins: Bool
@@ -352,24 +353,17 @@ public actor LibraryRepository {
           // Exact timestamp ties favor the Mac-authored state deterministically.
           incomingWins = false
         }
-        state.sequence &+= 1
-        state.deviceHighWater[envelope.deviceID] = envelope.clientSequence
-        state.receipts[envelope.operationID] = StoredSyncReceipt(
-          payloadDigest: digest, sequence: state.sequence, deviceID: envelope.deviceID,
-          clientSequence: envelope.clientSequence, superseded: !incomingWins)
-        try Self.trimReceipts(in: &state)
         if !incomingWins {
-          try persist(current, syncState: state)
-          cached = current
-          syncState = state
-          return .superseded(
-            sequence: state.sequence,
-            current: SyncSnapshot(
-              libraryID: state.libraryID, sequence: state.sequence, library: current))
+          return try persistSuperseded(envelope, digest: digest, current: current, state: &state)
         }
         commandEnvelope.expectedRevision = task.revision
-        let rebased = try SyncCommandValidator.mutation(for: commandEnvelope, in: current)
-        var resolved = try BoardReducer.apply(rebased, to: current)
+        var resolved: Library
+        do {
+          let rebased = try SyncCommandValidator.mutation(for: commandEnvelope, in: current)
+          resolved = try BoardReducer.apply(rebased, to: current)
+        } catch {
+          return try persistSuperseded(envelope, digest: digest, current: current, state: &state)
+        }
         if let index = resolved.tasks.firstIndex(where: { $0.id == taskID }) {
           resolved.tasks[index].updatedAt = incomingTime
         }
@@ -408,19 +402,40 @@ public actor LibraryRepository {
         snapshot: SyncSnapshot(
           libraryID: state.libraryID, sequence: state.sequence, library: updated))
     } catch BoardError.conflict {
-      return .conflict(
-        current: SyncSnapshot(
-          libraryID: state.libraryID, sequence: state.sequence, library: current))
+      return try persistSuperseded(envelope, digest: digest, current: current, state: &state)
     } catch BoardError.busy {
-      return .rejected(message: BoardError.busy.localizedDescription)
+      return try persistSuperseded(envelope, digest: digest, current: current, state: &state)
+    } catch BoardError.missing {
+      return try persistSuperseded(envelope, digest: digest, current: current, state: &state)
     } catch {
       return .rejected(message: error.localizedDescription)
     }
   }
 
+  private func persistSuperseded(
+    _ envelope: SyncEnvelope, digest: String, current: Library,
+    state: inout StoredSyncState
+  ) throws -> SyncCommandResult {
+    state.sequence &+= 1
+    state.deviceHighWater[envelope.deviceID] = max(
+      state.deviceHighWater[envelope.deviceID, default: 0], envelope.clientSequence)
+    state.receipts[envelope.operationID] = StoredSyncReceipt(
+      payloadDigest: digest, sequence: state.sequence, deviceID: envelope.deviceID,
+      clientSequence: envelope.clientSequence, superseded: true)
+    try Self.trimReceipts(in: &state)
+    try persist(current, syncState: state)
+    cached = current
+    syncState = state
+    return .superseded(
+      sequence: state.sequence,
+      current: SyncSnapshot(libraryID: state.libraryID, sequence: state.sequence, library: current))
+  }
+
   private static func lastWriteWinsTaskID(in command: SyncCommand) -> UUID? {
     switch command {
-    case .editTask(let id, _, _), .moveTask(let id, _): id
+    case .editTask(let id, _, _), .moveTask(let id, _), .completeTask(let id, _),
+      .deleteTask(let id):
+      id
     default: nil
     }
   }

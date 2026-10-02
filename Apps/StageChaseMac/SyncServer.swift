@@ -34,6 +34,9 @@ private struct PendingPhone: Sendable {
   private var pathMonitor: NWPathMonitor?
   private var isStarting = false
   private var startupGeneration = UUID()
+  private let instanceID = UUID()
+  private var loopbackProbeID: UUID?
+  private var loopbackConnection: NWConnection?
   private var pairingKey = SyncCrypto.randomSecret()
   private var pairingExpiresAt = Date().addingTimeInterval(5 * 60)
   private var devices: [UUID: SavedDevice] = [:]
@@ -43,6 +46,7 @@ private struct PendingPhone: Sendable {
   private var activeConnections = 0
   private var pairingAttempts: [Date] = []
   var status = "Off"
+  var portRegistrationStatus = "Not verified"
   var address: String?
   var pairingCode: String?
   var pendingDeviceName: String?
@@ -119,6 +123,7 @@ private struct PendingPhone: Sendable {
             self.status = "Available on this Wi-Fi network"
             self.address = Self.localAddress().map { "\($0):\(Self.port.rawValue)" }
             self.error = nil
+            self.verifyPortRegistration()
             self.recordNetworkEvent(
               SyncNetworkEvent(
                 direction: "Mac", operation: "Listener ready", requestBytes: 0,
@@ -128,6 +133,7 @@ private struct PendingPhone: Sendable {
           case .waiting(let failure):
             self.status = "Waiting for network"
             self.error = failure.localizedDescription
+            self.verifyPortRegistration()
             self.recordNetworkEvent(
               SyncNetworkEvent(
                 direction: "Mac", operation: "Listener state", requestBytes: 0,
@@ -137,6 +143,7 @@ private struct PendingPhone: Sendable {
             let detail = Self.listenerErrorMessage(failure)
             self.status = "Unavailable"
             self.error = detail
+            self.verifyPortRegistration()
             self.recordNetworkEvent(
               SyncNetworkEvent(
                 direction: "Mac", operation: "Listener failed", requestBytes: 0,
@@ -145,8 +152,11 @@ private struct PendingPhone: Sendable {
             self.listener?.cancel()
             self.listener = nil
           case .cancelled:
-            self.status = "Off"
-            self.address = nil
+            if self.status != "Unavailable" {
+              self.status = "Off"
+              self.address = nil
+              self.portRegistrationStatus = "Not verified"
+            }
           default: break
           }
         }
@@ -189,11 +199,15 @@ private struct PendingPhone: Sendable {
         SyncNetworkEvent(
           direction: "Mac", operation: "Listener failed", requestBytes: 0,
           responseBytes: nil, outcome: "Failed", detail: detail, elapsedMilliseconds: nil))
+      verifyPortRegistration()
     }
   }
 
   func stop() {
     startupGeneration = UUID()
+    loopbackProbeID = nil
+    loopbackConnection?.cancel()
+    loopbackConnection = nil
     isStarting = false
     recordNetworkEvent(
       SyncNetworkEvent(
@@ -209,6 +223,7 @@ private struct PendingPhone: Sendable {
     pendingDeviceName = nil
     address = nil
     status = "Off"
+    portRegistrationStatus = "Not verified"
   }
 
   private static func listenerErrorMessage(_ error: Error) -> String {
@@ -252,15 +267,12 @@ private struct PendingPhone: Sendable {
     let startedAt = Date()
     connection.stateUpdateHandler = { state in
       if case .ready = state {
-        Task { @MainActor in
-          server.lastPhoneContactAt = .now
-          server.lastPhoneAddress = String(describing: connection.endpoint)
-        }
         Self.receiveFrame(connection, buffer: Data()) { result in
           Task { @MainActor in
             let reply: SyncWireResponse
             var operation = "Read request"
             var requestBytes = 0
+            var isLoopbackProbe = false
             var failureDetail: String?
             do {
               switch result {
@@ -271,6 +283,7 @@ private struct PendingPhone: Sendable {
                 }
                 let request = try SyncFrame.decode(data, as: SyncWireRequest.self)
                 operation = Self.operationName(for: request)
+                if case .loopbackProbe = request { isLoopbackProbe = true }
                 reply = try await server.handle(request)
               case .failure(let error):
                 failureDetail = error.localizedDescription
@@ -287,6 +300,9 @@ private struct PendingPhone: Sendable {
             case .error(let message):
               outcome = "Rejected"
               detail = failureDetail ?? message
+            case .loopbackProbe(let instanceID, _):
+              outcome = instanceID == server.instanceID ? "Verified" : "Instance mismatch"
+              detail = "Loopback probe response sent by StageChase instance \(instanceID)."
             case .pairPending:
               outcome = "Paired"
               detail = "Temporary code accepted; phone credential issued."
@@ -297,12 +313,16 @@ private struct PendingPhone: Sendable {
               outcome = "Completed"
               detail = server.lastRequestResult
             }
-            server.lastPhoneContactAt = .now
+            if !isLoopbackProbe {
+              server.lastPhoneContactAt = .now
+              server.lastPhoneAddress = String(describing: connection.endpoint)
+            }
             server.lastRequestResult = "\(operation) · \(outcome) · \(detail)"
             let remoteAddress = String(describing: connection.endpoint)
             server.recordNetworkEvent(
               SyncNetworkEvent(
-                direction: "Phone → Mac", remoteAddress: remoteAddress,
+                direction: isLoopbackProbe ? "Mac loopback" : "Phone → Mac",
+                remoteAddress: remoteAddress,
                 operation: operation, requestBytes: requestBytes,
                 responseBytes: bytes.isEmpty ? nil : bytes.count, outcome: outcome,
                 detail: detail,
@@ -322,6 +342,9 @@ private struct PendingPhone: Sendable {
   }
 
   private func handle(_ request: SyncWireRequest) async throws -> SyncWireResponse {
+    if case .loopbackProbe(let nonce) = request {
+      return .loopbackProbe(instanceID: instanceID, nonce: nonce)
+    }
     let currentLibrary = try await repository.syncStateSnapshot()
     if devicesLibraryID != currentLibrary.libraryID {
       try loadDevices(for: currentLibrary.libraryID)
@@ -409,6 +432,8 @@ private struct PendingPhone: Sendable {
         }
       }
       return .authenticated(try SyncCrypto.seal(response, key: device.key))
+    case .loopbackProbe(let nonce):
+      return .loopbackProbe(instanceID: instanceID, nonce: nonce)
     }
   }
 
@@ -655,7 +680,115 @@ private struct PendingPhone: Sendable {
     case .pairStart: "Pair phone"
     case .pairPoll: "Pairing status"
     case .authenticated: "Sync request"
+    case .loopbackProbe: "Verify local port registration"
     }
+  }
+
+  func verifyPortRegistration() {
+    guard status != "Off" else {
+      portRegistrationStatus = "Listener is not running"
+      return
+    }
+    let probeID = UUID()
+    loopbackProbeID = probeID
+    let nonce = UUID()
+    let connection = NWConnection(
+      host: NWEndpoint.Host("127.0.0.1"), port: Self.port, using: .tcp)
+    loopbackConnection?.cancel()
+    loopbackConnection = connection
+    portRegistrationStatus = "Checking this StageChase instance…"
+    let queue = DispatchQueue(label: "com.cseibert.StageChase.loopback-probe")
+    connection.stateUpdateHandler = { [weak self] state in
+      switch state {
+      case .ready:
+        guard let frame = try? SyncFrame.encode(SyncWireRequest.loopbackProbe(nonce: nonce)) else {
+          Task { @MainActor in
+            self?.finishPortRegistration(
+              probeID: probeID, connection: connection,
+              status: "Could not create the loopback verification request.")
+          }
+          return
+        }
+        connection.send(
+          content: frame,
+          completion: .contentProcessed { error in
+            if let error {
+              Task { @MainActor in
+                self?.finishPortRegistration(
+                  probeID: probeID, connection: connection,
+                  status: "Port check failed: \(error.localizedDescription)")
+              }
+              return
+            }
+            Self.receiveFrame(connection, buffer: Data()) { result in
+              let response: SyncWireResponse
+              do {
+                response = try SyncFrame.decode(try result.get(), as: SyncWireResponse.self)
+              } catch {
+                Task { @MainActor in
+                  self?.finishPortRegistration(
+                    probeID: probeID, connection: connection,
+                    status: "Another service answered on port \(Self.port.rawValue).")
+                }
+                return
+              }
+              Task { @MainActor in
+                guard let self else { return }
+                switch response {
+                case .loopbackProbe(let responseInstanceID, let responseNonce):
+                  guard responseNonce == nonce else {
+                    self.finishPortRegistration(
+                      probeID: probeID, connection: connection,
+                      status: "A different service answered on port \(Self.port.rawValue).")
+                    return
+                  }
+                  guard responseInstanceID == self.instanceID else {
+                    self.finishPortRegistration(
+                      probeID: probeID, connection: connection,
+                      status: "Another StageChase instance answered on port \(Self.port.rawValue).")
+                    return
+                  }
+                  self.finishPortRegistration(
+                    probeID: probeID, connection: connection,
+                    status:
+                      "Verified · this StageChase instance is receiving requests on port \(Self.port.rawValue)."
+                  )
+                default:
+                  self.finishPortRegistration(
+                    probeID: probeID, connection: connection,
+                    status: "A different service answered on port \(Self.port.rawValue).")
+                }
+              }
+            }
+          })
+      case .waiting(let error), .failed(let error):
+        Task { @MainActor in
+          self?.finishPortRegistration(
+            probeID: probeID, connection: connection,
+            status: "Could not reach port \(Self.port.rawValue): \(error.localizedDescription)")
+        }
+      default:
+        break
+      }
+    }
+    connection.start(queue: queue)
+    queue.asyncAfter(deadline: .now() + 5) { [weak self] in
+      Task { @MainActor in
+        self?.finishPortRegistration(
+          probeID: probeID, connection: connection,
+          status: "Port verification timed out after five seconds.")
+      }
+    }
+  }
+
+  private func finishPortRegistration(
+    probeID: UUID, connection: NWConnection, status: String
+  ) {
+    guard loopbackProbeID == probeID else { return }
+    loopbackProbeID = nil
+    portRegistrationStatus = status
+    connection.cancel()
+    loopbackConnection = nil
   }
 
   nonisolated private static func receiveFrame(

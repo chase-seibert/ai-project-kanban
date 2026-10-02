@@ -692,6 +692,8 @@ public enum Mutation: Sendable {
   case restoreTask(UUID, WorkItem?, expectedRevision: Int?)
   case reorder(UUID, before: UUID, expectedRevision: Int)
   case retry(UUID, configuration: ResolvedCodexConfiguration? = nil)
+  /// Revision-rebased edit from a paired device; preserves the existing run snapshot.
+  case syncEditTask(WorkItem, expectedRevision: Int)
   case closeRun(UUID)
   case updateRun(AgentRun)
   case finishRun(UUID, planPath: String?)
@@ -851,6 +853,15 @@ public enum BoardReducer {
     case .editTask(var item, let expectedRevision):
       let index = try taskIndex(item.id, expectedRevision)
       try ensureIdle(item.id)
+      guard item.projectID == state.tasks[index].projectID, item.stage == state.tasks[index].stage
+      else { throw BoardError.invalid("Use Move to change a task’s stage.") }
+      item.title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !item.title.isEmpty else { throw BoardError.invalid("Give this task a title.") }
+      item.revision += 1
+      item.updatedAt = .now
+      state.tasks[index] = item
+    case .syncEditTask(var item, let expectedRevision):
+      let index = try taskIndex(item.id, expectedRevision)
       guard item.projectID == state.tasks[index].projectID, item.stage == state.tasks[index].stage
       else { throw BoardError.invalid("Use Move to change a task’s stage.") }
       item.title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)

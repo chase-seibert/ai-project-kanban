@@ -356,6 +356,25 @@ private struct PhoneOutbox: Codable {
     }
   }
 
+  /// Discards locally queued changes after a full authoritative snapshot has been applied.
+  @discardableResult func discardOutbox() throws -> Int {
+    guard outboxLoaded else {
+      throw BoardError.invalid("The offline queue could not be updated and was left intact.")
+    }
+    let previous = outbox
+    let previousConflict = conflictedOperationID
+    outbox.removeAll()
+    conflictedOperationID = nil
+    do {
+      try persistOutbox()
+      return previous.count
+    } catch {
+      outbox = previous
+      conflictedOperationID = previousConflict
+      throw error
+    }
+  }
+
   func markConflict(_ operationID: UUID) throws {
     let previous = conflictedOperationID
     conflictedOperationID = operationID

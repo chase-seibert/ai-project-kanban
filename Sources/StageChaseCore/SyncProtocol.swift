@@ -150,13 +150,10 @@ public enum SyncCommandValidator {
       guard let revision = envelope.expectedRevision,
         let existing = library.tasks.first(where: { $0.id == id })
       else { throw BoardError.missing }
-      guard !library.runs.contains(where: { $0.taskID == id && $0.status.isActive }) else {
-        throw BoardError.busy
-      }
       var item = existing
       item.title = title
       item.notes = notes
-      return .editTask(item, expectedRevision: revision)
+      return .syncEditTask(item, expectedRevision: revision)
     case .moveTask(let id, let stage):
       guard let revision = envelope.expectedRevision,
         library.tasks.contains(where: { $0.id == id })
@@ -443,12 +440,14 @@ public enum SyncWireRequest: Codable, Equatable, Sendable {
   case pairStart(Data)
   case pairPoll(Data)
   case authenticated(deviceID: UUID, sealed: Data)
+  case loopbackProbe(nonce: UUID)
 }
 
 public enum SyncWireResponse: Codable, Sendable {
   case pairPending(UUID)
   case pairStatus(Data)
   case authenticated(Data)
+  case loopbackProbe(instanceID: UUID, nonce: UUID)
   case error(String)
 }
 

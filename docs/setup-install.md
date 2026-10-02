@@ -72,6 +72,12 @@ refresh runs about every three seconds; each sync uses a short TCP connection,
 not an always-open socket. The app does not provide internet, background, or
 always-on delivery.
 
+The Mac Connection settings probe `127.0.0.1:47928` and verify a nonce plus a
+per-instance identifier before saying this StageChase instance receives its
+own port. A response from another service or another StageChase instance is
+reported as a registration mismatch. Use **Verify this instance owns the port**
+to repeat the check.
+
 The listener is local-network TCP with AES-GCM-encrypted application messages;
 it is not TLS and must only be used on a trusted local network. The phone stores
 its pairing key in Keychain, caches the Mac library separately from its local

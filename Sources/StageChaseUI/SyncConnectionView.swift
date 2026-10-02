@@ -32,6 +32,12 @@ struct SyncConnectionView: View {
         .stageFont(.caption).foregroundStyle(.secondary)
         if let server = model.syncServer, server.status != "Off" {
           LabeledContent("Listener", value: server.status)
+          LabeledContent("Port registration", value: server.portRegistrationStatus)
+            .foregroundStyle(
+              server.portRegistrationStatus.hasPrefix("Verified")
+                ? Color.green
+                : server.portRegistrationStatus.hasPrefix("Checking")
+                  ? Color.secondary : Color.orange)
           LabeledContent("Active requests", value: "\(server.activeConnectionCount)")
           if let address = server.address {
             LabeledContent("Address", value: "stagechase://\(address)")
@@ -53,6 +59,7 @@ struct SyncConnectionView: View {
             .stageFont(.caption).foregroundStyle(.secondary)
           }
           Button("Generate a new pairing code") { server.renewPairingCode() }
+          Button("Verify this instance owns the port") { server.verifyPortRegistration() }
           if let phone = server.pendingDeviceName {
             LabeledContent("Paired phone", value: phone)
           }
@@ -82,6 +89,12 @@ struct SyncConnectionView: View {
           .foregroundStyle(.secondary)
           if let error = model.syncServer?.error {
             Text(error).foregroundStyle(.red).stageFont(.callout)
+          }
+          if let registrationStatus = model.syncServer?.portRegistrationStatus,
+            registrationStatus != "Not verified"
+          {
+            LabeledContent("Port registration", value: registrationStatus)
+              .foregroundStyle(.orange)
           }
           Button("Enable local Wi-Fi sync") { Task { await model.startLocalSync() } }
             .buttonStyle(.borderedProminent)
@@ -172,6 +185,9 @@ struct SyncConnectionView: View {
               systemImage: "arrow.clockwise.circle")
           }
           .buttonStyle(.bordered)
+          .help(
+            "Replace this phone's cached library with the Mac snapshot and discard pending local changes."
+          )
           .disabled(sync.isSyncing || sync.hasUnsavedEndpoint)
           Text(
             "Sync uses a short connection for each request; the state above reports the latest check, not an always-open socket."

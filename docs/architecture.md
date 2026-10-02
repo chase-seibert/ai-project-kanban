@@ -283,17 +283,20 @@ generated JSON schema was checked for exact request spellings.
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
 sanitized snapshots. Queued phone edits remain a small allowlist (create/edit/
-move/reorder) with expected task revisions. Edit and move operations also carry
+move/reorder/complete/delete) with expected task revisions. Each command carries
 the phone edit timestamp captured when queued and the device's monotonic client
-sequence. A stale edit or move is rebased only when its source timestamp is newer
+sequence. A stale task edit is rebased only when its source timestamp is newer
 than the Mac task timestamp. Exact timestamp ties favor the Mac; ties between
 phone writes use device ID and then client sequence. Phone timestamps more than
 five minutes in the future are capped at that boundary. Accepted phone timestamps
 are retained with task sync metadata so a later queued edit can be ordered; a
 subsequent Mac task mutation clears that phone marker. Older writes receive a
 durable superseded receipt and the current snapshot, so the outbox advances.
-Invalid identity, active-run, unsupported-command, reorder digest, and project
-setting conflicts still fail closed. A separate authenticated request
+Unresolvable task, reorder, active-run, or project-setting conflicts resolve to
+the current Mac snapshot and consume the queued operation. After a successful
+sync exchange, the phone acknowledges every command that was applied, superseded,
+or rejected and replaced by the authoritative snapshot. Network failures keep
+the durable outbox intact. A separate authenticated request
 path is used only after a visible phone action: it updates a project's Codex
 profile/model with compare-before-write values, reads a bounded saved plan,
 refreshes the desktop model catalog, or requests a plan/run action. These
@@ -306,10 +309,11 @@ identity, monotonic sequence, device high-water marks, and operation receipts in
 the existing SwiftData metadata rows, committing accepted edits and receipts in
 one save. A changed snapshot is returned when the phone cursor is stale; an
 unchanged response avoids retransmitting the library every foreground poll.
-The explicit **Refresh everything from Mac** action first submits queued edits,
-then requests an unconditional full snapshot even when the cursor matches. It
-applies the snapshot only after the exchange succeeds, preserving the cached
-replica and queue if the Mac cannot complete the refresh.
+The explicit **Refresh everything from Mac** action requests an unconditional
+full snapshot without submitting queued edits. After the snapshot is received
+and applied, it discards the phone's entire local outbox and any saved conflict
+marker. If the Mac cannot complete the refresh, the cached replica and outbox
+remain intact.
 
 The Mac app starts `NWListener` on port 47928 only after the user enables local
 sync from Settings → Connection. That explicit choice is remembered, so the
@@ -324,6 +328,14 @@ limited to a trusted local Wi-Fi network; it is not HTTPS/TLS and is not
 intended for public or untrusted networks. The phone's direct local-network use
 is declared in its privacy usage string. Pair attempts, connection count, and
 message size are bounded.
+
+When the listener becomes ready (or reports a bind/network problem), the Mac
+opens a framed TCP connection to `127.0.0.1:47928`. The probe carries a fresh
+nonce; the listener returns that nonce and the `SyncServer` instance UUID. The
+Connection settings report successful port registration only when both values
+match, distinguishing this app instance from another service or StageChase
+instance responding on the port. The check can also be started manually from
+Settings.
 
 Both apps have a Connection view with current request state, last result,
 pending count, saved endpoint, and a persistent, bounded exchange journal. The
@@ -342,12 +354,14 @@ refresh runs every three seconds by default and can be disabled in the phone's
 Connection tab. Sync Now and board pull-to-refresh always perform an explicit
 sync; with automatic sync disabled, phone edits remain queued until then.
 Polling itself never invokes the runner. The Mac must be awake with StageChase
-open. Phone completion, deletion, and undo remain hidden while paired. Phone
-stage moves do not include automation configuration and never enqueue or invoke
-Codex. Explicit task-detail buttons can ask the Mac to prepare a planning or
-implementation run; only confirmation on the Mac starts Codex. Project settings on phone can update the execution profile
-and model for future runs. Plan content is read from the Mac only when the user
-opens the plan in task details and is rendered as Markdown on the phone.
+open. Paired-phone completion/reopening and confirmed task deletion use direct,
+revision-checked commands. Phone stage moves do not include automation
+configuration and never enqueue or invoke Codex. Tapping Run with StageChase or
+Plan with StageChase on the phone is the user's confirmation; the Mac resolves
+its saved model and starts the requested run without a second desktop prompt.
+Project settings on phone can update the execution profile and model for future
+runs. Plan content is read from the Mac only when the user opens the plan in task
+details and is rendered as Markdown on the phone.
 
 This path is still experimental. Unit and build checks pass, but pairing and
 task propagation have not yet been visibly verified between Mac and iPhone.

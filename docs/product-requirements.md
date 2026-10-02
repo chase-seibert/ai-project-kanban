@@ -48,9 +48,10 @@
 - As a user, I want the iPhone to offer a truthful Codex handoff, so it opens a
   supported thread URL or explains that I need to continue on Mac and can copy
   the session ID.
-- As a user, I want stale phone task edits and moves to resolve by source edit
-  time, so the latest edit wins across Mac and iPhone while exact timestamp ties
-  favor the Mac and invalid or unsafe writes remain rejected.
+- As a user, I want stale phone task edits, moves, completion changes, and
+  deletions to resolve by source edit time when they remain valid, so the latest
+  applicable record wins across Mac and iPhone while exact timestamp ties favor
+  the Mac.
 
 ## Experimental local Wi-Fi sync
 
@@ -60,25 +61,25 @@
 - As a user, I want supported phone edits to queue offline and reach the Mac
   once it is open on the same Wi-Fi network, so that temporary outages do not
   lose my intent.
-- As a user, I want a pending count, last-sync time, and visible conflicts, so
-  that cached Mac state is not mistaken for a successful refresh.
+- As a user, I want a pending count and last-sync time, so cached Mac state is
+  not mistaken for a successful refresh, and I want a successful sync to resolve
+  every queued change without leaving a conflict for me to handle.
 - As a user, I want a Connection tab showing in-progress state, last result,
   editable saved endpoint, and timestamped request/response sizes and outcomes,
   so that I can diagnose failed reconnects without losing queued changes.
 - As a user, I want to control automatic phone syncing and pull to refresh the
   board or tap Sync Now, so that I can choose between periodic updates and
   deliberate manual syncs without losing queued edits.
-- As a user, I want **Refresh everything from Mac** to send queued edits first
-  and then replace the phone replica with a complete Mac snapshot, even when
-  incremental sync reports no changes. The action reports progress, whether a
-  full snapshot arrived, and any changes still pending; a failed refresh keeps
-  the current replica and offline queue.
+- As a user, I want **Refresh everything from Mac** to replace the phone replica
+  with a complete Mac snapshot and discard every queued local change, even when
+  incremental sync reports no changes. The action reports progress and the
+  number of discarded changes; a failed refresh keeps the current replica and
+  offline queue.
 - As a user, I want polling and replica updates never to start or manage Codex,
   so that automation remains a confirmed Mac action.
 
 These requirements are implemented in part and remain unverified on devices.
-Phone confirmation for automated transitions and conflict reapplication remain
-open.
+Phone confirmation for automated transitions remains open.
 
 ## Git status and deployed revision
 
