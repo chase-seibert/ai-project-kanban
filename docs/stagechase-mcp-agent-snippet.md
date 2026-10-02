@@ -37,6 +37,11 @@ never start, stop, retry, or approve Codex work.
 - Call `begin_task` only when the user asks to start planning or implementation
   in this already-open Codex session. Use a fresh UUID `operation_id`; retain
   the returned `run_id` and latest task revision.
+- An explicit `begin_task` replaces an active StageChase-owned tracking record
+  for the same task, preserving the old run as Superseded and making the new
+  Codex Desktop record current. A concurrent active Codex Desktop session still
+  blocks another start. Superseding changes tracking only; it does not stop a
+  runner process, and late runner updates cannot overwrite the new record.
 - When the user asks to begin implementation, first call `move_task` to move
   the task to `implementation`, using the latest revision and a fresh operation
   ID. Then call `begin_task` and retain its returned run ID and revision. This

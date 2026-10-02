@@ -499,7 +499,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
 
 public enum RunStatus: String, Codable, CaseIterable, Sendable {
   case queued, readyForHandoff, running, needsInput, succeeded, failed, interrupted, cancelled,
-    stale
+    stale, superseded
   public var title: String {
     switch self {
     case .needsInput: "Needs your input"
@@ -822,9 +822,23 @@ public enum BoardReducer {
     case .beginExternalRun(let run):
       guard run.kind == .task, run.source == .codexDesktop, run.status == .running,
         state.tasks.contains(where: { $0.id == run.taskID && $0.projectID == run.projectID }),
-        !state.runs.contains(where: { $0.id == run.id }),
-        !state.runs.contains(where: { $0.taskID == run.taskID && $0.status.isActive })
+        !state.runs.contains(where: { $0.id == run.id })
       else { throw BoardError.invalid("The external Codex Desktop tracking record is invalid.") }
+      let activeRuns = state.runs.indices.filter {
+        state.runs[$0].taskID == run.taskID && state.runs[$0].status.isActive
+      }
+      guard activeRuns.allSatisfy({ state.runs[$0].source != .codexDesktop }) else {
+        throw BoardError.invalid("This task already has an active Codex Desktop session.")
+      }
+      for index in activeRuns {
+        state.runs[index].status = .superseded
+        state.runs[index].summary = "Tracking replaced by a newer Codex Desktop execution."
+        state.runs[index].updatedAt = .now
+        state.activity.append(
+          Activity(
+            "Tracking superseded by a new Codex Desktop execution.", projectID: run.projectID,
+            taskID: run.taskID, runID: state.runs[index].id))
+      }
       state.runs.append(run)
       state.activity.append(
         Activity(
@@ -1053,6 +1067,7 @@ public enum BoardReducer {
       guard let index = state.runs.firstIndex(where: { $0.id == run.id }) else {
         throw BoardError.missing
       }
+      guard state.runs[index].status != .superseded else { break }
       state.runs[index] = run
       if let taskIndex = state.tasks.firstIndex(where: { $0.id == run.taskID }) {
         let task = state.tasks[taskIndex]
@@ -1119,7 +1134,7 @@ public enum BoardReducer {
       message.localizedCaseInsensitiveContains("quota") ? .quota : .error
     case .succeeded: .review
     case .readyForHandoff: .ready
-    case .cancelled, .stale: .ready
+    case .cancelled, .stale, .superseded: .ready
     }
   }
 }

@@ -128,6 +128,11 @@ External session records have a distinct source; `begin_task`,
 already started. They store one bounded latest message on the task/run, never a
 transcript or inferred thread ID. Restart marks an external active record stale
 rather than interrupted or resumable by StageChase.
+An explicit fresh `begin_task` supersedes an active StageChase-owned run for
+that same task, keeps its history, and becomes the latest run. This replaces
+tracking only: it does not stop the underlying runner process. Updates from a
+superseded runner are ignored, while a second active Codex Desktop record still
+conflicts.
 MCP stage moves pass no model configuration and never call `kickRunner()`,
 regardless of automatic-invocation preferences. Stop the endpoint in Settings
 to disconnect Codex Desktop; it binds to `127.0.0.1` and uses a per-install

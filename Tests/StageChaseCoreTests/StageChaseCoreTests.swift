@@ -564,6 +564,78 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   repository = nil
 }
 
+@Test func externalCodexStartSupersedesOnlySameTaskStageChaseRunAndIgnoresLateUpdates() async throws
+{
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Retry tracking", directory: "/tmp/retry-tracking")
+  _ = try await repository.apply(.createProject(project))
+  let task = WorkItem(projectID: project.id, title: "Tracked task", stage: .implementation)
+  _ = try await repository.apply(.createTask(task))
+  let unrelatedTask = WorkItem(projectID: project.id, title: "Other task", stage: .implementation)
+  _ = try await repository.apply(.createTask(unrelatedTask))
+
+  _ = try await repository.apply(
+    .runTaskNow(
+      task.id, expectedRevision: 0, kind: .implementation,
+      configuration: fixtureModelConfiguration))
+  var snapshot = try await repository.load()
+  var stageChaseRun = try #require(snapshot.runs.first(where: { $0.taskID == task.id }))
+  stageChaseRun.source = .stageChase
+  stageChaseRun.status = .running
+  _ = try await repository.apply(.updateRun(stageChaseRun))
+
+  _ = try await repository.apply(
+    .runTaskNow(
+      unrelatedTask.id, expectedRevision: 0, kind: .implementation,
+      configuration: fixtureModelConfiguration))
+  snapshot = try await repository.load()
+  let unrelatedRun = try #require(snapshot.runs.first(where: { $0.taskID == unrelatedTask.id }))
+
+  let externalRunID = UUID()
+  var externalRun = AgentRun(task: task, kind: .task)
+  externalRun.id = externalRunID
+  externalRun.source = .codexDesktop
+  externalRun.status = .running
+  externalRun.createdAt = stageChaseRun.createdAt.addingTimeInterval(1)
+  let first = try await repository.applyMCP(
+    .beginExternalRun(externalRun), operationID: externalRunID, fingerprint: "begin-retry")
+  #expect(!first.replayed)
+  #expect(first.library.runs.count == 3)
+  #expect(first.library.runs.first(where: { $0.id == stageChaseRun.id })?.status == .superseded)
+  #expect(first.library.latestRun(for: task.id)?.id == externalRunID)
+  #expect(first.library.runs.first(where: { $0.id == unrelatedRun.id })?.status.isActive == true)
+  #expect(
+    first.library.activity.contains(where: {
+      $0.runID == stageChaseRun.id && $0.message.contains("superseded")
+    }))
+
+  let replay = try await repository.applyMCP(
+    .beginExternalRun(externalRun), operationID: externalRunID, fingerprint: "begin-retry")
+  #expect(replay.replayed)
+  #expect(replay.library.runs.count == 3)
+  let currentTaskStatus = try #require(replay.library.tasks.first(where: { $0.id == task.id }))
+    .status
+
+  var lateStageChaseUpdate = stageChaseRun
+  lateStageChaseUpdate.status = .failed
+  lateStageChaseUpdate.summary = "Late runner failure"
+  let afterLateUpdate = try BoardReducer.apply(.updateRun(lateStageChaseUpdate), to: replay.library)
+  #expect(afterLateUpdate.runs.first(where: { $0.id == stageChaseRun.id })?.status == .superseded)
+  #expect(
+    afterLateUpdate.runs.first(where: { $0.id == stageChaseRun.id })?.summary.contains(
+      "Late runner") == false)
+  #expect(afterLateUpdate.latestRun(for: task.id)?.id == externalRunID)
+  #expect(afterLateUpdate.tasks.first(where: { $0.id == task.id })?.status == currentTaskStatus)
+
+  var concurrentExternalRun = AgentRun(task: task, kind: .task)
+  concurrentExternalRun.id = UUID()
+  concurrentExternalRun.source = .codexDesktop
+  concurrentExternalRun.status = .running
+  #expect(throws: (any Error).self) {
+    try BoardReducer.apply(.beginExternalRun(concurrentExternalRun), to: replay.library)
+  }
+}
+
 @Test func taskIsolationAndQuickCaptureInEveryStage() throws {
   let a = Project(name: "A")
   let b = Project(name: "B")

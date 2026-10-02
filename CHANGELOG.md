@@ -2,6 +2,9 @@
 
 ## 2026-10-02
 
+- Let an explicit Codex Desktop `begin_task` replace an active StageChase run
+  for the same task, retain the old record as Superseded, and ignore late writes
+  from that runner while preserving idempotent MCP operation receipts.
 - Resolve stale phone task edits and moves by their queued edit time, acknowledge
   superseded outbox operations, and add an unconditional **Refresh everything
   from Mac** action that preserves local state if the full refresh fails.

@@ -724,12 +724,14 @@ struct RunBadge: View {
     case .failed, .interrupted: "exclamationmark.circle"
     case .cancelled: "stop.circle"
     case .stale: "questionmark.circle"
+    case .superseded: "arrow.uturn.forward"
     }
   }
   var color: Color {
     switch run.status {
     case .running: .purple
     case .needsInput, .interrupted: .orange
+    case .superseded: .secondary
     case .failed: .red
     case .succeeded: .green
     default: .secondary
