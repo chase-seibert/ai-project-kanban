@@ -14,8 +14,12 @@ not yet verified.
 | Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<normalized task-title>-<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
 | Planning success | Require an explicit plain-text `Completed:` response plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
 | Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Use the project folder, or create a managed worktree for a dirty repository when that project's worktree setting is on; then invoke Codex. A plan is optional context |
+| Confirm Run with StageChase from task detail | Queue and run only that task in its current Planning or Implementing section, using the saved project profile; this explicit action works even when automatic invocation or project automation is off |
+| Confirm Plan with StageChase from task detail | Queue a planning run from any section, reserve its plan path, and preserve the task's current section and completion state |
 | Implementation success | Require an explicit plain-text `Completed:` response; update the run only. The user chooses the task column and completion state |
-| Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers manual prompt copy and launch actions |
+| Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers Run with StageChase, Plan with StageChase, and the two Codex Desktop handoffs |
+| Run with StageChase from task detail | Confirm the resolved model and effort, then start the selected queued run in the Mac runner without opening Codex Desktop or moving the task |
+| Plan with StageChase from task detail | Confirm the resolved model and effort, then start a planning run in the Mac runner without opening Codex Desktop or moving the task |
 | Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, starting with the exact task title and including stable IDs and a readable project-relative plan path when available |
 | Launch Codex from task detail | Open `codex://threads/new` with the repository path and same MCP prompt; let the user start the turn in Desktop. StageChase cannot rename these threads because the URL flow returns no thread ID |
 | Successful task-prompt work | After `finish_task` succeeds, move the task to Review through MCP using its latest revision; preserve the completion flag for the user's review |
@@ -120,14 +124,19 @@ task's column. Failed and interrupted runs retain the path for retry. Legacy
 failed planning runs without a path receive the canonical path when explicitly
 retried.
 
-The Mac-wide **Automatically invoke Codex** preference gates automatic turns;
-the existing project switch must also be enabled for stage-triggered automation.
-With automatic invocation off, users can choose **Copy prompt** or **Launch
-Codex** on a task. Both actions use the same prompt, which identifies the
-project and task by stable IDs, includes a readable project-relative plan path
-when available, and otherwise includes the task title and notes. Launch opens
+The Mac-wide **Automatically invoke Codex** preference and project automation
+switch gate stage-triggered automatic turns. **Run with StageChase** is a
+separate, explicit task-detail action: it confirms the model and effort and
+starts only that task through the Mac runner, even with either automation gate
+off. **Plan with StageChase** works from any section, reserves a plan path,
+and leaves the task in place. The independent **Plan in Codex** and **Launch
+Codex** actions open Desktop for the user without submitting a turn. Launch
+uses the implementation prompt, and plan handoff uses the plan-only prompt.
+Each Desktop prompt identifies the project and task by stable IDs and includes
+the task title, notes, and any readable project-relative plan path. Launch opens
 `codex://threads/new` with the project folder and prompt; it does not submit a
-turn. The prompt directs Codex to update the task through the StageChase MCP and
+turn. Run with StageChase can still need the user's attention for quota,
+sign-in/device unlock, service errors, or genuine requests for input. The prompt directs Codex to update the task through the StageChase MCP and
 move successful implementation to Review. Completion remains under the user's
 control in StageChase.
 Automatic run settings do not restrict stage placement based on a plan,

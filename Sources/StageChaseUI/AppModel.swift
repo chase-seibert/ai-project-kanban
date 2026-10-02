@@ -35,6 +35,7 @@ import UniformTypeIdentifiers
   var launchTaskOnSelectionID: UUID?
   var saveTaskEditRequestedID: UUID?
   var error: String?
+  var phoneCodexActionMessage: String?
   var loadError: String?
   var ready = false
   var sheet: AppSheet?
@@ -179,7 +180,7 @@ import UniformTypeIdentifiers
           }
           if syncServer == nil {
             let server = SyncServer(repository: repository)
-            server.onLibraryChanged = { [weak self] library in self?.library = library }
+            configureSyncServer(server)
             syncServer = server
           }
           let savedPreference = preferences.object(forKey: "localSyncEnabled") as? Bool
@@ -237,7 +238,7 @@ import UniformTypeIdentifiers
       }
       if syncServer == nil {
         let server = SyncServer(repository: repository)
-        server.onLibraryChanged = { [weak self] library in self?.library = library }
+        configureSyncServer(server)
         syncServer = server
       }
       preferences.set(true, forKey: "localSyncEnabled")
@@ -247,6 +248,67 @@ import UniformTypeIdentifiers
     func stopLocalSync() {
       preferences.set(false, forKey: "localSyncEnabled")
       syncServer?.stop()
+    }
+
+    private func configureSyncServer(_ server: SyncServer) {
+      server.onLibraryChanged = { [weak self] library in self?.library = library }
+      server.onPhoneModelCatalogRequest = { [weak self] in
+        guard let self else { throw BoardError.invalid("The StageChase model is unavailable.") }
+        try await self.refreshModelCatalog()
+        return (self.globalModelConfiguration, self.modelCatalog)
+      }
+      server.onPhoneCodexAction = { [weak self] taskID, expectedRevision, action in
+        guard let self else { throw BoardError.invalid("The StageChase model is unavailable.") }
+        return try self.handlePhoneCodexAction(
+          taskID: taskID, expectedRevision: expectedRevision, action: action)
+      }
+    }
+
+    private func handlePhoneCodexAction(
+      taskID: UUID, expectedRevision: Int, action: SyncPhoneCodexAction
+    ) throws -> String {
+      guard let item = library.tasks.first(where: { $0.id == taskID }),
+        item.revision == expectedRevision,
+        let project = library.projects.first(where: { $0.id == item.projectID }),
+        !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else {
+        throw BoardError.invalid("The task or its project folder changed. Refresh and try again.")
+      }
+      switch action {
+      case .plan:
+        let prompt = PlanHandoffPrompt.make(
+          for: item, project: project, formatPrompt: resolvedPlanFormatPrompt)
+        try openCodexDesktop(prompt: prompt, projectDirectory: project.directory)
+        return "Plan request opened in Codex Desktop on the Mac."
+      case .run:
+        guard [.planning, .implementing].contains(item.section), !item.completed,
+          !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
+        else {
+          throw BoardError.invalid(
+            "Move the task into Planning or Implementing and finish any active run before requesting Codex."
+          )
+        }
+        requestRunnerRun(item)
+        guard pendingMove?.item.id == item.id, pendingMove?.runOnly == true else {
+          throw BoardError.invalid(error ?? "The Mac could not prepare this Codex run.")
+        }
+        return "Run confirmation is open in StageChase on the Mac. Confirm there to start Codex."
+      }
+    }
+
+    private func openCodexDesktop(prompt: String, projectDirectory: String) throws {
+      var components = URLComponents()
+      components.scheme = "codex"
+      components.host = "threads"
+      components.path = "/new"
+      components.queryItems = [
+        URLQueryItem(name: "path", value: projectDirectory),
+        URLQueryItem(name: "prompt", value: prompt),
+      ]
+      guard let url = components.url, NSWorkspace.shared.open(url) else {
+        throw BoardError.invalid(
+          "Codex Desktop could not open the task. Check its installation on the Mac.")
+      }
     }
 
     func startMCPServer() {
@@ -293,6 +355,33 @@ import UniformTypeIdentifiers
         }
         replicaRepository = nil
       } catch { syncClient.error = error.localizedDescription }
+    }
+
+    func readPlanFromMac(_ item: WorkItem) async throws -> String {
+      guard syncClient.isPaired else {
+        throw BoardError.invalid("Pair this phone with StageChase on the Mac to open saved plans.")
+      }
+      guard case .plan(let markdown) = try await syncClient.requestDirect(
+        .readPlan(taskID: item.id, expectedRevision: item.revision))
+      else { throw BoardError.invalid("The Mac returned an invalid plan response.") }
+      return markdown
+    }
+
+    func requestCodexFromMac(_ item: WorkItem, action: SyncPhoneCodexAction) async {
+      guard syncClient.isPaired else {
+        phoneCodexActionMessage = "Pair this phone with StageChase on the Mac first."
+        return
+      }
+      phoneCodexActionMessage = "Sending request to the Mac…"
+      do {
+        guard case .accepted(let message) = try await syncClient.requestDirect(
+          .invokeCodex(
+            requestID: UUID(), taskID: item.id, expectedRevision: item.revision, action: action))
+        else { throw BoardError.invalid("The Mac returned an invalid Codex response.") }
+        phoneCodexActionMessage = message
+      } catch {
+        phoneCodexActionMessage = error.localizedDescription
+      }
     }
 
     func refreshFromMac(manual: Bool = false) async {
@@ -457,6 +546,21 @@ import UniformTypeIdentifiers
             orderDigest: SyncCommandValidator.orderDigest(
               projectID: item.projectID, stage: item.stage, in: library))
           revision = expectedRevision
+        case .editProject(let project):
+          guard let existing = library.projects.first(where: { $0.id == project.id }),
+            project.name == existing.name, project.directory == existing.directory,
+            project.automationEnabled == existing.automationEnabled,
+            project.usesWorktrees == existing.usesWorktrees,
+            project.deployedCommitHash == existing.deployedCommitHash,
+            project.deployedAt == existing.deployedAt
+          else {
+            throw BoardError.invalid("On iPhone, only project Codex settings can be changed on the Mac.")
+          }
+          wireCommand = .updateProjectCodexSettings(
+            id: project.id, expectedProfile: existing.executionProfile,
+            expectedModelOverride: existing.modelOverride, profile: project.executionProfile,
+            modelOverride: project.modelOverride)
+          revision = nil
         default:
           throw BoardError.invalid("This action is available on the Mac only while connected.")
         }
@@ -882,8 +986,40 @@ import UniformTypeIdentifiers
     }
   }
 
+  func requestRunnerRun(_ item: WorkItem) {
+    requestRunnerRun(
+      item, kind: item.section == .planning ? .planning : .implementation)
+  }
+
+  func requestRunnerRun(_ item: WorkItem, kind: RunKind) {
+    #if os(macOS)
+      guard !isConnectedPhone, !isPreview else { return }
+      guard runner != nil else {
+        error = "The StageChase Codex runner is unavailable."
+        return
+      }
+      guard
+        kind == .planning || (kind == .implementation && item.section == .implementing),
+        !item.completed,
+        !library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive }),
+        let current = library.tasks.first(where: { $0.id == item.id }),
+        let project = library.projects.first(where: { $0.id == item.projectID }),
+        !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else { return }
+      let pending = PendingMove(
+        item: current, stage: current.stage, isNew: false, runKind: kind,
+        runOnly: true, configuration: nil, loading: true)
+      pendingMove = pending
+      preparePendingMove(pending.id)
+    #else
+      return
+    #endif
+  }
+
   func confirmMove(_ move: PendingMove) async {
-    guard autoInvokeCodex, !move.loading, let reviewed = move.configuration else { return }
+    guard move.runOnly || autoInvokeCodex, !move.loading,
+      let reviewed = move.configuration
+    else { return }
     do {
       try await refreshModelCatalog()
       let current = try resolvedConfiguration(for: move.item)
@@ -903,12 +1039,25 @@ import UniformTypeIdentifiers
       return
     }
     pendingMove = nil
-    let success = await perform(
-      move.isNew
-        ? .createTask(move.item, configuration: reviewed)
-        : .move(
-          move.item.id, move.stage, expectedRevision: move.item.revision, configuration: reviewed))
-    if success { kickRunner() }
+    if move.runOnly {
+      if await perform(
+        .runTaskNow(
+          move.item.id, expectedRevision: move.item.revision,
+          kind: move.runKind ?? (move.item.section == .planning ? .planning : .implementation),
+          configuration: reviewed)),
+        let run = library.latestRun(for: move.item.id), run.status == .queued
+      {
+        kickRunner(runID: run.id)
+      }
+    } else {
+      let success = await perform(
+        move.isNew
+          ? .createTask(move.item, configuration: reviewed)
+          : .move(
+            move.item.id, move.stage, expectedRevision: move.item.revision,
+            configuration: reviewed))
+      if success { kickRunner() }
+    }
   }
 
   func setGlobalModelConfiguration(_ configuration: CodexModelConfiguration) {
@@ -967,7 +1116,15 @@ import UniformTypeIdentifiers
         guard let runner else { throw BoardError.invalid("The Mac Codex runner is unavailable.") }
         catalog = try await runner.refreshModelCatalog()
       #else
-        throw BoardError.invalid("Model discovery is available on Mac only.")
+        guard syncClient.isPaired,
+          case .modelCatalog(let globalConfiguration, let options) =
+            try await syncClient
+            .requestDirect(.modelCatalog)
+        else {
+          throw BoardError.invalid("Pair this phone with StageChase on the Mac to load models.")
+        }
+        globalModelConfiguration = globalConfiguration
+        catalog = options
       #endif
       guard !Task.isCancelled, modelCatalogRequestID == requestID else {
         throw BoardError.invalid("A newer Codex model refresh replaced this result. Try again.")
@@ -1088,9 +1245,13 @@ import UniformTypeIdentifiers
     update(&move)
     pendingMove = move
   }
-  func kickRunner() {
+  func kickRunner(runID: UUID? = nil) {
     #if os(macOS)
-      runner?.resumeQueueAndDrain()
+      if let runID {
+        runner?.startExplicitly(runID)
+      } else {
+        runner?.resumeQueueAndDrain()
+      }
     #endif
   }
   #if os(macOS)
@@ -1248,23 +1409,26 @@ struct PendingMove: Identifiable {
   var item: WorkItem
   var stage: WorkflowStage
   var isNew: Bool
+  var runKind: RunKind?
   var configuration: ResolvedCodexConfiguration?
   var loading: Bool
   var retryRunID: UUID?
   var error: String?
   init(
     item: WorkItem, stage: WorkflowStage, isNew: Bool,
-    configuration: ResolvedCodexConfiguration?, loading: Bool,
+    runKind: RunKind? = nil, configuration: ResolvedCodexConfiguration?, loading: Bool,
     retryRunID: UUID? = nil, error: String? = nil
   ) {
     self.item = item
     self.stage = stage
     self.isNew = isNew
+    self.runKind = runKind
     self.configuration = configuration
     self.loading = loading
     self.retryRunID = retryRunID
     self.error = error
   }
+  var runOnly: Bool { runKind != nil }
 }
 
 struct PlanFeedbackMessage {

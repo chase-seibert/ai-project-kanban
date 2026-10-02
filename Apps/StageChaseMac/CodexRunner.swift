@@ -16,6 +16,7 @@ struct AgentApproval {
   private weak var model: AppModel?
   private let connection: any AgentConnection
   private var activeID: UUID?
+  private var explicitRunID: UUID?
   private(set) var approvalModeForActiveRun: CodexApprovalMode?
   private var draining = false
   private var queuePausedForHandoff = false
@@ -251,13 +252,31 @@ struct AgentApproval {
 
   func drain() {
     guard !queuePausedForHandoff, closingRunID == nil, !draining, activeID == nil,
-      let model, !model.isPreview, model.autoInvokeCodex
+      let model, !model.isPreview
     else { return }
-    guard
-      let run = model.library.runs.filter({ $0.status == .queued }).sorted(by: {
-        $0.createdAt < $1.createdAt
-      }).first
-    else { return }
+    let explicitlyRequested = explicitRunID != nil
+    guard explicitlyRequested || model.autoInvokeCodex else { return }
+    let run: AgentRun
+    if let explicitRunID {
+      guard
+        let requested = model.library.runs.first(where: {
+          $0.id == explicitRunID && $0.status == .queued
+        })
+      else {
+        self.explicitRunID = nil
+        if model.autoInvokeCodex { drain() }
+        return
+      }
+      run = requested
+      self.explicitRunID = nil
+    } else {
+      guard
+        let next = model.library.runs.filter({ $0.status == .queued }).sorted(by: {
+          $0.createdAt < $1.createdAt
+        }).first
+      else { return }
+      run = next
+    }
     let projectProfile =
       model.library.projects.first(where: { $0.id == run.projectID })?.executionProfile
       ?? .workspaceAccessNoPrompts
@@ -270,7 +289,7 @@ struct AgentApproval {
     finalOutcome = nil
     fileChangeDetails.removeAll()
     Task {
-      await start(runWithProfile, profile: profile)
+      await start(runWithProfile, profile: profile, explicitlyRequested: explicitlyRequested)
       draining = false
       if activeID == nil, model.library.runs.first(where: { $0.id == run.id })?.status == .succeeded
       {
@@ -281,6 +300,12 @@ struct AgentApproval {
 
   func resumeQueueAndDrain() {
     queuePausedForHandoff = false
+    drain()
+  }
+
+  func startExplicitly(_ runID: UUID) {
+    queuePausedForHandoff = false
+    explicitRunID = runID
     drain()
   }
 
@@ -351,11 +376,13 @@ struct AgentApproval {
     }
   }
 
-  private func start(_ initial: AgentRun, profile: CodexExecutionProfile) async {
+  private func start(
+    _ initial: AgentRun, profile: CodexExecutionProfile, explicitlyRequested: Bool = false
+  ) async {
     guard let model,
       let item = model.library.tasks.first(where: { $0.id == initial.taskID }),
       let project = model.library.projects.first(where: { $0.id == initial.projectID }),
-      project.automationEnabled
+      explicitlyRequested || project.automationEnabled
     else {
       await fail("Project automation is disabled or the task is missing.")
       return

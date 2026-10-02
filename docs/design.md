@@ -29,9 +29,14 @@ creates one task. When automatic invocation is enabled for Planning or Implement
 bulk capture is directed to Inbox so each later move retains its explicit run
 confirmation.
 
-iPhone uses a horizontally paged board and section strip: one readable lane plus
-a hint of its neighbor, not five squeezed desktop columns. Generated launch
+iPhone uses a horizontally paged board with bottom section controls: one
+readable lane plus a hint of its neighbor, not five squeezed desktop columns. Generated launch
 configuration enables the full display rather than iOS compatibility framing.
+On iPhone, the selected project name in the navigation bar opens a project
+switcher. The board's bottom controls select Inbox, Planning, or Implementing
+and stay in sync with horizontal paging. Connection is a top-bar action; Activity
+and Settings remain available from the board's overflow menu. The phone board
+does not show the connection-status card above its tasks.
 
 Mac task detail is an inspector; iPhone uses a sheet. Title, task context, saved
 plan, status, and manual completion share the model. Plans and Codex run state do
@@ -85,6 +90,11 @@ plans use a normalized task-title slug plus the full lowercase task UUID under
 exact task title. Codex attaches the saved Markdown plan through MCP and sets
 the status to Ready while preserving task completion. Launching the
 action does not itself change task state.
+Task detail groups actions into vertically stacked **You run in Codex** and
+**StageChase runs** sections so labels remain readable. Each section has a
+task-run action and a planning action; Refresh is below both groups. Plan with
+StageChase starts a confirmed planning run from any task section and leaves the
+task in place.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings
 shows progress, the saved endpoint, and timestamped framed exchange sizes and

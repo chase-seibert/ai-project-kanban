@@ -2,6 +2,17 @@
 
 ## 2026-10-02
 
+- Add a confirmed **Run with StageChase** task action that starts only the
+  selected task through the Mac runner, independent of automatic-run settings;
+  keep **Launch Codex** as the separate Desktop handoff.
+- Add **Plan with StageChase** as a confirmed planning action from any task
+  section, and group the four run/planning actions into full-width task-detail
+  sections with Refresh below them.
+- Replace the iPhone app tab bar with bottom Inbox, Planning, and Implementing
+  controls; add project switching from the navigation title, move Connection to
+  the top bar, and keep Activity and Settings in the overflow menu.
+- Remove the iPhone board status card and add a Project Chase preview fixture
+  based on the visible task titles in the supplied board screenshot.
 - Add per-project Codex execution profiles with a safe workspace-write default,
   explicit full-access opt-in, and per-run retry snapshots. Keep approval
   prompts disabled for both profiles while leaving quota, sign-in, device,

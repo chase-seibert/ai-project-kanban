@@ -267,6 +267,34 @@ private struct PhoneOutbox: Codable {
     return result
   }
 
+  /// Sends a user initiated request directly to the Mac. These controls stay out of the
+  /// background refresh loop and offline edit queue.
+  func requestDirect(_ direct: SyncDirectRequest) async throws -> SyncDirectResponse {
+    guard let credential else { throw BoardError.invalid("Pair this phone with the Mac first.") }
+    let route = try Self.parseEndpoint(endpoint)
+    let body = try SyncCrypto.seal(SyncClientRequest.direct(direct), key: credential.key)
+    guard
+      case .authenticated(let sealed) = try await exchange(
+        .authenticated(deviceID: credential.deviceID, sealed: body), route: route,
+        operation: Self.directOperationName(direct))
+    else { throw BoardError.invalid("The Mac returned an invalid direct response.") }
+    let response = try SyncCrypto.open(sealed, key: credential.key, as: SyncServerResponse.self)
+    guard case .direct(let result) = response else {
+      throw BoardError.invalid("The Mac returned an unexpected direct response.")
+    }
+    if case .rejected(let message) = result { throw BoardError.invalid(message) }
+    return result
+  }
+
+  private static func directOperationName(_ request: SyncDirectRequest) -> String {
+    switch request {
+    case .readPlan: "Read saved plan"
+    case .modelCatalog: "Refresh Codex model list"
+    case .invokeCodex(_, _, _, let action):
+      action == .plan ? "Plan in Codex" : "Run with StageChase"
+    }
+  }
+
   func enqueue(_ command: SyncCommand, expectedRevision: Int? = nil) throws -> SyncEnvelope {
     guard outboxLoaded else { throw BoardError.invalid("The offline queue is unavailable.") }
     guard let credential else { throw BoardError.invalid("Pair this phone with the Mac first.") }

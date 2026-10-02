@@ -36,6 +36,15 @@
 - As a user, I want Mac and iPhone to show concise run status and progress
   instead of a long event timeline, so task detail and Activity stay readable
   and I can open the associated Codex session for its full history.
+- As a user, I want to switch projects by tapping the selected project name on
+  iPhone, so I can move between boards without returning to the project list.
+- As a user, I want the iPhone board's bottom controls to select Inbox,
+  Planning, and Implementing, so I can change lanes without reaching the top
+  section strip. Horizontal paging remains available.
+- As a user, I want Connection at the top of the iPhone board and the status
+  card removed, so sync remains reachable while tasks gain vertical space.
+- As a user, I want Activity and Settings to remain available from the board's
+  overflow menu, so changing the bottom navigation does not remove those views.
 - As a user, I want the iPhone to offer a truthful Codex handoff, so it opens a
   supported thread URL or explains that I need to continue on Mac and can copy
   the session ID.
@@ -129,6 +138,14 @@ open.
 
 ## Implementation automation
 
+- As a user, I want a task-detail action to run the selected task in StageChase
+  after confirming the model, even when automatic invocation is off, so I can
+  start managed Codex work without opening Codex Desktop.
+- As a user, I want Run with StageChase to preserve the task's current section
+  and leave Launch Codex available as a separate Desktop handoff.
+- As a user, I want Plan with StageChase to start a confirmed planning run
+  from any task section without moving the task, so StageChase can create a
+  plan while preserving my board organization.
 - As a user, I want a separate Codex execution profile for each project, so
   projects can use workspace access or explicitly opted-in full access without
   approval prompts.
@@ -189,6 +206,9 @@ open.
   stable project/task IDs, the current Mac plan-format preference, and the
   intended project-relative path, so copying and launching produce the same
   plan workflow.
+- As a user, I want the StageChase planning action grouped separately from the
+  Plan in Codex and Revise plan in Codex handoffs, so I can tell which actions
+  start work inside the app and which open Desktop for me.
 - As a user, I want a new plan to use a normalized task-title slug plus its full
   task UUID under `to-do/` and a revision to preserve its attached path, so
   plans are recognizable, collision-safe, and honor an existing location.

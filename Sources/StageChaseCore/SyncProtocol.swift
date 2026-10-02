@@ -3,7 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
-  public static let version = 1
+  public static let version = 2
   public static let maximumMessageBytes = 1_048_576
   public static let maximumPairingSecretBytes = 64
 }
@@ -37,6 +37,31 @@ public enum SyncCommand: Codable, Equatable, Sendable {
   case editTask(id: UUID, title: String, notes: String)
   case moveTask(id: UUID, stage: WorkflowStage)
   case reorderTask(id: UUID, beforeID: UUID, orderDigest: String)
+  case updateProjectCodexSettings(
+    id: UUID, expectedProfile: CodexExecutionProfile,
+    expectedModelOverride: CodexModelConfiguration?, profile: CodexExecutionProfile,
+    modelOverride: CodexModelConfiguration?)
+}
+
+public enum SyncPhoneCodexAction: String, Codable, Sendable {
+  case plan
+  case run
+}
+
+/// Direct requests are initiated by a visible phone control. They are never part of background
+/// refresh or the offline edit queue.
+public enum SyncDirectRequest: Codable, Sendable {
+  case readPlan(taskID: UUID, expectedRevision: Int)
+  case modelCatalog
+  case invokeCodex(
+    requestID: UUID, taskID: UUID, expectedRevision: Int, action: SyncPhoneCodexAction)
+}
+
+public enum SyncDirectResponse: Codable, Sendable {
+  case plan(String)
+  case modelCatalog(globalConfiguration: CodexModelConfiguration, options: [CodexModelOption])
+  case accepted(String)
+  case rejected(String)
 }
 
 public enum SyncCommandResult: Codable, Equatable, Sendable {
@@ -94,6 +119,17 @@ public enum SyncCommandValidator {
         throw BoardError.conflict
       }
       return .reorder(id, before: beforeID, expectedRevision: revision)
+    case .updateProjectCodexSettings(
+      let id, let expectedProfile, let expectedModelOverride, let profile, let modelOverride):
+      guard envelope.expectedRevision == nil,
+        var project = library.projects.first(where: { $0.id == id })
+      else { throw BoardError.missing }
+      guard project.executionProfile == expectedProfile,
+        project.modelOverride == expectedModelOverride
+      else { throw BoardError.conflict }
+      project.executionProfile = profile
+      project.modelOverride = modelOverride
+      return .editProject(project)
     }
   }
 }
@@ -328,12 +364,14 @@ public enum SyncPairingStatus: Codable, Sendable {
 public enum SyncClientRequest: Codable, Sendable {
   case snapshot(cursor: UInt64)
   case command(SyncEnvelope)
+  case direct(SyncDirectRequest)
 }
 
 public enum SyncServerResponse: Codable, Sendable {
   case snapshot(SyncSnapshot)
   case unchanged(sequence: UInt64)
   case command(SyncCommandResult)
+  case direct(SyncDirectResponse)
   case error(String)
 }
 

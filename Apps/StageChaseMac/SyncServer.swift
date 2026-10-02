@@ -46,6 +46,8 @@ private struct PendingPhone: Sendable {
   var networkEvents: [SyncNetworkEvent] = []
   var eventLogError: String?
   var onLibraryChanged: ((Library) -> Void)?
+  var onPhoneCodexAction: ((UUID, Int, SyncPhoneCodexAction) async throws -> String)?
+  var onPhoneModelCatalogRequest: (() async throws -> (CodexModelConfiguration, [CodexModelOption]))?
   private let networkEventsURL: URL
   var activeConnectionCount: Int { activeConnections }
 
@@ -376,8 +378,58 @@ private struct PendingPhone: Sendable {
           lastRequestResult = "Pending change · rejected: \(message)"
         }
         response = .command(result)
+      case .direct(let direct):
+        response = .direct(try await handleDirect(direct, library: state.library))
       }
       return .authenticated(try SyncCrypto.seal(response, key: device.key))
+    }
+  }
+
+  private func handleDirect(
+    _ request: SyncDirectRequest, library: Library
+  ) async throws -> SyncDirectResponse {
+    switch request {
+    case .readPlan(let taskID, let expectedRevision):
+      guard let item = library.tasks.first(where: { $0.id == taskID }),
+        item.revision == expectedRevision,
+        let project = library.projects.first(where: { $0.id == item.projectID }),
+        let path = item.planPath
+      else { return .rejected("The task changed or no saved plan is attached. Refresh and try again.") }
+      do {
+        let url = try PlanFileStore.resolve(projectDirectory: project.directory, relativePath: path)
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard !data.isEmpty, data.count <= 512_000,
+          let markdown = String(data: data, encoding: .utf8),
+          !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+          return .rejected("The saved plan is empty, too large, or is not UTF-8 Markdown.")
+        }
+        return .plan(markdown)
+      } catch {
+        return .rejected("Could not read the saved plan: \(error.localizedDescription)")
+      }
+    case .modelCatalog:
+      do {
+        guard let onPhoneModelCatalogRequest else {
+          return .rejected("Model discovery is unavailable on the Mac.")
+        }
+        let (configuration, options) = try await onPhoneModelCatalogRequest()
+        return .modelCatalog(globalConfiguration: configuration, options: options)
+      } catch {
+        return .rejected("Could not refresh the model list: \(error.localizedDescription)")
+      }
+    case .invokeCodex(_, let taskID, let expectedRevision, let action):
+      guard let item = library.tasks.first(where: { $0.id == taskID }),
+        item.revision == expectedRevision
+      else { return .rejected("The task changed on the Mac. Refresh and try again.") }
+      do {
+        guard let onPhoneCodexAction else {
+          return .rejected("The Mac Codex action handler is unavailable.")
+        }
+        return .accepted(try await onPhoneCodexAction(taskID, expectedRevision, action))
+      } catch {
+        return .rejected(error.localizedDescription)
+      }
     }
   }
 

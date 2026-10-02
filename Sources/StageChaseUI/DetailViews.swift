@@ -8,8 +8,7 @@ import SwiftUI
   import UIKit
 #endif
 
-#if os(macOS)
-  struct CodexModelFields: View {
+struct CodexModelFields: View {
     @Environment(AppModel.self) private var model
     @Binding var configuration: CodexModelConfiguration
     var catalog: [CodexModelOption]
@@ -46,7 +45,7 @@ import SwiftUI
     }
   }
 
-  struct CodexModelOverrideEditor: View {
+struct CodexModelOverrideEditor: View {
     @Binding var configuration: CodexModelConfiguration?
     var inherited: CodexModelConfiguration
     var inheritLabel: String
@@ -67,8 +66,7 @@ import SwiftUI
           catalog: catalog)
       }
     }
-  }
-#endif
+}
 
 struct ProjectEditor: View {
   @Environment(AppModel.self) private var model
@@ -80,7 +78,15 @@ struct ProjectEditor: View {
     NavigationStack {
       Form {
         Section("Project") {
-          TextField("Name", text: $project.name)
+          #if os(iOS)
+            if model.isConnectedPhone && !isNew {
+              LabeledContent("Name", value: project.name)
+            } else {
+              TextField("Name", text: $project.name)
+            }
+          #else
+            TextField("Name", text: $project.name)
+          #endif
           #if os(macOS)
             HStack {
               TextField("Repository folder", text: $project.directory)
@@ -105,9 +111,11 @@ struct ProjectEditor: View {
             )
             .stageFont(.caption).foregroundStyle(.secondary)
           #else
-            Label("Codex runs on the Mac", systemImage: "desktopcomputer")
+            Label("Codex runs on the paired Mac", systemImage: "desktopcomputer")
             Text(
-              "These projects are saved on this iPhone. Mac pairing and synchronization are not connected in this version. You can create projects and organize tasks here; moves do not start Codex on another device."
+              model.isConnectedPhone
+                ? "Project profile and model changes apply to newly confirmed runs."
+                : "Pair this phone with StageChase on your Mac to manage its Codex settings."
             )
             .stageFont(.callout).foregroundStyle(.secondary)
           #endif
@@ -153,6 +161,34 @@ struct ProjectEditor: View {
             )
             .stageFont(.caption).foregroundStyle(.secondary)
           }
+        #else
+          if model.isConnectedPhone && !isNew {
+            Section("Codex execution profile") {
+              Picker("Permission profile", selection: $project.executionProfile) {
+                ForEach(CodexExecutionProfile.allCases) { profile in
+                  Text(profile.title).tag(profile)
+                }
+              }
+              Text(
+                project.executionProfile == .workspaceAccessNoPrompts
+                  ? "Runs stay within the project working folder and have no network access. Approval prompts are disabled."
+                  : "Full access removes filesystem and network isolation. Runs can change files outside this project. Choose this only when you trust the task and project. Approval prompts are disabled."
+              )
+              .stageFont(.caption).foregroundStyle(.secondary)
+            }
+            Section("Codex model") {
+              CodexModelOverrideEditor(
+                configuration: $project.modelOverride,
+                inherited: model.globalModelConfiguration,
+                inheritLabel: "Use global model settings",
+                catalog: model.modelCatalog)
+              if let error = model.modelCatalogError {
+                Text(error).stageFont(.caption).foregroundStyle(.orange)
+              }
+              Text("Changes apply to newly confirmed runs. Existing runs keep their saved model.")
+                .stageFont(.caption).foregroundStyle(.secondary)
+            }
+          }
         #endif
       }.formStyle(.grouped)
         .navigationTitle(isNew ? "New project" : "Project settings")
@@ -167,13 +203,23 @@ struct ProjectEditor: View {
               }
             }.disabled(
               project.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving
-                || (project.automationEnabled && project.directory.isEmpty))
+                || (!model.isConnectedPhone && project.automationEnabled && project.directory.isEmpty)
+                || (model.isConnectedPhone && !isNew
+                  && model.library.projects.first(where: { $0.id == project.id }).map {
+                    $0.executionProfile == project.executionProfile
+                      && $0.modelOverride == project.modelOverride
+                  } == true))
           }
         }
     }
     #if os(macOS)
       .frame(width: 560, height: 700)
     #endif
+      .task {
+        #if os(iOS)
+          if model.isConnectedPhone && !isNew { try? await model.refreshModelCatalog() }
+        #endif
+      }
   }
 }
 
@@ -489,6 +535,12 @@ struct TaskDetail: View {
   @State private var deleting = false
   @State private var promptCopied = false
   @State private var planPromptCopied = false
+  #if os(iOS)
+    @State private var planMarkdown: String?
+    @State private var planLoadError: String?
+    @State private var planLoading = false
+    @State private var codexActionLoading = false
+  #endif
   #if os(macOS)
     @FocusState private var focusedEditor: TaskEditorField?
     private enum TaskEditorField: Hashable {
@@ -546,51 +598,122 @@ struct TaskDetail: View {
           #if os(macOS)
             if !model.isConnectedPhone {
               VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                  Button("Launch Codex (⌘R)", systemImage: "arrow.up.right.square") {
-                    launchCodex()
-                  }
-                  .keyboardShortcut("r", modifiers: [.command])
-                  .disabled(
-                    handoffActionsDisabled || codexHandoffPrompt == nil
-                      || handoffProject?.directory.isEmpty != false
-                  )
-                  .help(
-                    handoffProject?.directory.isEmpty == false
-                      ? "Open this project in Codex Desktop with the task prompt."
-                      : "Choose a repository folder in Project settings before launching Codex.")
-                  Button(
-                    model.taskRefreshInFlight.contains(taskID) ? "Refreshing…" : "Refresh",
-                    systemImage: "arrow.clockwise"
-                  ) {
-                    Task { await model.refreshTask(taskID, preservingEdits: edited) }
-                  }
-                  .disabled(model.taskRefreshInFlight.contains(taskID))
-                  .help("Refresh the saved task, plan, and linked Codex activity.")
+                Text("You run in Codex").stageFont(.headline)
+                Button("Launch Codex (⌘R)", systemImage: "arrow.up.right.square") {
+                  launchCodex()
                 }
+                .keyboardShortcut("r", modifiers: [.command])
+                .disabled(
+                  handoffActionsDisabled || codexHandoffPrompt == nil
+                    || handoffProject?.directory.isEmpty != false
+                )
+                .help(
+                  handoffProject?.directory.isEmpty == false
+                    ? "Open this project in Codex Desktop with the task prompt."
+                    : "Choose a repository folder in Project settings before launching Codex."
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button(
+                  hasReadableAttachedPlan ? "Revise plan in Codex" : "Plan in Codex",
+                  systemImage: "arrow.up.right.square"
+                ) {
+                  launchPlanCodex()
+                }
+                .disabled(
+                  handoffActionsDisabled || planCodexHandoffPrompt == nil
+                    || handoffProject?.directory.isEmpty != false
+                )
+                .help(
+                  handoffProject?.directory.isEmpty == false
+                    ? "Open a new Codex Desktop thread with plan-only instructions."
+                    : "Choose a repository folder in Project settings before planning in Codex."
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("StageChase runs").stageFont(.headline).padding(.top, 6)
+                Button("Run with StageChase", systemImage: "play.fill") {
+                  model.requestRunnerRun(
+                    item, kind: item.section == .planning ? .planning : .implementation)
+                }
+                .disabled(
+                  handoffActionsDisabled || item.completed
+                    || ![.planning, .implementing].contains(item.section)
+                    || handoffProject?.directory.isEmpty != false
+                )
+                .help(
+                  ![.planning, .implementing].contains(item.section)
+                    ? "Move the task to Planning or Implementing first."
+                    : handoffProject?.directory.isEmpty == false
+                      ? "Start this task in StageChase. You will review the model and confirm first."
+                      : "Choose a repository folder in Project settings before running this task."
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button(
+                  hasReadableAttachedPlan ? "Revise plan with StageChase" : "Plan with StageChase",
+                  systemImage: "sparkles"
+                ) {
+                  model.requestRunnerRun(item, kind: .planning)
+                }
+                .disabled(
+                  handoffActionsDisabled || item.completed
+                    || handoffProject?.directory.isEmpty != false
+                )
+                .help(
+                  handoffProject?.directory.isEmpty == false
+                    ? "Have StageChase run a planning session for this task. You will review the model and confirm first."
+                    : "Choose a repository folder in Project settings before planning with StageChase."
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider().padding(.vertical, 3)
+                Button(
+                  model.taskRefreshInFlight.contains(taskID) ? "Refreshing…" : "Refresh",
+                  systemImage: "arrow.clockwise"
+                ) {
+                  Task { await model.refreshTask(taskID, preservingEdits: edited) }
+                }
+                .disabled(model.taskRefreshInFlight.contains(taskID))
+                .help("Refresh the saved task, plan, and linked Codex activity.")
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if let refreshMessage = model.taskRefreshMessages[taskID] {
                   Text(refreshMessage)
                     .stageFont(.caption)
                     .foregroundStyle(refreshMessage.contains("failed") ? .orange : .secondary)
                     .textSelection(.enabled)
                 }
+              }
+            }
+          #endif
+          #if os(iOS)
+            if model.isConnectedPhone {
+              VStack(alignment: .leading, spacing: 10) {
+                Label("Codex on Mac", systemImage: "desktopcomputer").stageFont(.headline)
                 HStack {
-                  Button(
-                    hasReadableAttachedPlan ? "Revise plan in Codex" : "Plan in Codex",
-                    systemImage: "arrow.up.right.square"
-                  ) {
-                    launchPlanCodex()
+                  Button("Plan in Codex", systemImage: "sparkles") {
+                    requestCodexAction(.plan, item: item)
+                  }
+                  .disabled(codexActionLoading || item.completed)
+                  Button("Run with StageChase", systemImage: "play.fill") {
+                    requestCodexAction(.run, item: item)
                   }
                   .disabled(
-                    handoffActionsDisabled || planCodexHandoffPrompt == nil
-                      || handoffProject?.directory.isEmpty != false
-                  )
-                  .help(
-                    handoffProject?.directory.isEmpty == false
-                      ? "Open a new Codex Desktop thread with plan-only instructions."
-                      : "Choose a repository folder in Project settings before planning in Codex.")
+                    codexActionLoading || item.completed
+                      || ![.planning, .implementing].contains(item.section)
+                      || model.library.latestRun(for: item.id)?.status.isActive == true)
+                }
+                Text(
+                  "Planning opens Codex Desktop on the Mac. Running opens the Mac confirmation first."
+                )
+                .stageFont(.caption).foregroundStyle(.secondary)
+                if let message = model.phoneCodexActionMessage {
+                  Text(message).stageFont(.callout)
+                    .foregroundStyle(message.localizedCaseInsensitiveContains("could not") ? .orange : .secondary)
+                    .textSelection(.enabled)
                 }
               }
+              .padding(12)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
             }
           #endif
           #if os(macOS)
@@ -685,11 +808,28 @@ struct TaskDetail: View {
               }
             }
             #if os(iOS)
-              if item.planPath != nil {
-                Text(
-                  "Append feedback to the saved plan on the Mac where its project file is stored."
-                )
-                .stageFont(.callout).foregroundStyle(.secondary)
+              if model.isConnectedPhone {
+                VStack(alignment: .leading, spacing: 10) {
+                  HStack {
+                    Text("SAVED PLAN").stageFont(.caption, weight: .semibold)
+                      .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(planMarkdown == nil ? "Open plan" : "Reload", systemImage: "doc.text") {
+                      loadPlanFromMac(item)
+                    }
+                    .disabled(planLoading)
+                  }
+                  if planLoading { ProgressView("Loading plan from Mac…") }
+                  if let planLoadError {
+                    Text(planLoadError).stageFont(.callout).foregroundStyle(.orange)
+                  }
+                  if let planMarkdown {
+                    PlanMarkdownView(markdown: planMarkdown)
+                  }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
               }
             #endif
             if edited {
@@ -739,7 +879,7 @@ struct TaskDetail: View {
               #if os(iOS)
                 Text(
                   model.isConnectedPhone
-                    ? "Codex runs on Mac. Stage changes do not start or manage Codex work."
+                    ? "Use the Codex on Mac buttons above to request a plan or run. The Mac confirms each StageChase run before Codex starts."
                     : model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
                       ? "Confirmed moves can start Codex. Task placement stays under your control."
                       : "Launch the task in Codex Desktop. Task placement stays under your control."
@@ -776,6 +916,11 @@ struct TaskDetail: View {
         edited = false
         promptCopied = false
         planPromptCopied = false
+        #if os(iOS)
+          planMarkdown = nil
+          planLoadError = nil
+          model.phoneCodexActionMessage = nil
+        #endif
         #if os(macOS)
           await Task.yield()
           focusedEditor = nil
@@ -855,6 +1000,28 @@ struct TaskDetail: View {
           saved
           ? "Feedback saved to plan."
           : "Could not append feedback. Your draft is still here."
+      }
+    }
+  #endif
+
+  #if os(iOS)
+    private func requestCodexAction(_ action: SyncPhoneCodexAction, item: WorkItem) {
+      guard !codexActionLoading else { return }
+      codexActionLoading = true
+      Task {
+        await model.requestCodexFromMac(item, action: action)
+        codexActionLoading = false
+      }
+    }
+
+    private func loadPlanFromMac(_ item: WorkItem) {
+      guard !planLoading else { return }
+      planLoading = true
+      planLoadError = nil
+      Task {
+        do { planMarkdown = try await model.readPlanFromMac(item) }
+        catch { planLoadError = error.localizedDescription }
+        planLoading = false
       }
     }
   #endif
@@ -979,6 +1146,22 @@ struct TaskDetail: View {
     return !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 }
+
+#if os(iOS)
+  private struct PlanMarkdownView: View {
+    let markdown: String
+    private var rendered: AttributedString {
+      (try? AttributedString(markdown: markdown)) ?? AttributedString(markdown)
+    }
+    var body: some View {
+      Text(rendered)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Palette.card, in: RoundedRectangle(cornerRadius: 8))
+    }
+  }
+#endif
 
 struct RunDetail: View {
   @Environment(AppModel.self) private var model

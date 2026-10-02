@@ -4,7 +4,7 @@ struct RootView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.undoManager) private var undoManager
   @Environment(\.scenePhase) private var scenePhase
-  @State private var phoneBoard = false
+  @State private var phonePath: [PhoneDestination] = []
   var body: some View {
     @Bindable var model = model
     Group {
@@ -65,26 +65,43 @@ struct RootView: View {
             }.searchable(text: $model.search, prompt: "Find tasks")
           }
         #else
-          TabView {
-            NavigationStack {
-              ProjectSidebar(onOpen: { phoneBoard = true })
-                .navigationTitle("Projects")
-                .toolbar {
-                  ToolbarItem(placement: .primaryAction) {
-                    if !model.isConnectedPhone {
-                      Button("New project", systemImage: "plus") { model.sheet = .newProject }
-                    }
+          NavigationStack(path: $phonePath) {
+            ProjectSidebar(onOpen: { phonePath.append(.board) })
+              .navigationTitle("Projects")
+              .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                  if !model.isConnectedPhone {
+                    Button("New project", systemImage: "plus") { model.sheet = .newProject }
                   }
                 }
-                .navigationDestination(isPresented: $phoneBoard) {
-                  BoardView().navigationTitle(model.selectedProject?.name ?? "Board")
+              }
+              .navigationDestination(for: PhoneDestination.self) { destination in
+                switch destination {
+                case .board:
+                  BoardView()
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                      ToolbarItem(placement: .primaryAction) {
+                      ToolbarItem(placement: .principal) {
+                        phoneProjectPicker
+                      }
+                      ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                          phonePath.append(.connection)
+                        } label: {
+                          Image(systemName: "network")
+                        }
+                        .accessibilityLabel("Connection")
+
                         Menu {
-                          Button("Add task", systemImage: "plus") { model.sheet = .newTask(.inbox) }
                           Toggle("Show completed", isOn: $model.showCompleted)
-                          if let project = model.selectedProject, !model.isConnectedPhone {
+                          Button("Activity", systemImage: "waveform.path.ecg") {
+                            phonePath.append(.activity)
+                          }
+                          Button("Settings", systemImage: "gearshape") {
+                            phonePath.append(.settings)
+                          }
+                          if model.isConnectedPhone, let project = model.selectedProject {
+                            Divider()
                             Button("Project settings", systemImage: "slider.horizontal.3") {
                               model.sheet = .editProject(project)
                             }
@@ -92,19 +109,17 @@ struct RootView: View {
                         } label: {
                           Image(systemName: "ellipsis.circle")
                         }
+                        .accessibilityLabel("More project actions")
                       }
                     }
+                case .activity:
+                  ActivityPanel().navigationTitle("Activity")
+                case .connection:
+                  SyncConnectionView().navigationTitle("Connection")
+                case .settings:
+                  AppSettings().navigationTitle("Settings")
                 }
-            }.tabItem { Label("Projects", systemImage: "square.grid.2x2") }
-            NavigationStack { ActivityPanel().navigationTitle("Activity") }.tabItem {
-              Label("Activity", systemImage: "waveform.path.ecg")
-            }
-            NavigationStack { SyncConnectionView().navigationTitle("Connection") }.tabItem {
-              Label("Connection", systemImage: "network")
-            }
-            NavigationStack { AppSettings().navigationTitle("Settings") }.tabItem {
-              Label("Settings", systemImage: "gearshape")
-            }
+              }
           }
         #endif
       }
@@ -144,14 +159,22 @@ struct RootView: View {
       Text(model.error ?? "")
     }
     .confirmationDialog(
-      "Start Codex \(model.pendingMove?.stage == .next ? "planning" : "implementation")?",
+      model.pendingMove?.runOnly == true
+        ? model.pendingMove?.runKind == .planning
+          ? "Plan this task with StageChase?"
+          : "Run this task with StageChase?"
+        : "Start Codex \(model.pendingMove?.stage == .next ? "planning" : "implementation")?",
       isPresented: Binding(
         get: { model.pendingMove != nil }, set: { if !$0 { model.pendingMove = nil } }),
       titleVisibility: .visible
     ) {
       if let move = model.pendingMove {
         Button(
-          move.retryRunID == nil ? "Start Codex" : "Confirm model and retry"
+          move.retryRunID != nil
+            ? "Confirm model and retry"
+            : move.runKind == .planning
+              ? "Plan with StageChase"
+              : move.runOnly ? "Run with StageChase" : "Start Codex"
         ) {
           Task {
             if move.retryRunID == nil {
@@ -163,7 +186,8 @@ struct RootView: View {
         }.disabled(move.loading || move.configuration == nil)
       }
       Button(
-        model.pendingMove?.retryRunID == nil ? "Keep moved task" : "Cancel", role: .cancel
+        model.pendingMove?.runOnly == true || model.pendingMove?.retryRunID != nil
+          ? "Cancel" : "Keep moved task", role: .cancel
       ) {
         model.pendingMove = nil
       }
@@ -173,14 +197,23 @@ struct RootView: View {
           [
             move.loading ? "Loading model settings…" : nil,
             move.configuration?.summary,
-            move.retryRunID == nil
-              ? "The task is already in \(move.stage.title). Cancel to leave it there without starting Codex."
+            move.runOnly
+              ? model.library.projects.first(where: { $0.id == move.item.projectID })?
+                .executionProfile.title
               : nil,
+            move.runOnly
+              ? "StageChase will run a \(move.runKind == .planning ? "planning" : "implementation") session here. Codex Desktop will not open, and the task will stay in \(move.item.section.title)."
+              : move.retryRunID == nil
+                ? "The task is already in \(move.stage.title). Cancel to leave it there without starting Codex."
+                : nil,
             move.error == nil || move.retryRunID != nil
-              ? nil : "The move is saved; Codex did not start.",
+              ? nil
+              : move.runOnly
+                ? "The task remains in its current section; Codex did not start."
+                : "The move is saved; Codex did not start.",
             move.error,
           ].compactMap { $0 }.joined(separator: "\n")
-            + "\nUsage may be billed. You can watch progress, approve commands, or stop the run in Activity."
+            + "\nUsage may be billed. Quota, sign-in or device unlock, service errors, and genuine requests for input may still need your attention. Watch progress or stop the run in Activity."
         )
       } else {
         Text("Codex starts only after confirmation.")
@@ -190,7 +223,7 @@ struct RootView: View {
       model.undoManager = undoManager
       await model.load()
       if model.isPreview && ProcessInfo.processInfo.arguments.contains("--preview-board") {
-        phoneBoard = true
+        phonePath = [.board]
       }
       #if os(iOS)
         guard scenePhase == .active else { return }
@@ -201,6 +234,46 @@ struct RootView: View {
       #endif
     }
   }
+
+  private var phoneProjectPicker: some View {
+    Menu {
+      if model.library.projects.isEmpty {
+        Button("No projects available") {}.disabled(true)
+      } else {
+        ForEach(model.library.projects) { project in
+          Button {
+            model.select(project.id)
+          } label: {
+            if project.id == model.selectedProjectID {
+              Label(project.name, systemImage: "checkmark")
+            } else {
+              Text(project.name)
+            }
+          }
+        }
+      }
+    } label: {
+      HStack(spacing: 6) {
+        Text(phoneProjectTitle).lineLimit(1)
+        Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+      }
+      .foregroundStyle(.primary)
+      .frame(maxWidth: 220)
+      .contentShape(Rectangle())
+    }
+    .accessibilityLabel("Choose project, current project \(phoneProjectTitle)")
+  }
+
+  private var phoneProjectTitle: String {
+    model.selectedProject?.name ?? "Choose project"
+  }
+}
+
+private enum PhoneDestination: Hashable {
+  case board
+  case activity
+  case connection
+  case settings
 }
 
 struct ProjectSidebar: View {
@@ -263,9 +336,13 @@ struct ProjectSidebar: View {
             project.id == model.selectedProjectID ? Color.accentColor.opacity(0.1) : .clear
           )
           .contextMenu {
-            if !model.isConnectedPhone {
+            #if os(macOS)
               Button("Project settings…") { model.sheet = .editProject(project) }
-            }
+            #else
+              if model.isConnectedPhone {
+                Button("Project settings…") { model.sheet = .editProject(project) }
+              }
+            #endif
           }
         }
         if !model.isConnectedPhone {

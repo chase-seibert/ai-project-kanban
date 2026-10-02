@@ -43,10 +43,17 @@ task/run state, then starts a serial Codex turn. Public events and approvals
 produce a verified run outcome; the task section never changes automatically.
 Planning completion sets Ready, implementation completion sets Review, and only
 the user's explicit sign-off sets Done and the existing completion flag. With
-automatic invocation off,
-task detail offers a Launch Codex action using the generated prompt with
-stable project/task IDs and a readable project-relative plan path when
-available. Prompts start with the exact task title. Runner-created planning
+automatic invocation off, task detail separates actions the user runs in Codex
+from actions StageChase runs. **Run with StageChase** confirms the resolved
+model and queues only that task for the Mac runner, without changing its section
+or requiring either automation setting. **Plan with StageChase** queues a
+planning run from any task section, reserves the plan path, and leaves placement
+unchanged. Both use the project's saved execution profile. The user-run actions
+**Launch Codex** and **Plan in Codex** open Codex Desktop with generated prompts
+without submitting turns.
+Prompts for Desktop handoff use stable project/task IDs and a readable
+project-relative plan path when available, and start with the exact task title.
+Runner-created planning
 sessions use `Plan: <task title>`; implementation and generic task handoff
 sessions use `Code: <task title>`. Launch opens `codex://threads/new` with the project folder and
 prompt without submitting a turn. That prompt directs Codex to move successful

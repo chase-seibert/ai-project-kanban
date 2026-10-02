@@ -306,6 +306,41 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         print("PASS: successful close preserves outcome, stage, summary, and plan")
       }
     }
+    project.automationEnabled = false
+    guard await model.saveProject(project, isNew: false) else {
+      throw BoardError.invalid(model.error ?? "Could not disable fixture automation")
+    }
+    model.setAutoInvokeCodex(false)
+    let explicitlyStarted = WorkItem(
+      projectID: project.id, title: "EXPLICIT_RUN_WITH_AUTOMATION_OFF", stage: .next)
+    guard await model.perform(.createTask(explicitlyStarted)),
+      await model.perform(
+        .runTaskNow(
+          explicitlyStarted.id, expectedRevision: explicitlyStarted.revision,
+          kind: .planning,
+          configuration: fixtureModelConfiguration)),
+      let explicitRun = model.library.latestRun(for: explicitlyStarted.id),
+      explicitRun.status == .queued
+    else { throw BoardError.invalid("Could not queue an explicit task run") }
+    model.kickRunner(runID: explicitRun.id)
+    try await wait { model.library.latestRun(for: explicitlyStarted.id)?.status.isActive == false }
+    guard model.library.latestRun(for: explicitlyStarted.id)?.status == .succeeded,
+      let explicitlySaved = model.library.tasks.first(where: { $0.id == explicitlyStarted.id }),
+      explicitlySaved.section == .planning,
+      explicitlySaved.planPath
+        == WorkItem.canonicalPlanPath(for: explicitlyStarted.id, title: explicitlyStarted.title)
+    else {
+      let failedRun = model.library.latestRun(for: explicitlyStarted.id)
+      throw BoardError.invalid(
+        "An explicit task run did not bypass only automation gates: \(failedRun?.status.rawValue ?? "missing") / \(failedRun?.error ?? "no error") / \(model.runnerMessage)"
+      )
+    }
+    print("PASS: explicit task run works while global and project automation are off")
+    project.automationEnabled = true
+    guard await model.saveProject(project, isNew: false) else {
+      throw BoardError.invalid(model.error ?? "Could not restore fixture automation")
+    }
+    model.setAutoInvokeCodex(true)
     let arrivingPlanTask = WorkItem(projectID: project.id, title: "Arriving plan fixture")
     _ = await model.perform(.createTask(arrivingPlanTask))
     var attachedTask = model.library.tasks.first(where: { $0.id == arrivingPlanTask.id })!

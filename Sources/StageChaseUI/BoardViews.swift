@@ -33,26 +33,8 @@ struct BoardView: View {
   @State private var editingTaskID: UUID?
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      BoardHeader()
-      #if os(iOS)
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 8) {
-            ForEach(WorkflowSection.allCases) { stage in
-              Button {
-                withAnimation { focusedStage = stage }
-                model.boardFocusedStage = stage
-              } label: {
-                Label(stage.title, systemImage: stage.symbol).stageFont(
-                  .subheadline, weight: .semibold
-                )
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(
-                  focusedStage == stage ? stage.color.opacity(0.14) : .clear, in: Capsule())
-              }.buttonStyle(.plain).foregroundStyle(
-                focusedStage == stage ? stage.color : .secondary)
-            }
-          }.padding(.horizontal, 16)
-        }.padding(.bottom, 12)
+      #if os(macOS)
+        BoardHeader()
       #endif
       #if os(macOS)
         GeometryReader { geometry in
@@ -85,6 +67,9 @@ struct BoardView: View {
           }
           .scrollPosition(id: $focusedStage, anchor: .leading)
           .onChange(of: model.boardFocusedStage) { _, value in focusedStage = value }
+          .onChange(of: focusedStage) { _, value in
+            if let value { model.boardFocusedStage = value }
+          }
           #if os(iOS)
             .scrollTargetBehavior(.viewAligned)
           #endif
@@ -93,6 +78,42 @@ struct BoardView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Palette.canvas)
+    #if os(iOS)
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        HStack(spacing: 6) {
+          ForEach(WorkflowSection.allCases) { section in
+            Button {
+              withAnimation(.snappy) {
+                focusedStage = section
+                model.boardFocusedStage = section
+              }
+            } label: {
+              VStack(spacing: 4) {
+                Image(systemName: section.symbol).font(.system(size: 19, weight: .semibold))
+                Text(section.title).font(.caption.weight(.semibold)).lineLimit(1)
+                .minimumScaleFactor(0.8)
+              }
+              .foregroundStyle(focusedStage == section ? section.color : .secondary)
+              .frame(maxWidth: .infinity, minHeight: 50)
+              .background(
+                focusedStage == section ? section.color.opacity(0.14) : .clear,
+                in: RoundedRectangle(cornerRadius: 12)
+              )
+              .contentShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(section.title)
+            .accessibilityAddTraits(focusedStage == section ? .isSelected : [])
+            .accessibilityIdentifier("board-section-\(section.rawValue)")
+          }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+      }
+    #endif
+    .onAppear { focusedStage = model.boardFocusedStage }
     #if os(macOS)
       .background(BoardKeyboardMonitor(model: model))
       .confirmationDialog(
@@ -221,8 +242,12 @@ struct BoardLane: View {
         .padding(.horizontal, 7).padding(.vertical, 3).background(.quaternary, in: Capsule())
         Spacer(minLength: 0)
         Button {
-          adding = true
-          captureFocused = true
+          #if os(iOS)
+            model.sheet = .newTask(section)
+          #else
+            adding = true
+            captureFocused = true
+          #endif
         } label: {
           Image(systemName: "plus")
         }
@@ -243,10 +268,12 @@ struct BoardLane: View {
               Text(model.search.isEmpty ? "Room for what’s next" : "No matching tasks").stageFont(
                 .subheadline)
               Text(
-                model.search.isEmpty ? "Drop a task here or add one below." : "Try another search."
+                model.search.isEmpty
+                  ? "Use + to add a task to this section." : "Try another search."
               ).stageFont(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity).padding(.vertical, 30)
           }
+          #if os(macOS)
           if adding {
             VStack(alignment: .leading, spacing: 10) {
               TextField("What needs doing?", text: $draft, axis: .vertical)
@@ -280,6 +307,7 @@ struct BoardLane: View {
             }.buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(
               "Quick add to \(section.title)")
           }
+          #endif
         }.padding(.bottom, 12)
       }
       #if os(iOS)
@@ -525,18 +553,33 @@ struct TaskCard: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Open task details for \(item.title)")
 
-        Button {
-          beginTitleEditing()
-        } label: {
+        #if os(iOS)
           Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
             .strikethrough(item.completed)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Click to edit title")
-        .accessibilityLabel("Edit title: \(item.title)")
-        .accessibilityHint("Press Return to save the title.")
+            .gesture(
+              TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
+                switch result {
+                case .first: beginTitleEditing()
+                case .second: openDetails()
+                }
+              })
+            .accessibilityLabel("Open task details for \(item.title); double tap to edit title")
+        #else
+          Button {
+            beginTitleEditing()
+          } label: {
+            Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
+              .strikethrough(item.completed)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .help("Click to edit title")
+          .accessibilityLabel("Edit title: \(item.title)")
+          .accessibilityHint("Press Return to save the title.")
+        #endif
 
         Button {
           openDetails()

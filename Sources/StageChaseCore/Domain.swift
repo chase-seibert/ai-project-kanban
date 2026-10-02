@@ -673,6 +673,8 @@ public enum Mutation: Sendable {
   case createProject(Project)
   case editProject(Project)
   case createTask(WorkItem, configuration: ResolvedCodexConfiguration? = nil)
+  case runTaskNow(
+    UUID, expectedRevision: Int, kind: RunKind, configuration: ResolvedCodexConfiguration)
   case createManualRun(AgentRun)
   case beginExternalRun(AgentRun)
   case editTask(WorkItem, expectedRevision: Int)
@@ -774,6 +776,39 @@ public enum BoardReducer {
         Activity(
           "Added “\(item.title)” to \(item.stage.title).", projectID: item.projectID,
           taskID: item.id))
+    case .runTaskNow(let id, let revision, let kind, let configuration):
+      let index = try taskIndex(id, revision)
+      try ensureIdle(id)
+      var item = state.tasks[index]
+      guard !item.completed else {
+        throw BoardError.invalid("Reopen this task before starting a Codex run.")
+      }
+      guard let project = state.projects.first(where: { $0.id == item.projectID }) else {
+        throw BoardError.missing
+      }
+      guard
+        kind == .planning || (kind == .implementation && item.section == .implementing)
+      else {
+        throw BoardError.invalid("Implementation runs require the task to be in Implementing.")
+      }
+      guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        throw BoardError.invalid("Choose a project folder before starting a Codex run.")
+      }
+      if kind == .planning, item.planPath == nil {
+        item.planPath = WorkItem.canonicalPlanPath(for: item.id, title: item.title)
+        item.revision += 1
+        item.updatedAt = .now
+      }
+      let run = AgentRun(
+        task: item, kind: kind,
+        modelConfiguration: configuration, usesWorktrees: project.usesWorktrees,
+        executionProfile: project.executionProfile)
+      state.tasks[index] = item
+      state.runs.append(run)
+      state.activity.append(
+        Activity(
+          "Codex run queued from task details · \(configuration.summary)",
+          projectID: item.projectID, taskID: item.id, runID: run.id))
     case .createManualRun(let run):
       guard run.kind == .task, run.status == .readyForHandoff,
         state.tasks.contains(where: { $0.id == run.taskID && $0.projectID == run.projectID }),
@@ -1148,33 +1183,48 @@ extension Library {
   public static var preview: Library {
     var library = Library()
     let projects = [
-      Project(name: "StageChase"), Project(name: "Sideline Save"), Project(name: "Weekend ideas"),
+      Project(name: "Project Chase"), Project(name: "StageChase"), Project(name: "Weekend ideas"),
     ]
     library.projects = projects
-    for (title, notes, stage) in [
+    for (title, notes) in [
       (
-        "An inbox for the next good idea", "Capture it now. Figure out the details later.",
-        WorkflowStage.inbox
-      ),
-      ("Keyboard-first navigation", "A few thoughtful shortcuts go a long way.", .inbox),
-      ("Make progress visible", "Show the plan, the work, and the moments that need you.", .next),
-      (
-        "A home for every project", "Keep the context. Switch projects without losing your place.",
-        .planned
+        "Add a voice record dictation button when I'm adding a task",
+        "Capture a task by voice while adding it to the board."
       ),
       (
-        "A board that breathes", "Top-aligned lanes, quick capture, and natural drag and drop.",
-        .implementation
+        "Delete tasks using the delete key",
+        "Make keyboard deletion available for selected tasks."
       ),
-      ("Give the details a final look", "Nothing is complete until you say so.", .review),
+      (
+        "Move a task with no plan right to implementation to one shot it",
+        "Allow a task without a saved plan to move directly into implementation."
+      ),
+      (
+        "Edit a task text inline in the column view itself",
+        "Edit task text without leaving the board column."
+      ),
+      (
+        "Need an app icon, same for desktop and mobile",
+        "Use one recognizable app icon across Apple platforms."
+      ),
     ] {
-      var item = WorkItem(projectID: projects[0].id, title: title, stage: stage)
+      var item = WorkItem(projectID: projects[0].id, title: title)
       item.notes = notes
       library.tasks.append(item)
     }
+    var currentTask = WorkItem(
+      projectID: projects[0].id,
+      title: "Improve phone board navigation and task space",
+      stage: .implementation
+    )
+    currentTask.section = .implementing
+    currentTask.status = .building
+    library.tasks.append(currentTask)
     library.tasks.append(
       WorkItem(projectID: projects[1].id, title: "Explore a better highlight workflow"))
-    library.activity = [Activity("Preview library — separate from your saved projects.")]
+    library.activity = [
+      Activity("Project Chase preview fixture — separate from your saved projects.")
+    ]
     return library
   }
 }

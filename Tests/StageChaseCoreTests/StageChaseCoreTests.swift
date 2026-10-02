@@ -6,6 +6,58 @@ import Testing
 private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   selection: .latestLuna, modelID: "gpt-6.10-luna", effort: "high", scope: .global)
 
+@Test func explicitTaskRunPreservesPlacementAndSnapshotsProjectSettings() throws {
+  var project = Project(name: "Manual runner", directory: "/tmp/manual-runner")
+  project.automationEnabled = false
+  project.usesWorktrees = true
+  project.executionProfile = .fullAccessNoPrompts
+  var task = WorkItem(projectID: project.id, title: "Run this now", stage: .next)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+
+  library = try BoardReducer.apply(
+    .runTaskNow(
+      task.id, expectedRevision: task.revision, kind: .planning,
+      configuration: fixtureModelConfiguration),
+    to: library)
+
+  task = library.tasks[0]
+  #expect(task.stage == .next)
+  #expect(task.section == .planning)
+  #expect(!task.completed)
+  #expect(task.planPath == WorkItem.canonicalPlanPath(for: task.id, title: task.title))
+  #expect(task.revision == 1)
+  #expect(library.runs.count == 1)
+  #expect(library.runs[0].kind == .planning)
+  #expect(library.runs[0].status == .queued)
+  #expect(library.runs[0].usesWorktrees == true)
+  #expect(library.runs[0].executionProfile == .fullAccessNoPrompts)
+  #expect(library.runs[0].modelConfiguration == fixtureModelConfiguration)
+
+  #expect(!library.projects[0].automationEnabled)
+  #expect(library.runs[0].status == .queued)
+}
+
+@Test func explicitStageChasePlanningCanStartFromInboxWithoutMovingTask() throws {
+  let project = Project(name: "Inbox planning", directory: "/tmp/inbox-planning")
+  let task = WorkItem(projectID: project.id, title: "Plan before implementation")
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+
+  library = try BoardReducer.apply(
+    .runTaskNow(
+      task.id, expectedRevision: task.revision, kind: .planning,
+      configuration: fixtureModelConfiguration),
+    to: library)
+
+  #expect(library.tasks[0].section == .inbox)
+  #expect(library.tasks[0].stage == .inbox)
+  #expect(library.tasks[0].planPath == WorkItem.canonicalPlanPath(for: task.id, title: task.title))
+  #expect(library.runs.first?.kind == .planning)
+}
+
 @Test func planHandoffPromptUsesCanonicalPathAndPlanOnlyMCPWorkflow() throws {
   let project = Project(name: "Prompt project", directory: "/tmp/missing-plan-project")
   let task = WorkItem(projectID: project.id, title: "Add a plan action")
