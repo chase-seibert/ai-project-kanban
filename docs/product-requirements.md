@@ -48,8 +48,9 @@
 - As a user, I want the iPhone to offer a truthful Codex handoff, so it opens a
   supported thread URL or explains that I need to continue on Mac and can copy
   the session ID.
-- As a user, I want edits to carry revisions, so that a stale iPhone write does
-  not silently overwrite a newer Mac transition.
+- As a user, I want stale phone task edits and moves to resolve by source edit
+  time, so the latest edit wins across Mac and iPhone while exact timestamp ties
+  favor the Mac and invalid or unsafe writes remain rejected.
 
 ## Experimental local Wi-Fi sync
 
@@ -67,6 +68,11 @@
 - As a user, I want to control automatic phone syncing and pull to refresh the
   board or tap Sync Now, so that I can choose between periodic updates and
   deliberate manual syncs without losing queued edits.
+- As a user, I want **Refresh everything from Mac** to send queued edits first
+  and then replace the phone replica with a complete Mac snapshot, even when
+  incremental sync reports no changes. The action reports progress, whether a
+  full snapshot arrived, and any changes still pending; a failed refresh keeps
+  the current replica and offline queue.
 - As a user, I want polling and replica updates never to start or manage Codex,
   so that automation remains a confirmed Mac action.
 

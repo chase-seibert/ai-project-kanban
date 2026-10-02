@@ -207,10 +207,11 @@ private struct PhoneOutbox: Codable {
     throw BoardError.invalid("The Mac did not finish pairing before the request expired.")
   }
 
-  func snapshot(cursor: UInt64) async throws -> SyncSnapshot? {
+  func snapshot(cursor: UInt64, force: Bool = false) async throws -> SyncSnapshot? {
     guard let credential else { throw BoardError.invalid("Pair this phone with the Mac first.") }
     let route = try Self.parseEndpoint(endpoint)
-    let body = try SyncCrypto.seal(SyncClientRequest.snapshot(cursor: cursor), key: credential.key)
+    let request: SyncClientRequest = force ? .fullSnapshot : .snapshot(cursor: cursor)
+    let body = try SyncCrypto.seal(request, key: credential.key)
     guard
       case .authenticated(let sealed) = try await exchange(
         .authenticated(deviceID: credential.deviceID, sealed: body), route: route,
@@ -263,6 +264,11 @@ private struct PhoneOutbox: Codable {
       try save(
         endpoint: endpoint, credential: credential, lastSequence: lastSequence,
         lastServerSequence: lastServerSequence)
+    } else if case .superseded(_, let snapshot) = result {
+      lastServerSequence = max(lastServerSequence, snapshot.sequence)
+      try save(
+        endpoint: endpoint, credential: credential, lastSequence: lastSequence,
+        lastServerSequence: lastServerSequence)
     }
     return result
   }
@@ -295,7 +301,9 @@ private struct PhoneOutbox: Codable {
     }
   }
 
-  func enqueue(_ command: SyncCommand, expectedRevision: Int? = nil) throws -> SyncEnvelope {
+  func enqueue(
+    _ command: SyncCommand, expectedRevision: Int? = nil, editedAt: Date = .now
+  ) throws -> SyncEnvelope {
     guard outboxLoaded else { throw BoardError.invalid("The offline queue is unavailable.") }
     guard let credential else { throw BoardError.invalid("Pair this phone with the Mac first.") }
     guard outbox.count < 500 else {
@@ -305,7 +313,8 @@ private struct PhoneOutbox: Codable {
     lastSequence &+= 1
     let envelope = SyncEnvelope(
       libraryID: credential.libraryID, deviceID: credential.deviceID,
-      clientSequence: lastSequence, expectedRevision: expectedRevision, command: command)
+      clientSequence: lastSequence, expectedRevision: expectedRevision, editedAt: editedAt,
+      command: command)
     try save(
       endpoint: endpoint, credential: credential, lastSequence: lastSequence,
       lastServerSequence: lastServerSequence)
@@ -318,10 +327,17 @@ private struct PhoneOutbox: Codable {
   }
 
   func acknowledge(_ operationID: UUID) throws {
+    try acknowledge([operationID])
+  }
+
+  func acknowledge(_ operationIDs: [UUID]) throws {
+    let acknowledged = Set(operationIDs)
     let previous = outbox
     let previousConflict = conflictedOperationID
-    outbox.removeAll { $0.operationID == operationID }
-    if conflictedOperationID == operationID { conflictedOperationID = nil }
+    outbox.removeAll { acknowledged.contains($0.operationID) }
+    if let conflictedOperationID, acknowledged.contains(conflictedOperationID) {
+      self.conflictedOperationID = nil
+    }
     do { try persistOutbox() } catch {
       outbox = previous
       conflictedOperationID = previousConflict

@@ -19,3 +19,10 @@
   controller worked. Improve the relaunch workflow so it reliably quits stale
   instances and opens the rebuilt bundle.
 - A nested `codex exec` could not reach StageChase's loopback MCP endpoint from its sandbox, even after allowing workspace writes. The StageChase settings UI showed the listener as stopped on a later check; restarting it and making a direct local MCP request worked. Avoid repeated nested CLI attempts: verify the listener is active and use the MCP connection in the current session, or report that the tools are unavailable.
+
+## 2026-10-02
+
+- `make lint` reports pre-existing `swift-format` indentation and line-break
+  findings in untouched `DetailViews.swift` and `BoardViews.swift`. The files
+  changed for sync pass targeted strict formatting; avoid broad unrelated
+  reformatting while working on sync.

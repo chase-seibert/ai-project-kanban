@@ -283,7 +283,8 @@ import UniformTypeIdentifiers
         guard pendingMove?.item.id == item.id, pendingMove?.runOnly == true else {
           throw BoardError.invalid(error ?? "The Mac could not prepare this planning run.")
         }
-        return "Planning confirmation is open in StageChase on the Mac. Confirm there to start Codex."
+        return
+          "Planning confirmation is open in StageChase on the Mac. Confirm there to start Codex."
       case .run:
         guard [.planning, .implementing].contains(item.section), !item.completed,
           !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
@@ -350,8 +351,9 @@ import UniformTypeIdentifiers
       guard syncClient.isPaired else {
         throw BoardError.invalid("Pair this phone with StageChase on the Mac to open saved plans.")
       }
-      guard case .plan(let markdown) = try await syncClient.requestDirect(
-        .readPlan(taskID: item.id, expectedRevision: item.revision))
+      guard
+        case .plan(let markdown) = try await syncClient.requestDirect(
+          .readPlan(taskID: item.id, expectedRevision: item.revision))
       else { throw BoardError.invalid("The Mac returned an invalid plan response.") }
       return markdown
     }
@@ -363,9 +365,10 @@ import UniformTypeIdentifiers
       }
       phoneCodexActionMessage = "Sending request to the Mac…"
       do {
-        guard case .accepted(let message) = try await syncClient.requestDirect(
-          .invokeCodex(
-            requestID: UUID(), taskID: item.id, expectedRevision: item.revision, action: action))
+        guard
+          case .accepted(let message) = try await syncClient.requestDirect(
+            .invokeCodex(
+              requestID: UUID(), taskID: item.id, expectedRevision: item.revision, action: action))
         else { throw BoardError.invalid("The Mac returned an invalid Codex response.") }
         phoneCodexActionMessage = message
       } catch {
@@ -373,7 +376,7 @@ import UniformTypeIdentifiers
       }
     }
 
-    func refreshFromMac(manual: Bool = false) async {
+    func refreshFromMac(manual: Bool = false, forceFullSnapshot: Bool = false) async {
       guard manual || syncClient.automaticSyncEnabled else { return }
       guard let credential = syncClient.credential else { return }
       guard let replicaRepository else {
@@ -397,10 +400,42 @@ import UniformTypeIdentifiers
       syncClient.recordDiagnostic("Sync started · \(pendingCount) pending change(s).")
       var acceptedCount = 0
       do {
+        if forceFullSnapshot {
+          let queued = syncClient.outbox
+          syncClient.status = "Sending queued changes before full refresh…"
+          for envelope in queued {
+            switch try await syncClient.send(envelope) {
+            case .applied, .superseded:
+              acceptedCount += 1
+            case .conflict:
+              throw BoardError.conflict
+            case .rejected(let message):
+              throw BoardError.invalid(message)
+            }
+          }
+          syncClient.status = "Receiving full snapshot from Mac…"
+          guard let snapshot = try await syncClient.snapshot(cursor: 0, force: true) else {
+            throw BoardError.invalid("The Mac did not return a full library snapshot.")
+          }
+          try await apply(snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+          try syncClient.acknowledge(queued.map(\.operationID))
+          syncClient.lastSuccessfulSync = .now
+          syncClient.status = "Full refresh complete · \(syncClient.outbox.count) pending"
+          syncClient.error = nil
+          syncClient.lastResultMessage =
+            "Full snapshot received from Mac. \(acceptedCount) queued edit(s) resolved; \(syncClient.outbox.count) change(s) remain pending."
+          syncClient.recordDiagnostic(syncClient.lastResultMessage)
+          return
+        }
         for envelope in syncClient.outbox where syncClient.conflictedOperationID == nil {
           syncClient.status = "Sending pending change…"
           switch try await syncClient.send(envelope) {
           case .applied(_, let snapshot):
+            try await apply(
+              snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+            try syncClient.acknowledge(envelope.operationID)
+            acceptedCount += 1
+          case .superseded(_, let snapshot):
             try await apply(
               snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
             try syncClient.acknowledge(envelope.operationID)
@@ -451,10 +486,15 @@ import UniformTypeIdentifiers
         syncClient.error = nil
         syncClient.recordDiagnostic(syncClient.lastResultMessage)
       } catch {
-        syncClient.status = "Unreachable · \(syncClient.outbox.count) pending"
+        syncClient.status =
+          forceFullSnapshot
+          ? "Full refresh failed · \(syncClient.outbox.count) pending"
+          : "Unreachable · \(syncClient.outbox.count) pending"
         syncClient.error = error.localizedDescription
         syncClient.lastResultMessage =
-          "No successful exchange. \(syncClient.outbox.count) pending change(s) remain saved on this phone."
+          forceFullSnapshot
+          ? "No full snapshot was received. The replica was kept; \(syncClient.outbox.count) pending change(s) remain saved on this phone."
+          : "No successful exchange. \(syncClient.outbox.count) pending change(s) remain saved on this phone."
         syncClient.recordDiagnostic("Sync failed · \(error.localizedDescription)")
       }
     }
@@ -543,7 +583,8 @@ import UniformTypeIdentifiers
             project.deployedCommitHash == existing.deployedCommitHash,
             project.deployedAt == existing.deployedAt
           else {
-            throw BoardError.invalid("On iPhone, only project Codex settings can be changed on the Mac.")
+            throw BoardError.invalid(
+              "On iPhone, only project Codex settings can be changed on the Mac.")
           }
           wireCommand = .updateProjectCodexSettings(
             id: project.id, expectedProfile: existing.executionProfile,

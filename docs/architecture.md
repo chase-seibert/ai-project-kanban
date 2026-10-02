@@ -259,7 +259,17 @@ generated JSON schema was checked for exact request spellings.
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
 sanitized snapshots. Queued phone edits remain a small allowlist (create/edit/
-move/reorder) with expected task revisions. A separate authenticated request
+move/reorder) with expected task revisions. Edit and move operations also carry
+the phone edit timestamp captured when queued and the device's monotonic client
+sequence. A stale edit or move is rebased only when its source timestamp is newer
+than the Mac task timestamp. Exact timestamp ties favor the Mac; ties between
+phone writes use device ID and then client sequence. Phone timestamps more than
+five minutes in the future are capped at that boundary. Accepted phone timestamps
+are retained with task sync metadata so a later queued edit can be ordered; a
+subsequent Mac task mutation clears that phone marker. Older writes receive a
+durable superseded receipt and the current snapshot, so the outbox advances.
+Invalid identity, active-run, unsupported-command, reorder digest, and project
+setting conflicts still fail closed. A separate authenticated request
 path is used only after a visible phone action: it updates a project's Codex
 profile/model with compare-before-write values, reads a bounded saved plan,
 refreshes the desktop model catalog, or requests a plan/run action. These
@@ -272,6 +282,10 @@ identity, monotonic sequence, device high-water marks, and operation receipts in
 the existing SwiftData metadata rows, committing accepted edits and receipts in
 one save. A changed snapshot is returned when the phone cursor is stale; an
 unchanged response avoids retransmitting the library every foreground poll.
+The explicit **Refresh everything from Mac** action first submits queued edits,
+then requests an unconditional full snapshot even when the cursor matches. It
+applies the snapshot only after the exchange succeeds, preserving the cached
+replica and queue if the Mac cannot complete the refresh.
 
 The Mac app starts `NWListener` on port 47928 only after the user enables local
 sync from Settings → Connection. That explicit choice is remembered, so the

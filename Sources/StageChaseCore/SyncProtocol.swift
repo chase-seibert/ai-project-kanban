@@ -15,11 +15,14 @@ public struct SyncEnvelope: Codable, Equatable, Sendable {
   public var operationID: UUID
   public var clientSequence: UInt64
   public var expectedRevision: Int?
+  /// Phone edit time captured when the operation is queued, never when it reaches the Mac.
+  public var editedAt: Date
   public var command: SyncCommand
 
   public init(
     libraryID: UUID, deviceID: UUID, clientSequence: UInt64 = 1,
-    operationID: UUID = UUID(), expectedRevision: Int? = nil, command: SyncCommand
+    operationID: UUID = UUID(), expectedRevision: Int? = nil, editedAt: Date = .now,
+    command: SyncCommand
   ) {
     version = SyncProtocol.version
     self.libraryID = libraryID
@@ -27,7 +30,25 @@ public struct SyncEnvelope: Codable, Equatable, Sendable {
     self.operationID = operationID
     self.clientSequence = clientSequence
     self.expectedRevision = expectedRevision
+    self.editedAt = editedAt
     self.command = command
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case version, libraryID, deviceID, operationID, clientSequence, expectedRevision, editedAt,
+      command
+  }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    version = try values.decode(Int.self, forKey: .version)
+    libraryID = try values.decode(UUID.self, forKey: .libraryID)
+    deviceID = try values.decode(UUID.self, forKey: .deviceID)
+    operationID = try values.decode(UUID.self, forKey: .operationID)
+    clientSequence = try values.decode(UInt64.self, forKey: .clientSequence)
+    expectedRevision = try values.decodeIfPresent(Int.self, forKey: .expectedRevision)
+    editedAt = try values.decodeIfPresent(Date.self, forKey: .editedAt) ?? .distantPast
+    command = try values.decode(SyncCommand.self, forKey: .command)
   }
 }
 
@@ -66,6 +87,7 @@ public enum SyncDirectResponse: Codable, Sendable {
 
 public enum SyncCommandResult: Codable, Equatable, Sendable {
   case applied(sequence: UInt64, snapshot: SyncSnapshot)
+  case superseded(sequence: UInt64, current: SyncSnapshot)
   case conflict(current: SyncSnapshot)
   case rejected(message: String)
 }
@@ -363,6 +385,7 @@ public enum SyncPairingStatus: Codable, Sendable {
 
 public enum SyncClientRequest: Codable, Sendable {
   case snapshot(cursor: UInt64)
+  case fullSnapshot
   case command(SyncEnvelope)
   case direct(SyncDirectRequest)
 }

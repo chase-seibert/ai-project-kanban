@@ -2,6 +2,9 @@
 
 ## 2026-10-02
 
+- Resolve stale phone task edits and moves by their queued edit time, acknowledge
+  superseded outbox operations, and add an unconditional **Refresh everything
+  from Mac** action that preserves local state if the full refresh fails.
 - Route each iPhone lane's + button to the shared Add Task sheet, remove the
   phone overflow Add Task command and bottom lane capture row, and make task
   title single taps open detail while double taps edit inline.

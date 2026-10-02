@@ -29,6 +29,37 @@ private struct StoredSyncReceipt: Codable, Sendable {
   var sequence: UInt64
   var deviceID: UUID
   var clientSequence: UInt64
+  var superseded: Bool = false
+
+  private enum CodingKeys: String, CodingKey {
+    case payloadDigest, sequence, deviceID, clientSequence, superseded
+  }
+
+  init(
+    payloadDigest: String, sequence: UInt64, deviceID: UUID, clientSequence: UInt64,
+    superseded: Bool = false
+  ) {
+    self.payloadDigest = payloadDigest
+    self.sequence = sequence
+    self.deviceID = deviceID
+    self.clientSequence = clientSequence
+    self.superseded = superseded
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    payloadDigest = try values.decode(String.self, forKey: .payloadDigest)
+    sequence = try values.decode(UInt64.self, forKey: .sequence)
+    deviceID = try values.decode(UUID.self, forKey: .deviceID)
+    clientSequence = try values.decode(UInt64.self, forKey: .clientSequence)
+    superseded = try values.decodeIfPresent(Bool.self, forKey: .superseded) ?? false
+  }
+}
+
+private struct StoredTaskEditVersion: Codable, Sendable {
+  var editedAt: Date
+  var deviceID: UUID
+  var clientSequence: UInt64
 }
 
 private struct StoredSyncState: Codable, Sendable {
@@ -36,6 +67,25 @@ private struct StoredSyncState: Codable, Sendable {
   var sequence: UInt64 = 0
   var deviceHighWater: [UUID: UInt64] = [:]
   var receipts: [UUID: StoredSyncReceipt] = [:]
+  var phoneTaskVersions: [UUID: StoredTaskEditVersion] = [:]
+
+  private enum CodingKeys: String, CodingKey {
+    case libraryID, sequence, deviceHighWater, receipts, phoneTaskVersions
+  }
+
+  init() {}
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    libraryID = try values.decodeIfPresent(UUID.self, forKey: .libraryID) ?? UUID()
+    sequence = try values.decodeIfPresent(UInt64.self, forKey: .sequence) ?? 0
+    deviceHighWater =
+      try values.decodeIfPresent([UUID: UInt64].self, forKey: .deviceHighWater) ?? [:]
+    receipts = try values.decodeIfPresent([UUID: StoredSyncReceipt].self, forKey: .receipts) ?? [:]
+    phoneTaskVersions =
+      try values.decodeIfPresent(
+        [UUID: StoredTaskEditVersion].self, forKey: .phoneTaskVersions) ?? [:]
+  }
 }
 
 private struct StoredMCPState: Codable, Sendable {
@@ -178,8 +228,10 @@ public actor LibraryRepository {
   }
 
   public func apply(_ command: Mutation) throws -> Library {
-    let library = try BoardReducer.apply(command, to: load())
+    let current = try load()
+    let library = try BoardReducer.apply(command, to: current)
     var nextSyncState = syncState ?? StoredSyncState()
+    Self.clearPhoneVersions(forChangedTasksFrom: current, to: library, in: &nextSyncState)
     nextSyncState.sequence &+= 1
     try persist(library, syncState: nextSyncState)
     cached = library
@@ -210,6 +262,7 @@ public actor LibraryRepository {
       }
     }
     var nextSyncState = syncState ?? StoredSyncState()
+    Self.clearPhoneVersions(forChangedTasksFrom: current, to: updated, in: &nextSyncState)
     nextSyncState.sequence &+= 1
     try persist(updated, syncState: nextSyncState, mcpState: state)
     cached = updated
@@ -261,10 +314,11 @@ public actor LibraryRepository {
       else {
         return .rejected(message: "This operation ID was already used for different content.")
       }
-      return .applied(
-        sequence: receipt.sequence,
-        snapshot: SyncSnapshot(
-          libraryID: state.libraryID, sequence: state.sequence, library: current))
+      let snapshot = SyncSnapshot(
+        libraryID: state.libraryID, sequence: state.sequence, library: current)
+      return receipt.superseded
+        ? .superseded(sequence: receipt.sequence, current: snapshot)
+        : .applied(sequence: receipt.sequence, snapshot: snapshot)
     }
     let highWater = state.deviceHighWater[envelope.deviceID, default: 0]
     guard envelope.clientSequence > highWater else {
@@ -272,18 +326,80 @@ public actor LibraryRepository {
         message: "The phone’s queued operation sequence is out of date. Refresh and retry.")
     }
     do {
-      let mutation = try SyncCommandValidator.mutation(for: envelope, in: current)
-      let updated = try BoardReducer.apply(mutation, to: current)
+      var commandEnvelope = envelope
+      let mutation = try SyncCommandValidator.mutation(for: commandEnvelope, in: current)
+      var updated: Library
+      do {
+        updated = try BoardReducer.apply(mutation, to: current)
+      } catch BoardError.conflict {
+        guard let taskID = Self.lastWriteWinsTaskID(in: envelope.command),
+          let task = current.tasks.first(where: { $0.id == taskID }),
+          !current.runs.contains(where: { $0.taskID == taskID && $0.status.isActive })
+        else { throw BoardError.conflict }
+        let incomingTime = min(envelope.editedAt, Date.now.addingTimeInterval(300))
+        let currentPhoneVersion = state.phoneTaskVersions[taskID]
+        let incomingWins: Bool
+        if incomingTime != task.updatedAt {
+          incomingWins = incomingTime > task.updatedAt
+        } else if let currentPhoneVersion, currentPhoneVersion.editedAt == incomingTime {
+          let incomingDevice = envelope.deviceID.uuidString
+          let currentDevice = currentPhoneVersion.deviceID.uuidString
+          incomingWins =
+            incomingDevice == currentDevice
+            ? envelope.clientSequence > currentPhoneVersion.clientSequence
+            : incomingDevice > currentDevice
+        } else {
+          // Exact timestamp ties favor the Mac-authored state deterministically.
+          incomingWins = false
+        }
+        state.sequence &+= 1
+        state.deviceHighWater[envelope.deviceID] = envelope.clientSequence
+        state.receipts[envelope.operationID] = StoredSyncReceipt(
+          payloadDigest: digest, sequence: state.sequence, deviceID: envelope.deviceID,
+          clientSequence: envelope.clientSequence, superseded: !incomingWins)
+        try Self.trimReceipts(in: &state)
+        if !incomingWins {
+          try persist(current, syncState: state)
+          cached = current
+          syncState = state
+          return .superseded(
+            sequence: state.sequence,
+            current: SyncSnapshot(
+              libraryID: state.libraryID, sequence: state.sequence, library: current))
+        }
+        commandEnvelope.expectedRevision = task.revision
+        let rebased = try SyncCommandValidator.mutation(for: commandEnvelope, in: current)
+        var resolved = try BoardReducer.apply(rebased, to: current)
+        if let index = resolved.tasks.firstIndex(where: { $0.id == taskID }) {
+          resolved.tasks[index].updatedAt = incomingTime
+        }
+        state.phoneTaskVersions[taskID] = StoredTaskEditVersion(
+          editedAt: incomingTime, deviceID: envelope.deviceID,
+          clientSequence: envelope.clientSequence)
+        let sequence = state.sequence
+        try persist(resolved, syncState: state)
+        cached = resolved
+        syncState = state
+        return .applied(
+          sequence: sequence,
+          snapshot: SyncSnapshot(libraryID: state.libraryID, sequence: sequence, library: resolved))
+      }
+      if let taskID = Self.lastWriteWinsTaskID(in: envelope.command),
+        let index = updated.tasks.firstIndex(where: { $0.id == taskID }),
+        envelope.editedAt > .distantPast
+      {
+        let incomingTime = min(envelope.editedAt, Date.now.addingTimeInterval(300))
+        updated.tasks[index].updatedAt = incomingTime
+        state.phoneTaskVersions[taskID] = StoredTaskEditVersion(
+          editedAt: incomingTime, deviceID: envelope.deviceID,
+          clientSequence: envelope.clientSequence)
+      }
       state.sequence &+= 1
       state.deviceHighWater[envelope.deviceID] = envelope.clientSequence
       state.receipts[envelope.operationID] = StoredSyncReceipt(
         payloadDigest: digest, sequence: state.sequence, deviceID: envelope.deviceID,
         clientSequence: envelope.clientSequence)
-      if state.receipts.count > 2_000 {
-        let stale = state.receipts.sorted { $0.value.sequence < $1.value.sequence }
-          .prefix(state.receipts.count - 2_000).map(\.key)
-        for id in stale { state.receipts.removeValue(forKey: id) }
-      }
+      try Self.trimReceipts(in: &state)
       try persist(updated, syncState: state)
       cached = updated
       syncState = state
@@ -299,6 +415,31 @@ public actor LibraryRepository {
       return .rejected(message: BoardError.busy.localizedDescription)
     } catch {
       return .rejected(message: error.localizedDescription)
+    }
+  }
+
+  private static func lastWriteWinsTaskID(in command: SyncCommand) -> UUID? {
+    switch command {
+    case .editTask(let id, _, _), .moveTask(let id, _): id
+    default: nil
+    }
+  }
+
+  private static func clearPhoneVersions(
+    forChangedTasksFrom old: Library, to new: Library, in state: inout StoredSyncState
+  ) {
+    let changed = Set(
+      old.tasks.filter { task in
+        new.tasks.first(where: { $0.id == task.id })?.revision != task.revision
+      }.map(\.id))
+    for id in changed { state.phoneTaskVersions.removeValue(forKey: id) }
+  }
+
+  private static func trimReceipts(in state: inout StoredSyncState) throws {
+    if state.receipts.count > 2_000 {
+      let stale = state.receipts.sorted { $0.value.sequence < $1.value.sequence }
+        .prefix(state.receipts.count - 2_000).map(\.key)
+      for id in stale { state.receipts.removeValue(forKey: id) }
     }
   }
 

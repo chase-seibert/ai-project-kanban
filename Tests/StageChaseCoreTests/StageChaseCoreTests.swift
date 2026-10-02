@@ -319,14 +319,73 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
 
   let stale = SyncEnvelope(
     libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 3,
-    expectedRevision: 0, command: .editTask(id: taskID, title: "Stale", notes: ""))
-  guard case .conflict = try await repository.applyRemote(stale)
+    expectedRevision: 0, editedAt: .distantPast,
+    command: .editTask(id: taskID, title: "Stale", notes: ""))
+  guard case .superseded(let staleSequence, _) = try await repository.applyRemote(stale)
   else {
-    Issue.record("Expected stale revision to report a conflict")
+    Issue.record("Expected an older queued edit to be acknowledged as superseded")
+    return
+  }
+  guard case .superseded(let replaySequence, _) = try await repository.applyRemote(stale)
+  else {
+    Issue.record("Expected a superseded retry to replay its terminal receipt")
+    return
+  }
+  #expect(replaySequence == staleSequence)
+  let later = SyncEnvelope(
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 4,
+    expectedRevision: 1, command: .editTask(id: taskID, title: "Later", notes: ""))
+  guard case .applied = try await repository.applyRemote(later)
+  else {
+    Issue.record("A later operation must proceed after a superseded queue entry")
     return
   }
   let persisted = try await repository.syncStateSnapshot()
-  #expect(persisted.library.tasks[0].title == "Edited")
+  #expect(persisted.library.tasks[0].title == "Later")
+}
+
+@Test func newerPhoneTaskEditWinsAndEqualTimestampMacEditWinsDeterministically() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Ordering")
+  _ = try await repository.apply(.createProject(project))
+  let task = WorkItem(projectID: project.id, title: "Original", stage: .inbox)
+  _ = try await repository.apply(.createTask(task))
+  var macEdited = task
+  macEdited.title = "Mac version"
+  _ = try await repository.apply(.editTask(macEdited, expectedRevision: 0))
+  let state = try await repository.syncStateSnapshot()
+  let current = try #require(state.library.tasks.first)
+  let deviceID = UUID()
+
+  let equalTime = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: deviceID, clientSequence: 1,
+    expectedRevision: 0, editedAt: current.updatedAt,
+    command: .editTask(id: task.id, title: "Equal timestamp phone", notes: ""))
+  guard case .superseded = try await repository.applyRemote(equalTime) else {
+    Issue.record("Exact timestamp ties must deterministically preserve the Mac version")
+    return
+  }
+
+  let newer = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: deviceID, clientSequence: 2,
+    expectedRevision: 0, editedAt: current.updatedAt.addingTimeInterval(1),
+    command: .editTask(id: task.id, title: "Newer phone version", notes: ""))
+  guard case .applied = try await repository.applyRemote(newer) else {
+    Issue.record("A newer phone edit should rebase over the stale Mac revision")
+    return
+  }
+  let finalState = try await repository.syncStateSnapshot()
+  #expect(finalState.library.tasks.first?.title == "Newer phone version")
+}
+
+@Test func forcedSnapshotRequestSurvivesWireEncoding() throws {
+  let request = SyncClientRequest.fullSnapshot
+  let decoded = try JSONDecoder.syncDecoder.decode(
+    SyncClientRequest.self, from: JSONEncoder.syncEncoder.encode(request))
+  guard case .fullSnapshot = decoded else {
+    Issue.record("Expected the explicit unconditional full-snapshot request")
+    return
+  }
 }
 
 @Test func syncFramesAreLengthBoundedAndRejectMalformedMessages() throws {

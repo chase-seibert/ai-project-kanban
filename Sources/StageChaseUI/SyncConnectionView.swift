@@ -164,6 +164,15 @@ struct SyncConnectionView: View {
           }
           .buttonStyle(.borderedProminent)
           .disabled(sync.isSyncing || sync.hasUnsavedEndpoint)
+          Button {
+            Task { await model.refreshFromMac(manual: true, forceFullSnapshot: true) }
+          } label: {
+            Label(
+              sync.isSyncing ? "Refreshing everything…" : "Refresh everything from Mac",
+              systemImage: "arrow.clockwise.circle")
+          }
+          .buttonStyle(.bordered)
+          .disabled(sync.isSyncing || sync.hasUnsavedEndpoint)
           Text(
             "Sync uses a short connection for each request; the state above reports the latest check, not an always-open socket."
           )

@@ -47,7 +47,8 @@ private struct PendingPhone: Sendable {
   var eventLogError: String?
   var onLibraryChanged: ((Library) -> Void)?
   var onPhoneCodexAction: ((UUID, Int, SyncPhoneCodexAction) async throws -> String)?
-  var onPhoneModelCatalogRequest: (() async throws -> (CodexModelConfiguration, [CodexModelOption]))?
+  var onPhoneModelCatalogRequest:
+    (() async throws -> (CodexModelConfiguration, [CodexModelOption]))?
   private let networkEventsURL: URL
   var activeConnectionCount: Int { activeConnections }
 
@@ -364,6 +365,12 @@ private struct PendingPhone: Sendable {
           : .snapshot(
             SyncSnapshot(
               libraryID: state.libraryID, sequence: state.sequence, library: state.library))
+      case .fullSnapshot:
+        lastRequestResult =
+          "Refresh everything · sent full library with \(state.library.projects.count) projects and \(state.library.tasks.count) tasks at sequence \(state.sequence)."
+        response = .snapshot(
+          SyncSnapshot(
+            libraryID: state.libraryID, sequence: state.sequence, library: state.library))
       case .command(let envelope):
         guard envelope.deviceID == deviceID else { return .error("Invalid device identity.") }
         let result = try await repository.applyRemote(envelope)
@@ -372,6 +379,9 @@ private struct PendingPhone: Sendable {
           lastRequestResult = "Pending change · accepted at sequence \(sequence)."
           let updated = try await repository.syncStateSnapshot()
           onLibraryChanged?(updated.library)
+        case .superseded(let sequence, _):
+          lastRequestResult =
+            "Pending change · superseded by newer Mac task at sequence \(sequence)."
         case .conflict:
           lastRequestResult = "Pending change · conflict; Mac state returned without applying edit."
         case .rejected(let message):
@@ -394,7 +404,9 @@ private struct PendingPhone: Sendable {
         item.revision == expectedRevision,
         let project = library.projects.first(where: { $0.id == item.projectID }),
         let path = item.planPath
-      else { return .rejected("The task changed or no saved plan is attached. Refresh and try again.") }
+      else {
+        return .rejected("The task changed or no saved plan is attached. Refresh and try again.")
+      }
       do {
         let url = try PlanFileStore.resolve(projectDirectory: project.directory, relativePath: path)
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
