@@ -1309,13 +1309,17 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
 @Test func specialStatusesSortFirstAndUserSignoffMarksDone() throws {
   let project = Project(name: "Statuses")
   var normal = WorkItem(projectID: project.id, title: "Normal", stage: .implementation)
+  normal.updatedAt = Date(timeIntervalSince1970: 10)
   normal.rank = 0
   var review = WorkItem(projectID: project.id, title: "Review", stage: .review)
+  review.updatedAt = Date(timeIntervalSince1970: 40)
   review.rank = 8
   var waiting = WorkItem(projectID: project.id, title: "Waiting", stage: .implementation)
+  waiting.updatedAt = Date(timeIntervalSince1970: 30)
   waiting.status = .waiting
   waiting.rank = 9
   var failed = WorkItem(projectID: project.id, title: "Failed", stage: .implementation)
+  failed.updatedAt = Date(timeIntervalSince1970: 20)
   failed.status = .error
   failed.rank = 10
   var library = Library()
@@ -1324,10 +1328,40 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
 
   #expect(
     library.items(in: project.id, section: .implementing).map(\.title)
-      == ["Waiting", "Failed", "Review", "Normal"])
+      == ["Review", "Waiting", "Failed", "Normal"])
   library = try BoardReducer.apply(.complete(review.id, true, expectedRevision: 0), to: library)
   let done = try #require(library.tasks.first(where: { $0.id == review.id }))
   #expect(done.completed)
   #expect(done.status == .done)
   #expect(done.section == .implementing)
+}
+
+@Test func planningAndImplementingSectionsSortByMostRecentlyUpdated() {
+  let project = Project(name: "Recent updates")
+  var oldPlanning = WorkItem(projectID: project.id, title: "Old planning", stage: .next)
+  oldPlanning.updatedAt = Date(timeIntervalSince1970: 10)
+  oldPlanning.priority = .high
+  var newPlanning = WorkItem(projectID: project.id, title: "New planning", stage: .planned)
+  newPlanning.updatedAt = Date(timeIntervalSince1970: 30)
+  newPlanning.priority = .low
+  var oldImplementation = WorkItem(
+    projectID: project.id, title: "Old implementation", stage: .implementation)
+  oldImplementation.updatedAt = Date(timeIntervalSince1970: 20)
+  oldImplementation.priority = .high
+  var newImplementation = WorkItem(
+    projectID: project.id, title: "New implementation", stage: .review)
+  newImplementation.updatedAt = Date(timeIntervalSince1970: 40)
+  newImplementation.priority = .low
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [oldPlanning, oldImplementation, newPlanning, newImplementation]
+
+  #expect(
+    library.items(in: project.id, section: .planning).map(\.title) == [
+      "New planning", "Old planning",
+    ])
+  #expect(
+    library.items(in: project.id, section: .implementing).map(\.title) == [
+      "New implementation", "Old implementation",
+    ])
 }

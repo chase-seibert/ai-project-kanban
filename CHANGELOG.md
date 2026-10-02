@@ -2,6 +2,12 @@
 
 ## 2026-10-02
 
+- Decode saved iPhone action queues with the same ISO-8601 date strategy used
+  when writing them, preserving queued edits across app relaunches.
+- Highlight unread task changes with a subtle light-blue card background and
+  sort Planning and Implementing tasks by most recent update on Mac and iPhone.
+- Use neutral text styling for Low, Medium, and High priority labels.
+
 - Add paired iPhone completion/reopening and confirmed task deletion through
   revision-checked sync protocol v3 commands. Add a visible board Refresh button
   with sync progress/result feedback, while keeping pull-to-refresh.

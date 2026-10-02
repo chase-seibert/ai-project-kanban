@@ -617,6 +617,10 @@ public struct Library: Codable, Equatable, Sendable {
       $0.projectID == project && $0.section == section && (completed || !$0.completed)
     }
     .sorted {
+      if section == .planning || section == .implementing {
+        if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+        return $0.id.uuidString < $1.id.uuidString
+      }
       if $0.status.attentionOrder != $1.status.attentionOrder {
         return $0.status.attentionOrder < $1.status.attentionOrder
       }

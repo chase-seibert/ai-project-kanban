@@ -41,6 +41,7 @@ private struct PhoneOutbox: Codable {
   private var lastSequence: UInt64 = 0
   private var lastServerSequence: UInt64 = 0
   private var outboxLoaded = true
+  private var outboxLoadError: String?
   private let outboxURL: URL
   private let networkEventsURL: URL
   private var savedEndpoint = ""
@@ -67,11 +68,12 @@ private struct PhoneOutbox: Codable {
     if FileManager.default.fileExists(atPath: outboxURL.path) {
       do {
         let data = try Data(contentsOf: outboxURL)
-        let saved = try JSONDecoder().decode(PhoneOutbox.self, from: data)
+        let saved = try JSONDecoder.syncDecoder.decode(PhoneOutbox.self, from: data)
         outbox = saved.operations
         conflictedOperationID = saved.conflictedOperationID
       } catch let caught {
         outboxLoaded = false
+        outboxLoadError = caught.localizedDescription
         self.error =
           "The offline queue could not be read and was left untouched: \(caught.localizedDescription)"
       }
@@ -308,7 +310,12 @@ private struct PhoneOutbox: Codable {
   func enqueue(
     _ command: SyncCommand, expectedRevision: Int? = nil, editedAt: Date = .now
   ) throws -> SyncEnvelope {
-    guard outboxLoaded else { throw BoardError.invalid("The offline queue is unavailable.") }
+    guard outboxLoaded else {
+      let detail = outboxLoadError.map { " (\($0))" } ?? ""
+      throw BoardError.invalid(
+        "The offline queue could not be loaded and was preserved. Reopen the app after installing the date-decoding fix.\(detail)"
+      )
+    }
     guard let credential else { throw BoardError.invalid("Pair this phone with the Mac first.") }
     guard outbox.count < 500 else {
       throw BoardError.invalid(

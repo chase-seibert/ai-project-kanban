@@ -523,12 +523,6 @@ struct TaskCard: View {
   private var cardContents: some View {
     VStack(alignment: .leading, spacing: 10) {
       if isEditingTitle {
-        if let change = model.unreadTaskChangeKind(for: item.id) {
-          Label(change.badgeTitle, systemImage: "circle.fill")
-            .stageFont(.caption, weight: .semibold)
-            .foregroundStyle(Color.accentColor)
-            .accessibilityIdentifier("unread-task-\(item.id.uuidString)")
-        }
         if let priority = item.priority {
           priorityLabel(priority)
         }
@@ -565,12 +559,6 @@ struct TaskCard: View {
           openDetails()
         } label: {
           VStack(alignment: .leading, spacing: 10) {
-            if let change = model.unreadTaskChangeKind(for: item.id) {
-              Label(change.badgeTitle, systemImage: "circle.fill")
-                .stageFont(.caption, weight: .semibold)
-                .foregroundStyle(Color.accentColor)
-                .accessibilityIdentifier("unread-task-\(item.id.uuidString)")
-            }
             if let priority = item.priority {
               priorityLabel(priority)
             }
@@ -630,7 +618,10 @@ struct TaskCard: View {
         .accessibilityLabel("Open task details for \(item.title)")
       }
     }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
-      .background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
+      .background(
+        model.unreadTaskChangeKind(for: item.id) == nil ? Palette.card : Color.blue.opacity(0.08),
+        in: RoundedRectangle(cornerRadius: 12)
+      )
       .overlay(
         RoundedRectangle(cornerRadius: 12).stroke(
           model.boardSelectedTaskID == item.id || model.selectedTaskID == item.id
@@ -644,9 +635,7 @@ struct TaskCard: View {
 
   private func priorityLabel(_ priority: TaskPriority) -> some View {
     Label("\(priority.rawValue) · \(priority.title)", systemImage: "flag.fill")
-      .stageFont(.caption, weight: .semibold).foregroundStyle(
-        priority == .high ? .red : priority == .medium ? .orange : .secondary
-      )
+      .stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
       .accessibilityLabel("Priority: \(priority.title)")
   }
 
