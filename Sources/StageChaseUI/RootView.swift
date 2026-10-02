@@ -151,7 +151,7 @@ struct RootView: View {
     ) {
       if let move = model.pendingMove {
         Button(
-          move.retryRunID == nil ? "Move and start Codex" : "Confirm model and retry"
+          move.retryRunID == nil ? "Start Codex" : "Confirm model and retry"
         ) {
           Task {
             if move.retryRunID == nil {
@@ -162,13 +162,22 @@ struct RootView: View {
           }
         }.disabled(move.loading || move.configuration == nil)
       }
-      Button("Cancel", role: .cancel) { model.pendingMove = nil }
+      Button(
+        model.pendingMove?.retryRunID == nil ? "Keep moved task" : "Cancel", role: .cancel
+      ) {
+        model.pendingMove = nil
+      }
     } message: {
       if let move = model.pendingMove {
         Text(
           [
             move.loading ? "Loading model settings…" : nil,
             move.configuration?.summary,
+            move.retryRunID == nil
+              ? "The task is already in \(move.stage.title). Cancel to leave it there without starting Codex."
+              : nil,
+            move.error == nil || move.retryRunID != nil
+              ? nil : "The move is saved; Codex did not start.",
             move.error,
           ].compactMap { $0 }.joined(separator: "\n")
             + "\nUsage may be billed. You can watch progress, approve commands, or stop the run in Activity."

@@ -31,6 +31,8 @@
   and Codex run state, so the board reflects my intent.
 - As a user, I want transitions and activity to be recorded, so that I can see
   what changed and why.
+- As a user, I want to complete or reopen a task manually while Codex is Waiting
+  or active, so that completion remains my decision.
 - As a user, I want Mac and iPhone to show concise run status and progress
   instead of a long event timeline, so task detail and Activity stay readable
   and I can open the associated Codex session for its full history.
@@ -153,8 +155,9 @@ open.
   include a readable project-relative plan path when one exists, and otherwise
   include the task title and notes.
 - As a user, I want successful implementation from that prompt to move the
-  identified task to Review through MCP after reporting success, leaving it
-  incomplete until I sign off; failed or blocked work remains incomplete.
+  identified task to Review through MCP after reporting success, while
+  preserving its completion flag; completion and reopening remain my actions
+  in StageChase.
 - As a user, I want legacy linked-session status refresh and rerun controls to
   remain available for existing handoffs.
 - As a user, I want a task-level Refresh action to reread saved task fields,
@@ -179,7 +182,7 @@ open.
   plans are recognizable, collision-safe, and honor an existing location.
 - As a user, I want Codex to attach the saved readable Markdown plan through
   revision-checked MCP operations and set successful planning to Ready in
-  Planning, while leaving the task incomplete and never starting another Codex
+  Planning, while preserving task completion and never starting another Codex
   session.
 - Opening a plan prompt does not itself change task state. Plan handoff controls remain unavailable on iPhone and paired
   phone replicas.

@@ -39,6 +39,9 @@ not restrict section placement. Title and priority drafts require Save; ordinary
 task context saves automatically. Stale revisions
 produce an error. Task detail and the Activity screen show compact
 Codex run status and progress instead of a long chronological event timeline.
+The user can complete or reopen a task from task detail at any time, including
+while a Codex run is Waiting or active. Run outcomes never complete a task or
+overwrite its Done status; unsaved detail drafts remain available to save.
 The Activity screen lists active runs; task detail keeps the latest run. Full
 event records remain stored; open a run in Codex on Mac to inspect its session.
 On iPhone, StageChase tries the Codex thread URL and, if no app can open it,
@@ -51,8 +54,10 @@ keeps a failed draft available for retry.
 The phone directs the user to the Mac because project plan files are not synced.
 
 When the Mac-wide automatic invocation setting and the project automation
-setting are both enabled, moves into Planning or Implementing require confirmation
-including usage cost. The Mac setting can turn off automatic turns globally;
+setting are both enabled, moving into Planning or Implementing saves the new
+placement first, then asks for confirmation before starting Codex and shows the
+usage cost. Cancelling or failing to prepare the run leaves the task in its new
+column. The Mac setting can turn off automatic turns globally;
 task detail then offers Launch Codex using a StageChase
 MCP prompt. It starts with the exact task title and contains stable project/task IDs and a readable project-relative
 plan path when available. Runner-created planning sessions are named
@@ -62,7 +67,7 @@ the unchanged task title. Launch opens a new Codex Desktop thread without
 submitting a turn. That URL flow returns no thread ID, so StageChase cannot
 rename prompt-launched threads; Codex Desktop controls their displayed names.
 After success, that prompt directs Codex to move the task to
-Review through MCP and leave it incomplete. Enabling automation alone
+Review through MCP while preserving its current completion flag. Enabling automation alone
 never starts work.
 Mac task detail also offers **Plan in Codex** or **Revise plan in Codex**
 actions. They use the plan-only prompt, include the Mac plan-format
@@ -71,7 +76,7 @@ whether Codex will create a first plan or revise a readable attached plan. New
 plans use a normalized task-title slug plus the full lowercase task UUID under
 `to-do/`; revisions retain the attached path. Plan prompts also start with the
 exact task title. Codex attaches the saved Markdown plan through MCP and sets
-the status to Ready while leaving it in Planning and incomplete. Launching the
+the status to Ready while preserving task completion. Launching the
 action does not itself change task state.
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings

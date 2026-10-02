@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-02
+
+- Keep manual task completion and reopening available while a Codex run is
+  Waiting or active, and remove completion changes from MCP. Run updates
+  preserve a user's Done state and manually selected column.
+- Save manual column moves before optional Codex setup, keep moved tasks placed
+  if setup fails or is cancelled, and allow card drops across priority groups.
+
 ## 2026-10-01
 
 - Prefix runner-created Codex sessions with `Plan: ` for planning and `Code: `

@@ -846,15 +846,19 @@ import UniformTypeIdentifiers
   func requestMove(_ item: WorkItem, to stage: WorkflowStage) {
     guard item.stage != stage else { return }
     let automation = library.projects.first { $0.id == item.projectID }?.automationEnabled == true
-    if !isConnectedPhone, autoInvokeCodex && automation,
-      [.next, .implementation].contains(stage)
-    {
-      let move = PendingMove(
-        item: item, stage: stage, isNew: false, configuration: nil, loading: true)
-      pendingMove = move
-      preparePendingMove(move.id)
-    } else {
-      Task { await perform(.move(item.id, stage, expectedRevision: item.revision)) }
+    let shouldPrepareRun =
+      !isConnectedPhone && autoInvokeCodex && automation
+      && [.next, .implementation].contains(stage)
+    Task {
+      guard await perform(.move(item.id, stage, expectedRevision: item.revision)) else { return }
+      guard shouldPrepareRun,
+        !library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive }),
+        let moved = library.tasks.first(where: { $0.id == item.id })
+      else { return }
+      let pending = PendingMove(
+        item: moved, stage: stage, isNew: false, configuration: nil, loading: true)
+      pendingMove = pending
+      preparePendingMove(pending.id)
     }
   }
 
@@ -862,19 +866,19 @@ import UniformTypeIdentifiers
     guard item.section != section else { return }
     let stage = section.compatibilityStage
     let automation = library.projects.first { $0.id == item.projectID }?.automationEnabled == true
-    if !isConnectedPhone, autoInvokeCodex && automation,
-      [.planning, .implementing].contains(section)
-    {
-      var moved = item
-      moved.section = section
-      moved.stage = stage
-      moved.status = section == .planning ? .planning : .ready
-      let move = PendingMove(
+    let shouldPrepareRun =
+      !isConnectedPhone && autoInvokeCodex && automation
+      && [.planning, .implementing].contains(section)
+    Task {
+      guard await perform(.move(item.id, stage, expectedRevision: item.revision)) else { return }
+      guard shouldPrepareRun,
+        !library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive }),
+        let moved = library.tasks.first(where: { $0.id == item.id })
+      else { return }
+      let pending = PendingMove(
         item: moved, stage: stage, isNew: false, configuration: nil, loading: true)
-      pendingMove = move
-      preparePendingMove(move.id)
-    } else {
-      Task { await perform(.move(item.id, stage, expectedRevision: item.revision)) }
+      pendingMove = pending
+      preparePendingMove(pending.id)
     }
   }
 

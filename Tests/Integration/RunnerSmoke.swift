@@ -12,6 +12,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     throw BoardError.invalid("Fixture timed out")
   }
   @MainActor static func main() async throws {
+    try await testMCPCompletionCannotBeChangedByLegacyTool()
+    try await testMovePersistsWhenRunnerSetupFails()
     try await testGitService()
     let promptProject = Project(name: "Prompt fixture", directory: "/tmp/prompt-fixture")
     let promptTask = WorkItem(projectID: promptProject.id, title: "Readable prompt title")
@@ -495,6 +497,66 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       directRun.usesWorktrees == false
     else { throw BoardError.invalid("Disabled worktrees did not use the project folder") }
     print("PASS: dirty implementation with worktrees disabled uses the project folder")
+  }
+
+  @MainActor static func testMCPCompletionCannotBeChangedByLegacyTool() async throws {
+    let repository = try LibraryRepository(inMemory: true)
+    let project = Project(name: "MCP completion fixture")
+    _ = try await repository.apply(.createProject(project))
+    let task = WorkItem(projectID: project.id, title: "Completion stays user controlled")
+    _ = try await repository.apply(.createTask(task))
+    let server = MCPServer(repository: repository)
+    let names = MCPServer.tools.compactMap { $0["name"] as? String }
+    guard !names.contains("set_task_completed") else {
+      throw BoardError.invalid("MCP discovery still advertises task completion")
+    }
+    do {
+      _ = try await server.callTool(
+        "set_task_completed",
+        arguments: [
+          "project_id": project.id.uuidString, "task_id": task.id.uuidString,
+          "operation_id": UUID().uuidString, "expected_revision": 0, "completed": true,
+        ])
+      throw BoardError.invalid("The legacy MCP completion tool unexpectedly succeeded")
+    } catch let error as BoardError {
+      guard case .invalid(let message) = error, message.contains("Unknown StageChase tool") else {
+        throw BoardError.invalid("The legacy MCP completion call failed for the wrong reason")
+      }
+    }
+    let saved = try await repository.load()
+    guard let savedTask = saved.tasks.first(where: { $0.id == task.id }),
+      savedTask.completed == task.completed, savedTask.stage == task.stage,
+      savedTask.revision == task.revision
+    else { throw BoardError.invalid("A legacy MCP completion call changed the task") }
+    print("PASS: MCP no longer advertises or accepts the legacy completion write")
+  }
+
+  @MainActor static func testMovePersistsWhenRunnerSetupFails() async throws {
+    let repository = try LibraryRepository(inMemory: true)
+    let preferences = UserDefaults(suiteName: "StageChase.MoveSmoke.\(UUID().uuidString)")!
+    preferences.set(false, forKey: "localSyncEnabled")
+    let model = AppModel(repository: repository, preferences: preferences, preview: true)
+    await model.load()
+    var project = Project(name: "Move without runner", directory: "/tmp/move-without-runner")
+    project.automationEnabled = true
+    guard await model.perform(.createProject(project)) else {
+      throw BoardError.invalid(model.error ?? "Could not create move fixture project")
+    }
+    let task = WorkItem(projectID: project.id, title: "Move before preparing Codex")
+    guard await model.perform(.createTask(task)) else {
+      throw BoardError.invalid(model.error ?? "Could not create move fixture task")
+    }
+    model.autoInvokeCodex = true
+    model.requestMove(task, to: .implementation)
+    try await wait {
+      model.library.tasks.first(where: { $0.id == task.id })?.stage == .implementation
+        && model.pendingMove?.loading == false
+    }
+    guard model.pendingMove?.error?.contains("preview mode") == true,
+      model.library.tasks.first(where: { $0.id == task.id })?.stage == .implementation,
+      model.library.runs.isEmpty
+    else { throw BoardError.invalid("Runner setup failure blocked or reversed the stage move") }
+    print("PASS: a missing runner leaves the moved task placed and queues no Codex run")
   }
 
   static func testGitService() async throws {

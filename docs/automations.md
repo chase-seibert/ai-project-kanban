@@ -18,9 +18,9 @@ not yet verified.
 | Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers manual prompt copy and launch actions |
 | Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, starting with the exact task title and including stable IDs and a readable project-relative plan path when available |
 | Launch Codex from task detail | Open `codex://threads/new` with the repository path and same MCP prompt; let the user start the turn in Desktop. StageChase cannot rename these threads because the URL flow returns no thread ID |
-| Successful task-prompt work | After `finish_task` succeeds, move the task to Review through MCP using its latest revision; leave it incomplete for user review |
-| Failed or blocked task-prompt work | Report the outcome through MCP and leave the task incomplete |
-| Use the optional Codex Desktop MCP connection | Read/create tasks and explicitly move/complete them through the Mac library; MCP task calls never start or control a Codex turn |
+| Successful task-prompt work | After `finish_task` succeeds, move the task to Review through MCP using its latest revision; preserve the completion flag for the user's review |
+| Failed or blocked task-prompt work | Report the outcome through MCP and preserve the completion flag |
+| Use the optional Codex Desktop MCP connection | Read/create tasks and move them through the Mac library; users complete or reopen tasks in StageChase, and MCP task calls never start or control a Codex turn |
 | Refresh manual Codex status | Read the linked session only after the user presses Refresh status; update its run record without changing the task |
 | Retry/rerun a manual task | Reuse the saved context in a fresh Desktop session and copy it again; the user starts the new turn |
 | Approval request in Ask me mode | Show Allow once / Deny and Needs Approval state |
@@ -42,7 +42,8 @@ The **Connection → Codex Desktop task tools** setting starts an opt-in MCP
 listener bound to `127.0.0.1`. Use the displayed `codex mcp add stagechase
 --url …` command to register it with the Codex Desktop configuration. The
 listener is available only while StageChase is open. MCP task creation defaults
-to Inbox; moves and completion are explicit, revision-checked, separate changes.
+to Inbox; moves are explicit, revision-checked changes. Completion and reopening
+are available only through the user's StageChase controls.
 The repository commits an operation receipt with each MCP write so a retry with
 the same operation ID cannot duplicate the change. Moving a task through MCP
 never enters the automatic-run path.
@@ -122,8 +123,9 @@ Codex** on a task. Both actions use the same prompt, which identifies the
 project and task by stable IDs, includes a readable project-relative plan path
 when available, and otherwise includes the task title and notes. Launch opens
 `codex://threads/new` with the project folder and prompt; it does not submit a
-turn. The prompt directs Codex to update the task through the StageChase MCP
-and mark it complete only after successful work, without moving its stage.
+turn. The prompt directs Codex to update the task through the StageChase MCP and
+move successful implementation to Review. Completion remains under the user's
+control in StageChase.
 Automatic run settings do not restrict stage placement based on a plan,
 completion state, or Codex run status.
 

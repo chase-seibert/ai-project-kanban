@@ -134,7 +134,7 @@ import Network
             "capabilities": ["tools": ["listChanged": false]],
             "serverInfo": ["name": "stagechase", "version": "1.0.0"],
             "instructions":
-              "Task reads and writes update the local StageChase library. Task operations never start or control Codex work. Move and completion are separate, explicit changes.",
+              "Task reads and writes update the local StageChase library. MCP stage moves are explicit and never start Codex work. Only the user can complete or reopen a task in StageChase; MCP has no completion write.",
           ])
       )
     case "ping": return (200, Self.rpcResult(id, result: [:]))
@@ -170,7 +170,7 @@ import Network
     }
   }
 
-  private func callTool(_ name: String, arguments: [String: Any]) async throws -> [String: Any] {
+  func callTool(_ name: String, arguments: [String: Any]) async throws -> [String: Any] {
     let library = try await repository.load()
     switch name {
     case "list_projects":
@@ -264,21 +264,6 @@ import Network
         .editTask(updated, expectedRevision: revision), operationID: operationID,
         arguments: arguments)
       return taskJSON(try requiredTask(taskID, in: result), detailed: true)
-    case "set_task_completed":
-      let projectID = try uuid("project_id", arguments)
-      let taskID = try uuid("task_id", arguments)
-      guard library.tasks.contains(where: { $0.id == taskID && $0.projectID == projectID }) else {
-        throw BoardError.missing
-      }
-      let revision = try integer("expected_revision", arguments)
-      guard let completed = arguments["completed"] as? Bool else {
-        throw BoardError.invalid("completed must be true or false.")
-      }
-      let operationID = try uuid("operation_id", arguments)
-      let result = try await commit(
-        .complete(taskID, completed, expectedRevision: revision), operationID: operationID,
-        arguments: arguments)
-      return taskJSON(try requiredTask(taskID, in: result))
     case "report_task_update":
       let projectID = try uuid("project_id", arguments)
       let taskID = try uuid("task_id", arguments)
@@ -426,7 +411,7 @@ extension Optional where Wrapped == WorkflowStage {
 }
 
 extension MCPServer {
-  fileprivate static let tools: [[String: Any]] = [
+  static let tools: [[String: Any]] = [
     tool(
       "list_projects", "List StageChase projects and stable IDs.",
       ["type": "object", "properties": [:], "additionalProperties": false]),
@@ -506,17 +491,6 @@ extension MCPServer {
           "project_id", "task_id", "run_id", "operation_id", "expected_revision", "message",
           "status",
         ],
-        "additionalProperties": false,
-      ]),
-    tool(
-      "set_task_completed",
-      "Explicitly set or clear the completion flag, separate from the workflow stage. Requires its current revision.",
-      [
-        "type": "object",
-        "properties": [
-          "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
-          "expected_revision": ["type": "integer"], "completed": ["type": "boolean"],
-        ], "required": ["project_id", "task_id", "operation_id", "expected_revision", "completed"],
         "additionalProperties": false,
       ]),
     tool(

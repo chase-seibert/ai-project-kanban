@@ -478,7 +478,7 @@ struct AgentApproval {
 
       You are working on a StageChase task in this project. Follow its AGENTS.md instructions.
       Details: \(item.notes)
-      Do not commit, push, publish, deploy, send messages, or delete unrelated files. Do not mark the task complete.
+      Do not commit, push, publish, deploy, send messages, or delete unrelated files. The user controls task completion and reopening in StageChase; preserve the current completion flag.
       Keep progress updates concise and use the plan tool so StageChase can display progress. Ask for approval when required; never bypass sandbox restrictions.
       Your final structured response must use outcome=completed only when the requested work and verification are finished; otherwise use outcome=blocked and explain what remains in summary.
       """

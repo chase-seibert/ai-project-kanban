@@ -51,8 +51,8 @@ sessions use `Plan: <task title>`; implementation and generic task handoff
 sessions use `Code: <task title>`. Launch opens `codex://threads/new` with the project folder and
 prompt without submitting a turn. That prompt directs Codex to move successful
 implementation to Review through MCP after successful work, using the latest
-revision, while leaving the task incomplete. Failed or blocked work stays
-incomplete. Legacy
+revision, while preserving the current completion flag. Completion and
+reopening are user actions in StageChase. Legacy
 linked sessions can still be refreshed explicitly to update their run record.
 
 ## Consolidated sections and task status
@@ -99,7 +99,7 @@ labels revision actions only when that attached Markdown file is readable and
 nonempty. Launch opens a new `codex://threads/new` URL and never submits a turn.
 After saving a readable nonempty plan, the external Codex session finishes its
 run, attaches the plan with the latest revision through `attach_task_plan`, and
-sets the incomplete task's status to Ready in Planning with the returned
+sets the task's status to Ready in Planning with the returned
 revision. Opening the prompt does not mutate task state; these actions are
 Mac-only. Prompt-launched threads do not return a thread ID to StageChase, so it
 cannot call `thread/name/set` for them; Codex Desktop controls their displayed
@@ -109,12 +109,13 @@ not change run outcomes.
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same
 `LibraryRepository` as the board; no second process opens the SQLite library.
-Project/task reads are scoped by stable IDs. Create/move/complete and plan
-attachment writes use the normal reducer, persist bounded operation receipts
+Project/task reads are scoped by stable IDs. Create/move and plan attachment
+writes use the normal reducer, persist bounded operation receipts
 and advance the phone-sync sequence in the same save. Existing-task updates
 require the current revision. `attach_task_plan` accepts only a readable,
 nonempty Markdown file resolved inside the project's folder; it does not move or
-complete the task or invoke Codex.
+complete the task or invoke Codex. Completion and reopening are available only
+through the user's StageChase controls; MCP exposes no completion write.
 External session records have a distinct source; `begin_task`,
 `report_task_update`, and `finish_task` only track work that Codex Desktop
 already started. They store one bounded latest message on the task/run, never a
@@ -123,7 +124,8 @@ rather than interrupted or resumable by StageChase.
 MCP stage moves pass no model configuration and never call `kickRunner()`,
 regardless of automatic-invocation preferences. Stop the endpoint in Settings
 to disconnect Codex Desktop; it binds to `127.0.0.1` and uses a per-install
-secret path component. Task move and completion remain distinct.
+secret path component. MCP can move tasks but cannot complete or reopen them;
+the user controls those actions in StageChase.
 
 Model precedence is task override, project override, then the Mac's global
 StageChase preference. The built-in default is Latest Luna with High reasoning.

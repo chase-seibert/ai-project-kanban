@@ -396,9 +396,6 @@ struct TaskCard: View {
                 $0.id == id && $0.projectID == item.projectID
               })
             else { return false }
-            guard source.priority == item.priority || source.section != item.section else {
-              return false
-            }
             if source.section == item.section {
               Task {
                 await model.perform(

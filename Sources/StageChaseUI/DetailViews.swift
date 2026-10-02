@@ -101,7 +101,7 @@ struct ProjectEditor: View {
             )
             .stageFont(.callout).foregroundStyle(.secondary)
             Text(
-              "Uses StageChase’s selected model and reasoning effort. Usage may count toward your subscription or API billing. Automatic runs do not change task placement or completion. Successful manual task prompts move the task to Review and leave it incomplete for your review."
+              "Uses StageChase’s selected model and reasoning effort. Usage may count toward your subscription or API billing. Automatic runs do not change task placement or completion. Successful manual task prompts move the task to Review and preserve its completion flag."
             )
             .stageFont(.caption).foregroundStyle(.secondary)
           #else
@@ -699,13 +699,10 @@ struct TaskDetail: View {
             Spacer()
             if !model.isConnectedPhone {
               Button(item.completed ? "Reopen" : "Complete", systemImage: "checkmark.circle") {
-                Task {
-                  await model.perform(
-                    .complete(item.id, !item.completed, expectedRevision: item.revision))
-                }
+                setTaskCompleted(!item.completed)
               }
             }
-          }.disabled(edited || model.planFeedbackInFlight.contains(taskID))
+          }
           Divider()
           VStack(alignment: .leading, spacing: 12) {
             Label("Codex activity", systemImage: "sparkles").stageFont(.headline)
@@ -863,6 +860,24 @@ struct TaskDetail: View {
         self.draft = self.item
         edited = false
       }
+    }
+  }
+
+  private func setTaskCompleted(_ completed: Bool) {
+    Task {
+      guard let current = item,
+        await model.perform(
+          .complete(current.id, completed, expectedRevision: current.revision)),
+        var localDraft = draft,
+        let latest = item
+      else { return }
+      localDraft.completed = latest.completed
+      localDraft.completedAt = latest.completedAt
+      localDraft.stage = latest.stage
+      localDraft.section = latest.section
+      localDraft.status = latest.status
+      localDraft.revision = latest.revision
+      draft = localDraft
     }
   }
 

@@ -625,7 +625,7 @@ public enum BoardError: LocalizedError, Sendable {
     case .missing: "This item no longer exists."
     case .conflict:
       "This task changed while you were editing. Close and reopen it to use the latest version."
-    case .busy: "Stop the active Codex run before changing this task."
+    case .busy: "Wait for the active Codex run to finish before editing or deleting this task."
     case .invalid(let message): message
     }
   }
@@ -774,11 +774,20 @@ public enum BoardReducer {
       state.tasks[index].updatedAt = .now
     case .move(let id, let stage, let revision, let configuration):
       let index = try taskIndex(id, revision)
-      if state.tasks[index].stage == stage { return state }
       var item = state.tasks[index]
+      if item.stage == stage {
+        let old = item
+        try enqueue(&item, configuration: configuration)
+        if item != old {
+          item.revision += 1
+          item.updatedAt = .now
+          state.tasks[index] = item
+        }
+        return state
+      }
       item.stage = stage
       item.section = WorkItem.legacySection(for: stage)
-      item.status = TaskStatus.legacyStatus(for: stage)
+      if !item.completed { item.status = TaskStatus.legacyStatus(for: stage) }
       item.rank =
         (state.tasks.filter { $0.projectID == item.projectID && $0.section == item.section }
           .map(\.rank).max() ?? -1) + 1
@@ -792,7 +801,6 @@ public enum BoardReducer {
           projectID: state.tasks[index].projectID, taskID: id, taskChange: .stageChanged))
     case .complete(let id, let complete, let revision):
       let index = try taskIndex(id, revision)
-      try ensureIdle(id)
       let wasCompleted = state.tasks[index].completed
       state.tasks[index].completed = complete
       if complete {
@@ -845,7 +853,9 @@ public enum BoardReducer {
       state.tasks[index].revision += 1
       state.tasks[index].updatedAt = .now
       state.runs[runIndex].status = status
-      state.tasks[index].status = Self.taskStatus(for: status, message: trimmed)
+      if !state.tasks[index].completed {
+        state.tasks[index].status = Self.taskStatus(for: status, message: trimmed)
+      }
       state.runs[runIndex].summary = trimmed
       state.runs[runIndex].latestMessage = trimmed
       state.runs[runIndex].updatedAt = .now
@@ -892,23 +902,24 @@ public enum BoardReducer {
           projectID: desired?.projectID ?? existing?.projectID, taskID: id,
           taskChange: taskChange))
     case .reorder(let id, let before, let revision):
-      let source = state.tasks[try taskIndex(id, revision)]
+      let sourceIndex = try taskIndex(id, revision)
+      var source = state.tasks[sourceIndex]
       let target = state.tasks[try taskIndex(before)]
-      try ensureIdle(id)
-      guard source.projectID == target.projectID, source.section == target.section,
-        source.priority == target.priority
+      guard source.projectID == target.projectID, source.section == target.section
       else {
-        throw BoardError.invalid("Reorder tasks within the same priority group.")
+        throw BoardError.invalid("Reorder tasks within the same project section.")
       }
       if id == before { return state }
+      source.priority = target.priority
       var ordered = state.items(in: source.projectID, section: source.section, completed: true)
-        .filter { $0.priority == source.priority && $0.id != id }
+        .filter { $0.priority == target.priority && $0.id != id }
       let index = ordered.firstIndex { $0.id == before } ?? ordered.endIndex
       ordered.insert(source, at: index)
       for (rank, item) in ordered.enumerated() {
         let i = try taskIndex(item.id)
-        if state.tasks[i].rank != rank {
+        if state.tasks[i].rank != rank || state.tasks[i].priority != target.priority {
           state.tasks[i].rank = rank
+          state.tasks[i].priority = target.priority
           state.tasks[i].revision += 1
           state.tasks[i].updatedAt = .now
         }
@@ -968,10 +979,11 @@ public enum BoardReducer {
       }
       state.runs[index] = run
       if let taskIndex = state.tasks.firstIndex(where: { $0.id == run.taskID }) {
+        let task = state.tasks[taskIndex]
         let status =
           run.status == .succeeded && run.kind == .planning
           ? TaskStatus.ready : Self.taskStatus(for: run.status, message: run.error ?? run.summary)
-        if state.tasks[taskIndex].status != status {
+        if !task.completed && task.status != status {
           state.tasks[taskIndex].status = status
           state.tasks[taskIndex].updatedAt = .now
           state.tasks[taskIndex].revision += 1
@@ -1002,10 +1014,11 @@ public enum BoardReducer {
         }
       }
       state.runs[index].status = .succeeded
-      state.tasks[taskIndex].section = run.kind == .planning ? .planning : .implementing
-      state.tasks[taskIndex].status = run.kind == .planning ? .ready : .review
-      state.tasks[taskIndex].revision += 1
-      state.tasks[taskIndex].updatedAt = .now
+      if !state.tasks[taskIndex].completed {
+        state.tasks[taskIndex].status = run.kind == .planning ? .ready : .review
+        state.tasks[taskIndex].revision += 1
+        state.tasks[taskIndex].updatedAt = .now
+      }
       state.runs[index].updatedAt = .now
       state.runs[index].summary =
         run.kind == .planning

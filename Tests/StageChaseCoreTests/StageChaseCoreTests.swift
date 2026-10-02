@@ -24,7 +24,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(prompt.contains("Start with user stories, then risks."))
   #expect(prompt.contains("attach_task_plan"))
   #expect(prompt.contains("move_task` to `planned`"))
-  #expect(prompt.contains("Keep the task incomplete"))
+  #expect(prompt.contains("Preserve the current completion flag"))
+  #expect(prompt.contains("MCP has no completion action"))
   #expect(!prompt.contains("set_task_completed"))
   #expect(!prompt.contains("Execute this existing task"))
   #expect(!prompt.contains("implementation work"))
@@ -468,6 +469,56 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   library = try BoardReducer.apply(.move(task.id, .review, expectedRevision: 1), to: library)
   #expect(library.tasks[0].stage == .review)
   #expect(library.runs.count == 1)
+  library = try BoardReducer.apply(.complete(task.id, true, expectedRevision: 2), to: library)
+  #expect(library.tasks[0].completed)
+  #expect(library.tasks[0].status == .done)
+  var activeRun = library.runs[0]
+  activeRun.status = .running
+  library = try BoardReducer.apply(.updateRun(activeRun), to: library)
+  library = try BoardReducer.apply(.finishRun(library.runs[0].id, planPath: nil), to: library)
+  #expect(library.tasks[0].stage == .review)
+  #expect(library.tasks[0].section == .implementing)
+  #expect(library.tasks[0].completed)
+  #expect(library.tasks[0].status == .done)
+}
+
+@Test func sameStageConfirmationCanQueueOnlyAfterUserConfirms() throws {
+  var project = Project(name: "A", directory: "/tmp/fixture")
+  project.automationEnabled = true
+  let task = WorkItem(projectID: project.id, title: "Plan it", stage: .next)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+
+  library = try BoardReducer.apply(
+    .move(task.id, .next, expectedRevision: 0, configuration: fixtureModelConfiguration),
+    to: library)
+
+  #expect(library.tasks[0].stage == .next)
+  #expect(library.runs.count == 1)
+  #expect(library.tasks[0].planPath == WorkItem.canonicalPlanPath(for: task.id, title: task.title))
+  #expect(library.tasks[0].revision == 1)
+}
+
+@Test func reorderCanMoveTaskAcrossPriorityGroups() throws {
+  let project = Project(name: "A")
+  var source = WorkItem(projectID: project.id, title: "Source", stage: .implementation)
+  source.priority = .low
+  source.rank = 0
+  var target = WorkItem(projectID: project.id, title: "Target", stage: .implementation)
+  target.priority = .high
+  target.rank = 0
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [source, target]
+
+  library = try BoardReducer.apply(
+    .reorder(source.id, before: target.id, expectedRevision: source.revision), to: library)
+
+  let moved = try #require(library.tasks.first { $0.id == source.id })
+  #expect(moved.priority == .high)
+  #expect(moved.rank == 0)
+  #expect(moved.revision == 1)
 }
 
 @Test func codexCompletionLeavesTaskColumnAndCompletionStateAlone() throws {
@@ -922,19 +973,6 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let text = try String(contentsOf: plan, encoding: .utf8)
   #expect(text.components(separatedBy: "## User feedback on the plan").count == 2)
   #expect(text.hasSuffix("Keep the migration small."))
-}
-
-@Test func reorderCannotCrossPriorityGroups() throws {
-  let project = Project(name: "Priority")
-  var high = WorkItem(projectID: project.id, title: "High")
-  high.priority = .high
-  let medium = WorkItem(projectID: project.id, title: "Medium")
-  var library = Library()
-  library.projects = [project]
-  library.tasks = [high, medium]
-  #expect(throws: BoardError.self) {
-    try BoardReducer.apply(.reorder(high.id, before: medium.id, expectedRevision: 0), to: library)
-  }
 }
 
 @Test func legacyWorkItemsDecodeIntoConsolidatedSectionsAndStatuses() throws {
