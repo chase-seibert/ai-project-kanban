@@ -176,6 +176,12 @@ import UniformTypeIdentifiers
           if mcpServer == nil {
             let server = MCPServer(repository: repository)
             server.onLibraryChanged = { [weak self] library in self?.library = library }
+            server.onDesktopSessionLink = { [weak self] runID, threadID in
+              guard let self, let runner = self.runner else {
+                throw BoardError.invalid("Codex Desktop session linking is unavailable.")
+              }
+              try await runner.linkDesktopSession(runID: runID, threadID: threadID)
+            }
             mcpServer = server
           }
           if preferences.object(forKey: Self.mcpServerEnabledPreferenceKey) as? Bool ?? true {
@@ -337,6 +343,12 @@ import UniformTypeIdentifiers
       if mcpServer == nil {
         let server = MCPServer(repository: repository)
         server.onLibraryChanged = { [weak self] library in self?.library = library }
+        server.onDesktopSessionLink = { [weak self] runID, threadID in
+          guard let self, let runner = self.runner else {
+            throw BoardError.invalid("Codex Desktop session linking is unavailable.")
+          }
+          try await runner.linkDesktopSession(runID: runID, threadID: threadID)
+        }
         mcpServer = server
       }
       preferences.set(true, forKey: Self.mcpServerEnabledPreferenceKey)

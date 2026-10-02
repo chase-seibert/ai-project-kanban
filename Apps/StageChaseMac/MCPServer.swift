@@ -9,6 +9,7 @@ import Network
   private let repository: LibraryRepository
   private let token: String
   var onLibraryChanged: ((Library) -> Void)?
+  var onDesktopSessionLink: ((UUID, String) async throws -> Void)?
   private var listener: NWListener?
 
   init(repository: LibraryRepository, preferences: UserDefaults = .standard) {
@@ -216,6 +217,11 @@ import Network
       else { throw BoardError.missing }
       let operationID = try uuid("operation_id", arguments)
       let kindName = try optionalString("activity_kind", arguments, max: 32) ?? "task"
+      let suppliedThreadID = try optionalString("thread_id", arguments, max: 256)
+      let threadID = suppliedThreadID?.trimmingCharacters(in: .whitespacesAndNewlines)
+      if suppliedThreadID != nil && threadID?.isEmpty == true {
+        throw BoardError.invalid("thread_id must contain a Codex Desktop thread ID.")
+      }
       guard let kind = RunKind(rawValue: kindName) else {
         throw BoardError.invalid("activity_kind must be planning, implementation, or task.")
       }
@@ -226,10 +232,27 @@ import Network
       run.summary = "Work started in Codex Desktop."
       let result = try await commit(
         .beginExternalRun(run), operationID: operationID, arguments: arguments)
-      return [
+      var response: [String: Any] = [
         "run_id": run.id.uuidString.lowercased(),
         "task": taskJSON(try requiredTask(taskID, in: result)),
       ]
+      if let threadID {
+        do {
+          guard let onDesktopSessionLink else {
+            throw BoardError.invalid("StageChase cannot observe Codex Desktop sessions right now.")
+          }
+          try await onDesktopSessionLink(run.id, threadID)
+          response["thread_linked"] = true
+        } catch {
+          response["thread_linked"] = false
+          response["thread_link_error"] = error.localizedDescription
+        }
+      } else {
+        response["thread_linked"] = false
+        response["thread_link_error"] =
+          "No exact Codex Desktop thread ID was supplied. Link this run from task detail."
+      }
+      return response
     case "move_task":
       let projectID = try uuid("project_id", arguments)
       let taskID = try uuid("task_id", arguments)
@@ -436,11 +459,12 @@ extension MCPServer {
       ]),
     tool(
       "begin_task",
-      "Record that planning or execution work began in the already-open Codex Desktop session. activity_kind is optional for older clients and defaults to task. This never starts a session or turn.",
+      "Record planning or execution work in the already-open Codex Desktop session. Supply thread_id only when this client exposes the exact current Codex app-server thread ID; never guess or use an MCP session ID. If omitted or linking fails, the run is still recorded but remains unlinked and can be linked from task detail. activity_kind is optional for older clients and defaults to task. This never starts a session or turn.",
       [
         "type": "object",
         "properties": [
           "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
+          "thread_id": ["type": "string", "minLength": 1, "maxLength": 256],
           "activity_kind": ["type": "string", "enum": ["planning", "implementation", "task"]],
         ],
         "required": ["project_id", "task_id", "operation_id"], "additionalProperties": false,

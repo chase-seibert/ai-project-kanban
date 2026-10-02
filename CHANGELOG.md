@@ -10,6 +10,10 @@
   detail sections. Let the user link an exact same-project Desktop thread and
   observe its live turn state and latest message; show a card spinner/caption
   only for a confirmed busy turn, and stop it on waiting, idle, or disconnect.
+- Let `begin_task` accept the exact current Codex Desktop `thread_id` and link
+  the run immediately when supplied. Update shared MCP and generated handoff
+  instructions to pass the ID when available, never guess, and report when
+  manual linking is still needed.
 - Verify the Mac sync listener over loopback with a nonce and per-instance ID,
   and show whether this StageChase instance successfully receives requests on
   its registered port.

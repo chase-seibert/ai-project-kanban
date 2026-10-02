@@ -210,9 +210,10 @@ Phone confirmation for automated transitions remains open.
 - As a user, I want external `begin_task` to distinguish planning from task
   execution while older callers default to generic task activity, so the task
   history keeps those workflows separate.
-- As a user, I want to explicitly link the same-project Codex Desktop thread
-  where I pasted a prompt, so StageChase tracks that exact session instead of
-  guessing from its title or task text.
+- As a user, I want `begin_task` clients to pass the exact current Codex Desktop
+  thread ID when their client exposes it, so StageChase can link the run as soon
+  as it is recorded without guessing from a title or task text. When the client
+  cannot access that ID, I can link the exact session from task detail.
 - As a user, I want the linked task card to show a spinner and the latest short
   Codex message only while a confirmed turn is busy, so waiting, finished, or
   disconnected sessions are not shown as processing.

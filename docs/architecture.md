@@ -52,13 +52,20 @@ unchanged. Both use the project's saved execution profile. The user-run actions
 **Launch Codex** and **Plan in Codex** open Codex Desktop with generated prompts
 without submitting turns.
 External `begin_task` records accept an optional `activity_kind` of `planning`,
-`implementation`, or `task`; old clients default to `task`. Because prompt
-opening does not return the Desktop thread ID, task detail offers an explicit
-same-project session picker. Choosing a session calls `thread/resume` to join
-that exact thread and observe notifications; `thread/read` alone is a snapshot,
-not a subscription. StageChase shows the card spinner and a short latest-message
-caption only while a confirmed turn is busy. Waiting, idle, or stale states stop
-the spinner. Linking does not submit, interrupt, or close an external turn.
+`implementation`, or `task`; old clients default to `task`. Clients may also
+pass the exact current Codex Desktop app-server `thread_id`. StageChase validates
+and resumes that thread after recording the run, then observes its live events.
+The run is still recorded if linking fails; the tool response reports
+`thread_linked: false`, and task detail offers an explicit same-project session
+picker as a fallback. Clients must not guess a thread ID or substitute an MCP
+session identifier. Because prompt opening does not return the Desktop thread
+ID, generated prompts instruct clients to pass it only when the exact ID is
+available to them. Choosing a session from the picker calls `thread/resume` to
+join that exact thread and observe notifications; `thread/read` alone is a
+snapshot, not a subscription. StageChase shows the card spinner and a short
+latest-message caption only while a confirmed turn is busy. Waiting, idle, or
+stale states stop the spinner. Linking does not submit, interrupt, or close an
+external turn.
 Prompts for Desktop handoff use stable project/task IDs and a readable
 project-relative plan path when available, and start with the exact task title.
 Runner-created planning

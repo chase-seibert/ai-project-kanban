@@ -280,6 +280,9 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
     if let existingRunID = observedDesktopRuns[threadID], existingRunID != runID {
       throw BoardError.invalid("This Codex Desktop session is already linked to another task.")
     }
+    guard try await desktopThreads(for: runID).contains(where: { $0.id == threadID }) else {
+      throw BoardError.invalid("Choose a Codex Desktop session from this task's project.")
+    }
     try await connect(executable: executable())
     let response = try await connection.call(
       "thread/resume", ["threadId": threadID, "excludeTurns": false])
