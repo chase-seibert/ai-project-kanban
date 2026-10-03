@@ -44,11 +44,12 @@ produce a verified run outcome; the task section never changes automatically.
 Planning completion sets Ready, implementation completion sets Review, and only
 the user's explicit sign-off sets Done and the existing completion flag. With
 automatic invocation off, task detail separates actions the user runs in Codex
-from actions StageChase runs. **Run with StageChase** confirms the resolved
-model and queues only that task for the Mac runner, without changing its section
-or requiring either automation setting. **Plan with StageChase** queues a
-planning run from any task section, reserves the plan path, and leaves placement
-unchanged. Both use the project's saved execution profile. The user-run actions
+from actions StageChase runs. **Execute Task** confirms the resolved model and
+queues an implementation run from Planning or Implementing through the Mac
+runner, without changing the task's section or requiring either automation
+setting. **Plan with StageChase** queues a planning run from any task section,
+reserves the plan path, and leaves placement unchanged. Both use the project's
+saved execution profile. The user-run actions
 **Launch Codex** and **Plan in Codex** open Codex Desktop with generated prompts
 without submitting turns.
 External `begin_task` records accept an optional `activity_kind` of `planning`,
@@ -374,7 +375,7 @@ sync; with automatic sync disabled, phone edits remain queued until then.
 Polling itself never invokes the runner. The Mac must be awake with StageChase
 open. Paired-phone completion/reopening and confirmed task deletion use direct,
 revision-checked commands. Phone stage moves do not include automation
-configuration and never enqueue or invoke Codex. Tapping Run with StageChase or
+configuration and never enqueue or invoke Codex. Tapping Execute Task or
 Plan with StageChase on the phone is the user's confirmation; the Mac resolves
 its saved model and starts the requested run without a second desktop prompt.
 Project settings on phone can update the execution profile and model for future

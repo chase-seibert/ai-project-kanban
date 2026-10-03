@@ -630,6 +630,8 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
       } ?? "No plan is attached. Continue from the task details."
     return common + """
 
+      Execute the task now. Do the requested implementation work.
+      Do not create or revise a plan as the deliverable.
       \(planInstruction) Preserve all unrelated work.
       If this is a retry, inspect changes already made and continue; do not repeat completed operations.
       Run focused tests and summarize verification, changed files, and any remaining limitations. If blocked or incomplete, clearly report failure rather than claiming completion.

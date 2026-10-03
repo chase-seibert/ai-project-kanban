@@ -2,6 +2,9 @@
 
 ## 2026-10-02
 
+- Rename the explicit StageChase task action to **Execute Task** and make it
+  queue an implementation run from Planning or Implementing. Keep plan creation
+  and revision on the separate planning action.
 - Add project Codex command rules and build instructions that request approved
   host execution initially for Apple builds/checks, avoiding repeated known
   compiler sandbox failures while keeping workspace sandboxing as the default.

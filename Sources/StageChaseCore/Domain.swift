@@ -796,9 +796,11 @@ public enum BoardReducer {
         throw BoardError.missing
       }
       guard
-        kind == .planning || (kind == .implementation && item.section == .implementing)
+        kind == .planning
+          || (kind == .implementation && [.planning, .implementing].contains(item.section))
       else {
-        throw BoardError.invalid("Implementation runs require the task to be in Implementing.")
+        throw BoardError.invalid(
+          "Implementation runs require the task to be in Planning or Implementing.")
       }
       guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw BoardError.invalid("Choose a project folder before starting a Codex run.")

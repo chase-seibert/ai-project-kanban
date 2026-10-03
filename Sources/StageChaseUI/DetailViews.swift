@@ -732,9 +732,8 @@ struct TaskDetail: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Text("StageChase runs").stageFont(.headline).padding(.top, 6)
-                Button("Run with StageChase", systemImage: "play.fill") {
-                  model.requestRunnerRun(
-                    item, kind: item.section == .planning ? .planning : .implementation)
+                Button("Execute Task", systemImage: "play.fill") {
+                  model.requestRunnerRun(item, kind: .implementation)
                 }
                 .disabled(
                   handoffActionsDisabled || item.completed
@@ -745,7 +744,7 @@ struct TaskDetail: View {
                   ![.planning, .implementing].contains(item.section)
                     ? "Move the task to Planning or Implementing first."
                     : handoffProject?.directory.isEmpty == false
-                      ? "Start this task in StageChase. You will review the model and confirm first."
+                      ? "Execute this task in StageChase. You will review the model and confirm first."
                       : "Choose a repository folder in Project settings before running this task."
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -794,7 +793,7 @@ struct TaskDetail: View {
                     requestCodexAction(.plan, item: item)
                   }
                   .disabled(codexActionLoading || item.completed)
-                  Button("Run with StageChase", systemImage: "play.fill") {
+                  Button("Execute Task", systemImage: "play.fill") {
                     requestCodexAction(.run, item: item)
                   }
                   .disabled(

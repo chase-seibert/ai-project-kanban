@@ -1116,8 +1116,7 @@ import UniformTypeIdentifiers
   }
 
   func requestRunnerRun(_ item: WorkItem) {
-    requestRunnerRun(
-      item, kind: item.section == .planning ? .planning : .implementation)
+    requestRunnerRun(item, kind: .implementation)
   }
 
   func requestRunnerRun(_ item: WorkItem, kind: RunKind) {
@@ -1128,7 +1127,8 @@ import UniformTypeIdentifiers
         return
       }
       guard
-        kind == .planning || (kind == .implementation && item.section == .implementing),
+        kind == .planning
+          || (kind == .implementation && [.planning, .implementing].contains(item.section)),
         !item.completed,
         !library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive }),
         let current = library.tasks.first(where: { $0.id == item.id }),

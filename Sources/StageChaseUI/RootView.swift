@@ -162,7 +162,7 @@ struct RootView: View {
       model.pendingMove?.runOnly == true
         ? model.pendingMove?.runKind == .planning
           ? "Plan this task with StageChase?"
-          : "Run this task with StageChase?"
+          : "Execute this task with StageChase?"
         : "Start Codex \(model.pendingMove?.stage == .next ? "planning" : "implementation")?",
       isPresented: Binding(
         get: { model.pendingMove != nil }, set: { if !$0 { model.pendingMove = nil } }),
@@ -174,7 +174,7 @@ struct RootView: View {
             ? "Confirm model and retry"
             : move.runKind == .planning
               ? "Plan with StageChase"
-              : move.runOnly ? "Run with StageChase" : "Start Codex"
+              : move.runOnly ? "Execute Task" : "Start Codex"
         ) {
           Task {
             if move.retryRunID == nil {

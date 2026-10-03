@@ -149,10 +149,11 @@ Phone confirmation for automated transitions remains open.
 
 ## Implementation automation
 
-- As a user, I want a task-detail action to run the selected task in StageChase
-  after confirming the model, even when automatic invocation is off, so I can
-  start managed Codex work without opening Codex Desktop.
-- As a user, I want Run with StageChase to preserve the task's current section
+- As a user, I want an **Execute Task** action to execute the selected task in
+  StageChase from Planning or Implementing after confirming the model, even when
+  automatic invocation is off, so I can start managed Codex work without opening
+  Codex Desktop.
+- As a user, I want Execute Task to preserve the task's current section
   and leave Launch Codex available as a separate Desktop handoff.
 - As a user, I want Plan with StageChase to start a confirmed planning run
   from any task section without moving the task, so StageChase can create a

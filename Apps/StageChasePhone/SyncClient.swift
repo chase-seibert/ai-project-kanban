@@ -299,7 +299,7 @@ private struct PhoneOutbox: Codable {
     case .readPlan: "Read saved plan"
     case .modelCatalog: "Refresh Codex model list"
     case .invokeCodex(_, _, _, let action):
-      action == .plan ? "Plan in Codex" : "Run with StageChase"
+      action == .plan ? "Plan in Codex" : "Execute Task"
     case .gitStatus: "Read Git status"
     case .commitTask: "Commit task changes"
     case .commitProject: "Commit project changes"
