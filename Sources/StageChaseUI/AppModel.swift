@@ -131,6 +131,7 @@ import UniformTypeIdentifiers
     var gitBusyProjectIDs: Set<UUID> = []
     var gitActionMessages: [UUID: String] = [:]
     private let gitService = GitService()
+    let makeTargetService = MakeTargetService()
   #endif
 
   #if os(iOS)
@@ -1047,6 +1048,16 @@ import UniformTypeIdentifiers
         await refreshTaskGitStatus(taskID: taskID)
         await refreshGitStatus(projectID: project.id)
       }
+    }
+
+    func runFavoriteMakeTarget(_ target: String, projectID: UUID) throws {
+      guard let project = library.projects.first(where: { $0.id == projectID }) else {
+        throw BoardError.missing
+      }
+      guard project.favoriteMakeTargets.contains(target) else {
+        throw MakeTargetError.invalidTarget
+      }
+      try makeTargetService.start(target: target, project: project)
     }
 
     func commitProjectChanges(projectID: UUID) async {

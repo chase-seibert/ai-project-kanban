@@ -114,6 +114,19 @@ Phone confirmation for automated transitions remains open.
   requests run on the Mac, stay online-only, and return no filesystem paths.
   Commit operation IDs are deduplicated on the Mac.
 
+## Favorite Make targets
+
+- As a user, I want to add, remove, and reorder favorite Make target names in
+  Mac Project Settings, so that frequently used project actions are easy to
+  find.
+- As a user, I want to explicitly run one of a project's favorites from its Mac
+  board header, stop an active target, and see bounded output and the result,
+  so that I can run common repository actions without leaving the board.
+- Favorites are project-specific Codable data and round-trip through phone
+  snapshots. Settings and execution remain Mac-only. Runs use the latest saved
+  project folder, one target argument, and one app-wide active process; they
+  never alter tasks, start Codex, or commit Git changes.
+
 ## Planned automation
 
 - As a user, I want a confirmed move into Planning to create one persisted Codex

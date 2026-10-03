@@ -242,6 +242,7 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
   public var executionProfile: CodexExecutionProfile?
   public var deployedCommitHash: String?
   public var deployedAt: Date?
+  public var favoriteMakeTargets: [String]?
   public var createdAt: Date
 
   public init(_ project: Project) {
@@ -253,6 +254,7 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
     executionProfile = project.executionProfile
     deployedCommitHash = project.deployedCommitHash
     deployedAt = project.deployedAt
+    favoriteMakeTargets = project.favoriteMakeTargets
     createdAt = project.createdAt
   }
 }
@@ -351,6 +353,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       project.executionProfile = $0.executionProfile ?? .workspaceAccessNoPrompts
       project.deployedCommitHash = $0.deployedCommitHash
       project.deployedAt = $0.deployedAt
+      project.favoriteMakeTargets = $0.favoriteMakeTargets ?? []
       project.createdAt = $0.createdAt
       return project
     }

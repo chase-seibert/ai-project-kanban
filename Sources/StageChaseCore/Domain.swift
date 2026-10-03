@@ -339,11 +339,12 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var executionProfile: CodexExecutionProfile = .workspaceAccessNoPrompts
   public var deployedCommitHash: String?
   public var deployedAt: Date?
+  public var favoriteMakeTargets: [String] = []
   public var createdAt = Date()
 
   private enum CodingKeys: String, CodingKey {
     case id, name, directory, automationEnabled, usesWorktrees, modelOverride, executionProfile
-    case deployedCommitHash, deployedAt, createdAt
+    case deployedCommitHash, deployedAt, favoriteMakeTargets, createdAt
   }
 
   public init(name: String, directory: String = "") {
@@ -364,6 +365,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
       ?? .workspaceAccessNoPrompts
     deployedCommitHash = try values.decodeIfPresent(String.self, forKey: .deployedCommitHash)
     deployedAt = try values.decodeIfPresent(Date.self, forKey: .deployedAt)
+    favoriteMakeTargets =
+      try values.decodeIfPresent([String].self, forKey: .favoriteMakeTargets) ?? []
     createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
   }
 
@@ -378,6 +381,7 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     try values.encode(executionProfile, forKey: .executionProfile)
     try values.encodeIfPresent(deployedCommitHash, forKey: .deployedCommitHash)
     try values.encodeIfPresent(deployedAt, forKey: .deployedAt)
+    try values.encode(favoriteMakeTargets, forKey: .favoriteMakeTargets)
     try values.encode(createdAt, forKey: .createdAt)
   }
 }

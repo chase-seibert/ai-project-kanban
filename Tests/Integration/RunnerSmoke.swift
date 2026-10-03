@@ -15,6 +15,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try await testMCPCompletionCannotBeChangedByLegacyTool()
     try await testMovePersistsWhenRunnerSetupFails()
     try await testGitService()
+    try await testMakeTargetService()
     let promptProject = Project(name: "Prompt fixture", directory: "/tmp/prompt-fixture")
     let promptTask = WorkItem(projectID: promptProject.id, title: "Readable prompt title")
     guard
@@ -637,6 +638,69 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     } catch GitServiceError.command {}
     print(
       "PASS: Git status tracks clean, dirty, untracked, and empty-repository states; task commits stage all changes"
+    )
+  }
+
+  @MainActor static func testMakeTargetService() async throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stagechase-make-smoke-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let recipePrefix = "\t"
+    try """
+    .PHONY: verify fail wait
+    verify:
+    \(recipePrefix)@echo from-stdout
+    \(recipePrefix)@echo from-stderr >&2
+    fail:
+    \(recipePrefix)@echo expected-failure >&2
+    \(recipePrefix)@false
+    wait:
+    \(recipePrefix)@exec sleep 10
+    """.write(to: root.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+    var project = Project(name: "Make fixture", directory: root.path)
+    project.favoriteMakeTargets = ["verify", "fail", "wait"]
+    let service = MakeTargetService()
+    try service.start(target: "verify", project: project)
+    try await wait { !service.isRunning }
+    guard service.status == .succeeded,
+      service.output.contains("from-stdout"), service.output.contains("from-stderr"),
+      service.projectID == project.id
+    else { throw BoardError.invalid("Make success status or combined output was not retained") }
+
+    try service.start(target: "fail", project: project)
+    try await wait { !service.isRunning }
+    guard case .failed = service.status, service.output.contains("expected-failure") else {
+      throw BoardError.invalid("A failing Make target did not report its output and exit status")
+    }
+    try service.start(target: "wait", project: project)
+    service.stop()
+    try await wait { !service.isRunning }
+    guard service.status == .stopped else {
+      throw BoardError.invalid("Stopping a Make target did not leave stopped status")
+    }
+    do {
+      _ = try MakeTargetService.validate("-f")
+      throw BoardError.invalid("A Make option was accepted as a target")
+    } catch MakeTargetError.invalidTarget {}
+    do {
+      try service.start(
+        target: "verify", project: Project(name: "Missing", directory: root.path + "/missing"))
+      throw BoardError.invalid("A missing Make working directory was accepted")
+    } catch MakeTargetError.missingDirectory {}
+    let marker = root.appendingPathComponent("injected")
+    let shellLike = "verify; touch injected"
+    do {
+      try service.start(target: shellLike, project: project)
+      try await wait { !service.isRunning }
+      guard case .failed = service.status,
+        !FileManager.default.fileExists(atPath: marker.path)
+      else { throw BoardError.invalid("Shell-like target text executed an extra command") }
+    } catch MakeTargetError.invalidTarget {
+      throw BoardError.invalid("A safe single-argument target string was rejected")
+    }
+    print(
+      "PASS: Make targets run in the project directory with bounded process state, output, and safe argument handling"
     )
   }
 

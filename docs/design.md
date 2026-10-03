@@ -4,6 +4,12 @@ Mac sidebar and iPhone Projects tab are the main entry points. New Project opens
 a blank form with a fresh identity; Project Settings edits the chosen project.
 Switching projects clears task selection and search.
 
+On Mac, Project Settings stores an ordered list of favorite Make target names.
+The project header offers an explicit Run action for each favorite and a Stop
+action while a target is active. It shows the selected project, target, running
+or final result, and bounded process output. Settings and execution are Mac-only;
+favorite names travel in project snapshots so phone refreshes do not discard them.
+
 The board has three sections in order: Inbox, Planning, and Implementing. Mac
 shows them as three side-by-side columns with independently vertical-scrolling
 task lists; iPhone keeps horizontally paged columns. Each card shows one

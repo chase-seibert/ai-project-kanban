@@ -2,6 +2,10 @@
 
 ## 2026-10-02
 
+- Add project-specific favorite Make targets to Mac Project Settings and an
+  explicit project-header run menu with Stop, bounded output, and final status.
+  Favorite names remain backward-compatible and round-trip through phone
+  snapshots; Make execution stays separate from tasks, Codex, and Git commits.
 - Rename the explicit StageChase task action to **Execute Task** and make it
   queue an implementation run from Planning or Implementing. Keep plan creation
   and revision on the separate planning action.

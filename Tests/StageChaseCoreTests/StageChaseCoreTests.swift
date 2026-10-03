@@ -148,12 +148,14 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     #"{"id":"00000000-0000-0000-0000-000000000001","name":"Legacy","directory":"/tmp/legacy","automationEnabled":true,"createdAt":0}"#
       .utf8)
   let decoded = try JSONDecoder().decode(Project.self, from: legacy)
+  #expect(decoded.favoriteMakeTargets.isEmpty)
   #expect(!decoded.usesWorktrees)
   #expect(decoded.executionProfile == .workspaceAccessNoPrompts)
   #expect(!Project(name: "New").usesWorktrees)
 
   var enabled = decoded
   enabled.usesWorktrees = true
+  enabled.favoriteMakeTargets = ["test", "lint"]
   let roundTrip = try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(enabled))
   #expect(roundTrip == enabled)
 }
@@ -243,6 +245,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   project.usesWorktrees = true
   project.modelOverride = CodexModelConfiguration(selection: .model("private-model"))
   project.executionProfile = .fullAccessNoPrompts
+  project.favoriteMakeTargets = ["test", "build"]
   var task = WorkItem(projectID: project.id, title: "Task", stage: .planned)
   task.planPath = "/Users/test/private-repo/plan.md"
   task.notes = "Keep the details"
@@ -263,9 +266,19 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.projects[0].usesWorktrees)
   #expect(replica.projects[0].modelOverride == project.modelOverride)
   #expect(replica.projects[0].executionProfile == .fullAccessNoPrompts)
+  #expect(replica.projects[0].favoriteMakeTargets == project.favoriteMakeTargets)
   #expect(replica.tasks[0].notes == task.notes)
   #expect(replica.tasks[0].planPath == nil)
   #expect(replica.runs[0].status == run.status)
+
+  var legacyObject = try #require(
+    JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+  var legacyProjects = try #require(legacyObject["projects"] as? [[String: Any]])
+  legacyProjects[0].removeValue(forKey: "favoriteMakeTargets")
+  legacyObject["projects"] = legacyProjects
+  let legacySnapshotData = try JSONSerialization.data(withJSONObject: legacyObject)
+  let legacySnapshot = try JSONDecoder().decode(SyncSnapshot.self, from: legacySnapshotData)
+  #expect(try legacySnapshot.replica().projects[0].favoriteMakeTargets.isEmpty)
 }
 
 @Test func remoteCommandsAreTransactionalRevisionCheckedAndIdempotent() async throws {

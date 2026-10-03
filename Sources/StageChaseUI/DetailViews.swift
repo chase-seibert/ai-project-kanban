@@ -74,6 +74,7 @@ struct ProjectEditor: View {
   @State var project: Project
   let isNew: Bool
   @State private var saving = false
+  @State private var makeTargetDraft = ""
   var body: some View {
     NavigationStack {
       Form {
@@ -97,6 +98,53 @@ struct ProjectEditor: View {
                 if panel.runModal() == .OK, let url = panel.url { project.directory = url.path }
               }
             }
+            VStack(alignment: .leading, spacing: 8) {
+              Text("Favorite Make targets").font(.headline)
+              HStack {
+                TextField("Target name", text: $makeTargetDraft)
+                  .onSubmit(addMakeTarget)
+                Button("Add", action: addMakeTarget)
+                  .disabled(!canAddMakeTarget)
+              }
+              if project.favoriteMakeTargets.isEmpty {
+                Text("Add the Make targets you use often. Names are saved with this project.")
+                  .stageFont(.caption).foregroundStyle(.secondary)
+              } else {
+                ForEach(Array(project.favoriteMakeTargets.enumerated()), id: \.offset) {
+                  index, name in
+                  HStack {
+                    Label(name, systemImage: "star.fill")
+                    Spacer()
+                    Button {
+                      guard index > 0 else { return }
+                      project.favoriteMakeTargets.swapAt(index, index - 1)
+                    } label: {
+                      Image(systemName: "arrow.up")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(index == 0)
+                    .help("Move \(name) up")
+                    Button {
+                      guard index + 1 < project.favoriteMakeTargets.count else { return }
+                      project.favoriteMakeTargets.swapAt(index, index + 1)
+                    } label: {
+                      Image(systemName: "arrow.down")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(index + 1 == project.favoriteMakeTargets.count)
+                    .help("Move \(name) down")
+                    Button(role: .destructive) {
+                      project.favoriteMakeTargets.remove(at: index)
+                    } label: {
+                      Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Remove \(name) from favorite Make targets")
+                  }
+                }
+              }
+            }
+            .padding(.top, 5)
           #endif
         }
         Section {
@@ -223,6 +271,19 @@ struct ProjectEditor: View {
       #endif
     }
   }
+
+  private var canAddMakeTarget: Bool {
+    let target = makeTargetDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    return !target.isEmpty && !target.hasPrefix("-")
+      && !project.favoriteMakeTargets.contains(target)
+  }
+
+  private func addMakeTarget() {
+    let target = makeTargetDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard canAddMakeTarget, (try? MakeTargetService.validate(target)) != nil else { return }
+    project.favoriteMakeTargets.append(target)
+    makeTargetDraft = ""
+  }
 }
 
 #if os(macOS)
@@ -235,6 +296,7 @@ struct ProjectEditor: View {
     @State private var modelDraft: CodexModelConfiguration?
     @State private var savingModel = false
     @State private var modelError: String?
+    @State private var makeError: String?
 
     private var effectiveModel: (configuration: CodexModelConfiguration, scope: CodexModelScope) {
       CodexModelResolver.effective(
@@ -244,6 +306,7 @@ struct ProjectEditor: View {
     var body: some View {
       VStack(alignment: .leading, spacing: 9) {
         HStack(spacing: 10) {
+          makeTargetMenu
           Toggle(
             "Worktrees",
             isOn: Binding(
@@ -286,6 +349,81 @@ struct ProjectEditor: View {
           }
         }
         ProjectGitStatusView(project: project, taskID: nil, showDeployedAction: true)
+        makeTargetResult
+      }
+    }
+
+    private var currentProject: Project {
+      model.library.projects.first(where: { $0.id == project.id }) ?? project
+    }
+
+    private var makeTargetMenu: some View {
+      Menu {
+        if currentProject.favoriteMakeTargets.isEmpty {
+          Text("Add favorites in Project settings")
+        } else {
+          ForEach(currentProject.favoriteMakeTargets, id: \.self) { target in
+            Button("Run \(target)", systemImage: "play.fill") {
+              do {
+                try model.runFavoriteMakeTarget(target, projectID: currentProject.id)
+                makeError = nil
+              } catch {
+                makeError = error.localizedDescription
+              }
+            }
+            .disabled(model.makeTargetService.isRunning)
+          }
+        }
+        if model.makeTargetService.isRunning {
+          Divider()
+          Button(
+            "Stop \(model.makeTargetService.target)", systemImage: "stop.fill", role: .destructive
+          ) {
+            model.makeTargetService.stop()
+          }
+        }
+      } label: {
+        Label(
+          "Make", systemImage: model.makeTargetService.isRunning ? "gearshape.2.fill" : "hammer")
+      }
+      .menuStyle(.borderlessButton)
+      .help("Run a favorite Make target in \(currentProject.name)")
+      .accessibilityIdentifier("project-make-target-menu")
+    }
+
+    @ViewBuilder private var makeTargetResult: some View {
+      let service = model.makeTargetService
+      if service.projectID == project.id {
+        HStack(spacing: 6) {
+          if service.isRunning { ProgressView().controlSize(.small) }
+          Text("Make · \(service.projectName) / \(service.target) · \(service.status.label)")
+            .stageFont(.caption).foregroundStyle(service.isRunning ? .orange : .secondary)
+          if service.isRunning {
+            Button("Stop") { service.stop() }.buttonStyle(.borderless)
+          }
+        }
+        if case .failed(let message) = service.status {
+          Text(message).stageFont(.caption).foregroundStyle(.orange)
+        }
+        if !service.output.isEmpty {
+          ScrollView {
+            Text(service.output).font(.system(.caption, design: .monospaced))
+              .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .frame(maxHeight: 100)
+          .padding(7)
+          .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 7))
+        }
+      } else if service.isRunning {
+        HStack {
+          ProgressView().controlSize(.small)
+          Text("\(service.target) is running in \(service.projectName)")
+            .stageFont(.caption).foregroundStyle(.secondary)
+          Button("Stop") { service.stop() }.buttonStyle(.borderless)
+        }
+      }
+      if let makeError {
+        Text(makeError).stageFont(.caption).foregroundStyle(.orange)
       }
     }
 

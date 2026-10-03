@@ -161,7 +161,7 @@ struct BoardHeader: View {
             .stageFont(.subheadline).foregroundStyle(.secondary).padding(.top, 10)
         }
         if let project = model.selectedProject {
-          ProjectGitStatusView(project: project, taskID: nil, showDeployedAction: true)
+          ProjectHeaderControls(project: project)
         }
       #endif
       HStack(spacing: 8) {

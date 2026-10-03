@@ -265,6 +265,22 @@ branch changes happen elsewhere. Older project records decode with no
 checkpoint. The checkpoint is included in the phone's project replica, while
 local repository paths and Git contents remain Mac-only.
 
+## Favorite Make targets
+
+Projects store an ordered, backward-compatible list of favorite Make target
+names. `SyncProject` carries the list and older snapshots decode it as empty;
+the phone can preserve the data but has no editor or execution command. The Mac
+project editor trims names and rejects empty, duplicate, leading-dash, and
+control-character values.
+
+`MakeTargetService` resolves the latest project from the library by ID, checks
+its configured directory, and launches `/usr/bin/make` directly with one target
+argument and that directory as its working folder. It captures stdout and
+stderr into a bounded in-memory buffer, keeps one app-wide process active, and
+reports running, succeeded, failed, or stopped state in the project header.
+This local action is separate from task placement/completion, Codex runs, Git
+commits, and phone-triggered work.
+
 ## Plan feedback
 
 The Mac task context field autosaves ordinary notes and, when a readable plan is
