@@ -35,6 +35,9 @@
   when writing them, preserving queued edits across app relaunches.
 - Highlight unread task changes with a subtle light-blue card background and
   sort Planning and Implementing tasks by most recent update on Mac and iPhone.
+- Sync task and project unread read-through markers in protocol v4. Phone
+  acknowledgments apply optimistically, stay queued through failed exchanges and
+  full refresh, and cannot move the shared marker backward.
 - Use neutral text styling for Low, Medium, and High priority labels.
 
 - Add paired iPhone completion/reopening and confirmed task deletion through

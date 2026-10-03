@@ -20,8 +20,9 @@
   records remain persisted. Mac opens saved Codex thread links directly. iPhone
   tries the same URL and offers a Mac continuation message plus session-ID copy
   when no handler accepts it. New Project and Edit Project are distinct routes.
-  Move and completion activity is tagged for unread badges; local read timestamps
-  are tracked independently for each project and task on each device.
+  Move and completion activity is tagged for unread badges. Task and project
+  read-through markers are synchronized separately, so opening a task never clears
+  its project marker and selecting a project never clears task markers.
   Model configuration is a global Mac preference with optional project/task
   overrides; queued runs save the resolved model, effort, policy, and source.
 - `Apps/StageChaseMac/`: one singleton `Window` scene for the board and its
@@ -300,8 +301,11 @@ generated JSON schema was checked for exact request spellings.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Queued phone edits remain a small allowlist (create/edit/
-move/reorder/complete/delete) with expected task revisions. Each command carries
+sanitized snapshots. Protocol version 4 adds synchronized task and project read
+markers and acknowledgment commands. Version 3 and older clients are rejected
+explicitly; they must update before syncing with this build. Queued phone edits
+remain a small allowlist (create/edit/move/reorder/complete/delete and read
+acknowledgments) with expected task revisions where applicable. Each command carries
 the phone edit timestamp captured when queued and the device's monotonic client
 sequence. A stale task edit is rebased only when its source timestamp is newer
 than the Mac task timestamp. Exact timestamp ties favor the Mac; ties between
@@ -327,11 +331,15 @@ identity, monotonic sequence, device high-water marks, and operation receipts in
 the existing SwiftData metadata rows, committing accepted edits and receipts in
 one save. A changed snapshot is returned when the phone cursor is stale; an
 unchanged response avoids retransmitting the library every foreground poll.
-The explicit **Refresh everything from Mac** action requests an unconditional
-full snapshot without submitting queued edits. After the snapshot is received
-and applied, it discards the phone's entire local outbox and any saved conflict
-marker. If the Mac cannot complete the refresh, the cached replica and outbox
-remain intact.
+The explicit **Refresh everything from Mac** action first submits queued phone
+operations, including read acknowledgments, then requests an unconditional full
+snapshot. A transport failure leaves unaccepted operations in the outbox. The
+Mac stores task and project read markers in the existing metadata row alongside
+the sequence and receipts, and snapshots return the authoritative maps. A marker
+contains an activity date and ID; equal dates are ordered by activity UUID, while
+date-only legacy markers acknowledge all activity at their timestamp. Markers
+advance monotonically, so a delayed phone acknowledgment cannot hide a newer
+change. Version 3 clients fail clearly rather than exchanging a partial snapshot.
 
 The Mac app starts `NWListener` on port 47928 only after the user enables local
 sync from Settings → Connection. That explicit choice is remembered, so the

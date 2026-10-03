@@ -30,6 +30,8 @@ import UniformTypeIdentifiers
   var selectedTaskID: UUID?
   var boardSelectedTaskID: UUID?
   private var taskChangeReadStateRevision = 0
+  private(set) var taskReadMarkers: [UUID: TaskChangeReadMarker] = [:]
+  private(set) var projectReadMarkers: [UUID: TaskChangeReadMarker] = [:]
   var boardFocusedStage: WorkflowSection = .inbox
   var taskPendingDeletionID: UUID?
   var launchTaskOnSelectionID: UUID?
@@ -152,6 +154,9 @@ import UniformTypeIdentifiers
     do {
       if let repository {
         library = try await repository.load()
+        let syncState = try await repository.syncStateSnapshot()
+        taskReadMarkers = syncState.taskReadMarkers
+        projectReadMarkers = syncState.projectReadMarkers
       } else if isPreview {
         repository = try LibraryRepository(inMemory: true)
         library = try await repository!.importLibrary(JSONEncoder().encode(Library.preview))
@@ -500,25 +505,6 @@ import UniformTypeIdentifiers
       var acceptedCount = 0
       var receivedSnapshot = false
       do {
-        if forceFullSnapshot {
-          syncClient.status = "Receiving full snapshot from Mac…"
-          guard let snapshot = try await syncClient.snapshot(cursor: 0, force: true) else {
-            throw BoardError.invalid("The Mac did not return a full library snapshot.")
-          }
-          try await apply(
-            snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
-          receivedSnapshot = true
-          selectedTaskID = nil
-          search = ""
-          let discardedCount = try syncClient.discardOutbox()
-          syncClient.lastSuccessfulSync = .now
-          syncClient.status = "Full refresh complete"
-          syncClient.error = nil
-          syncClient.lastResultMessage =
-            "Full snapshot received from Mac. Discarded \(discardedCount) pending local change(s); no pending local changes remain."
-          syncClient.recordDiagnostic(syncClient.lastResultMessage)
-          return
-        }
         while true {
           while let envelope = syncClient.outbox.first {
             syncClient.status = "Sending pending change…"
@@ -552,6 +538,24 @@ import UniformTypeIdentifiers
               syncClient.recordDiagnostic(
                 "Resolved a rejected phone edit using the latest Mac record: \(message)")
             }
+          }
+          if forceFullSnapshot {
+            syncClient.status = "Receiving full snapshot from Mac…"
+            guard let snapshot = try await syncClient.snapshot(cursor: 0, force: true) else {
+              throw BoardError.invalid("The Mac did not return a full library snapshot.")
+            }
+            try await apply(
+              snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
+            receivedSnapshot = true
+            selectedTaskID = nil
+            search = ""
+            syncClient.lastSuccessfulSync = .now
+            syncClient.status = "Full refresh complete"
+            syncClient.error = nil
+            syncClient.lastResultMessage =
+              "Full snapshot received from Mac after resolving \(acceptedCount) queued change(s). No pending local changes remain."
+            syncClient.recordDiagnostic(syncClient.lastResultMessage)
+            return
           }
           syncClient.status = "Refreshing project list…"
           let cursor = try await replicaRepository.syncStateSnapshot().sequence
@@ -600,8 +604,13 @@ import UniformTypeIdentifiers
       }
       let replica = try snapshot.replica()
       try await repository.replaceReplica(
-        replica, libraryID: snapshot.libraryID, sequence: snapshot.sequence)
+        replica, libraryID: snapshot.libraryID, sequence: snapshot.sequence,
+        taskReadMarkers: snapshot.taskReadMarkers,
+        projectReadMarkers: snapshot.projectReadMarkers)
       library = replica
+      taskReadMarkers = snapshot.taskReadMarkers
+      projectReadMarkers = snapshot.projectReadMarkers
+      taskChangeReadStateRevision &+= 1
       if let selectedProjectID, !replica.projects.contains(where: { $0.id == selectedProjectID }) {
         select(replica.projects.first?.id)
       }
@@ -610,6 +619,17 @@ import UniformTypeIdentifiers
     private func applyPendingOverlay() async {
       for envelope in syncClient.outbox {
         guard envelope.libraryID == syncClient.credential?.libraryID else { continue }
+        switch envelope.command {
+        case .acknowledgeTaskChanges(let taskID, let marker):
+          taskReadMarkers[taskID] = .later(taskReadMarkers[taskID], marker)
+          taskChangeReadStateRevision &+= 1
+          continue
+        case .acknowledgeProjectChanges(let projectID, let marker):
+          projectReadMarkers[projectID] = .later(projectReadMarkers[projectID], marker)
+          taskChangeReadStateRevision &+= 1
+          continue
+        default: break
+        }
         do {
           let mutation = try SyncCommandValidator.mutation(for: envelope, in: library)
           library = try BoardReducer.apply(mutation, to: library)
@@ -771,42 +791,79 @@ import UniformTypeIdentifiers
   func unreadTaskChangeKind(for taskID: UUID) -> TaskChangeKind? {
     _ = taskChangeReadStateRevision
     guard let latest = latestTaskChange(for: taskID),
-      latest.date > readDate(forKey: taskChangeReadKey(taskID))
+      !((taskReadMarkers[taskID] ?? legacyMarker(forKey: taskChangeReadKey(taskID)))?
+        .acknowledges(latest) ?? false)
     else { return nil }
     return latest.taskChange
   }
 
   func unreadProjectChangeCount(_ projectID: UUID) -> Int {
     _ = taskChangeReadStateRevision
-    let readAt = readDate(forKey: projectChangeReadKey(projectID))
+    let marker =
+      projectReadMarkers[projectID] ?? legacyMarker(forKey: projectChangeReadKey(projectID))
     return library.tasks.filter { task in
       task.projectID == projectID
-        && (latestTaskChange(for: task.id)?.date ?? .distantPast) > readAt
+        && latestTaskChange(for: task.id).map { !(marker?.acknowledges($0) ?? false) } == true
     }.count
   }
 
   func markTaskChangesRead(_ taskID: UUID) {
-    let date = latestTaskChange(for: taskID)?.date ?? .now
-    preferences.set(date, forKey: taskChangeReadKey(taskID))
+    guard let activity = latestTaskChange(for: taskID) else { return }
+    let marker = TaskChangeReadMarker(date: activity.date, activityID: activity.id)
+    taskReadMarkers[taskID] = .later(taskReadMarkers[taskID], marker)
     taskChangeReadStateRevision &+= 1
+    #if os(iOS)
+      if syncClient.isPaired {
+        enqueueReadAcknowledgment(.acknowledgeTaskChanges(taskID: taskID, marker: marker))
+      } else {
+        Task { try? await repository?.acknowledgeTaskRead(taskID, marker: marker) }
+      }
+    #else
+      Task { try? await repository?.acknowledgeTaskRead(taskID, marker: marker) }
+    #endif
   }
 
   func markProjectChangesRead(_ projectID: UUID) {
-    let date =
-      library.activity.filter { $0.projectID == projectID && $0.taskChange != nil }
-      .map(\.date).max() ?? .now
-    preferences.set(date, forKey: projectChangeReadKey(projectID))
+    guard
+      let activity = library.activity.filter({ $0.projectID == projectID && $0.taskChange != nil })
+        .max(by: Self.activityComesBefore)
+    else { return }
+    let marker = TaskChangeReadMarker(date: activity.date, activityID: activity.id)
+    projectReadMarkers[projectID] = .later(projectReadMarkers[projectID], marker)
     taskChangeReadStateRevision &+= 1
+    #if os(iOS)
+      if syncClient.isPaired {
+        enqueueReadAcknowledgment(.acknowledgeProjectChanges(projectID: projectID, marker: marker))
+      } else {
+        Task { try? await repository?.acknowledgeProjectRead(projectID, marker: marker) }
+      }
+    #else
+      Task { try? await repository?.acknowledgeProjectRead(projectID, marker: marker) }
+    #endif
   }
 
   private func latestTaskChange(for taskID: UUID) -> Activity? {
     library.activity.filter { $0.taskID == taskID && $0.taskChange != nil }
-      .max { $0.date < $1.date }
+      .max(by: Self.activityComesBefore)
   }
 
-  private func readDate(forKey key: String) -> Date {
-    preferences.object(forKey: key) as? Date ?? .distantPast
+  private static func activityComesBefore(_ lhs: Activity, _ rhs: Activity) -> Bool {
+    if lhs.date != rhs.date { return lhs.date < rhs.date }
+    return lhs.id.uuidString.lowercased() < rhs.id.uuidString.lowercased()
   }
+
+  private func legacyMarker(forKey key: String) -> TaskChangeReadMarker? {
+    (preferences.object(forKey: key) as? Date).map { TaskChangeReadMarker(date: $0) }
+  }
+
+  #if os(iOS)
+    private func enqueueReadAcknowledgment(_ command: SyncCommand) {
+      do {
+        _ = try syncClient.enqueue(command)
+        Task { await refreshFromMac() }
+      } catch { self.error = error.localizedDescription }
+    }
+  #endif
 
   private func taskChangeReadKey(_ id: UUID) -> String {
     "taskChangeReadAt.\(id.uuidString.lowercased())"
@@ -817,11 +874,53 @@ import UniformTypeIdentifiers
   }
 
   private func initializeTaskChangeReadMarkersIfNeeded() {
-    let key = "taskChangeReadMarkersInitialized"
+    let key = "sharedTaskChangeReadMarkersMigrated"
     guard !preferences.bool(forKey: key) else { return }
-    for project in library.projects { markProjectChangesRead(project.id) }
-    for task in library.tasks { markTaskChangesRead(task.id) }
+    let firstRun = !preferences.bool(forKey: "taskChangeReadMarkersInitialized")
+    for project in library.projects where projectReadMarkers[project.id] == nil {
+      if let marker = legacyMarker(forKey: projectChangeReadKey(project.id)) {
+        adoptLegacyMarker(marker, projectID: project.id)
+      } else if firstRun {
+        markProjectChangesRead(project.id)
+      }
+    }
+    for task in library.tasks where taskReadMarkers[task.id] == nil {
+      if let marker = legacyMarker(forKey: taskChangeReadKey(task.id)) {
+        adoptLegacyMarker(marker, taskID: task.id)
+      } else if firstRun {
+        markTaskChangesRead(task.id)
+      }
+    }
+    preferences.set(true, forKey: "taskChangeReadMarkersInitialized")
     preferences.set(true, forKey: key)
+  }
+
+  private func adoptLegacyMarker(_ marker: TaskChangeReadMarker, taskID: UUID) {
+    taskReadMarkers[taskID] = .later(taskReadMarkers[taskID], marker)
+    taskChangeReadStateRevision &+= 1
+    #if os(iOS)
+      if syncClient.isPaired {
+        enqueueReadAcknowledgment(.acknowledgeTaskChanges(taskID: taskID, marker: marker))
+      } else {
+        Task { try? await repository?.acknowledgeTaskRead(taskID, marker: marker) }
+      }
+    #else
+      Task { try? await repository?.acknowledgeTaskRead(taskID, marker: marker) }
+    #endif
+  }
+
+  private func adoptLegacyMarker(_ marker: TaskChangeReadMarker, projectID: UUID) {
+    projectReadMarkers[projectID] = .later(projectReadMarkers[projectID], marker)
+    taskChangeReadStateRevision &+= 1
+    #if os(iOS)
+      if syncClient.isPaired {
+        enqueueReadAcknowledgment(.acknowledgeProjectChanges(projectID: projectID, marker: marker))
+      } else {
+        Task { try? await repository?.acknowledgeProjectRead(projectID, marker: marker) }
+      }
+    #else
+      Task { try? await repository?.acknowledgeProjectRead(projectID, marker: marker) }
+    #endif
   }
 
   #if os(macOS)

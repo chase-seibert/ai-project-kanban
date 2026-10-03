@@ -286,7 +286,13 @@ Phone confirmation for automated transitions remains open.
 - As a user, I want each project row to show how many tasks have unread changes,
   so I can find affected projects quickly.
 - Opening a task clears only that task's badge. Selecting a project clears its
-  project-level badge independently. Read markers are local to each device.
+  project-level badge independently. Read markers are shared through Mac snapshots,
+  so acknowledging on either paired device clears the same indicator on both.
+- Offline phone acknowledgments appear immediately and remain in the durable outbox
+  until accepted. Full refresh first resolves queued operations and then applies
+  the authoritative snapshot; transport failures preserve unaccepted acknowledgments.
+- A read marker records the activity date and ID. Date ties use activity UUID order,
+  and accepted markers only advance, so delayed acknowledgments cannot hide newer changes.
 - Only column and completion-status changes create these badges; task edits and
   agent activity do not.
 

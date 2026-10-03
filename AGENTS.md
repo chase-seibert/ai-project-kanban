@@ -30,28 +30,25 @@ Prefer Makefile targets over ad hoc commands:
   `make phone-deploy` — physical-device workflow.
 - `make clean` — remove project build outputs.
 
-### Codex build permissions on this Mac
+### Codex build and verification on this Mac
 
 - Read `FRUSTRATION.md` before build, test, or launch work. SwiftPM manifests
   and Swift compiler macro plugins have repeatedly failed inside Codex's macOS
   sandbox with `sandbox_apply: Operation not permitted`.
-- Request approved host execution **on the first invocation** of SwiftPM,
-  Xcode, compiler, simulator, and device targets. With `exec_command`, set
-  `sandbox_permissions: "require_escalated"`; do not first run the known failing
-  sandboxed command. Respect the active approval policy; if access is denied
-  or unavailable, report the blocked check without trying another bypass.
+- Start Makefile build, test, lint, simulator, and device targets with normal
+  workspace permissions; host approval is not a prerequisite. If a documented
+  sandbox failure blocks a check, use an escalation only when the active
+  execution profile and task instructions allow it. Never bypass a denied or
+  unavailable approval path; report the specific check as unverified.
 - Use one Makefile target per command in the form
   `make -C /Users/cseibert/projects/ai-project-kanban build`, replacing `build`
   with the requested target. Use the literal absolute path of the actual
-  checkout. In a worktree or another checkout, use that checkout's path and
-  request its own approval; never build the main checkout instead.
+  checkout; in a worktree or another checkout, use that checkout's path.
 - `.codex/rules/apple-build.rules` allows `build`, `sim-build`, `lint`, `test`,
   `sync-test`, `runner-test`, and `codex-check` for this checkout. Setup, cleanup,
-  launch, provisioning, installation, and deployment use normal approval.
-  It requires a trusted project and a Codex restart to load. Additional options,
-  Make variable overrides, other targets, and different checkout paths require
-  separate review; do not append them to an allowed command to gain host access.
-  Formatting and ordinary file edits use normal workspace permissions.
+  launch, provisioning, installation, and deployment still use the active
+  execution profile. Formatting and ordinary file edits use normal workspace
+  permissions. Do not append options or Make variable overrides to a target.
 
 ## Product boundaries
 
@@ -143,7 +140,11 @@ never start, stop, retry, or approve Codex work.
   tool.
 
 ## Instructions
-- When finishing a prompt session, rebuild and relaunch either the mac app or ios app or both depeneding on the change.
+- For app code changes, rebuild and attempt to relaunch the affected app or
+  apps. If the environment prevents launch, report the failed check and what
+  remains unverified; treat that as a verification limitation rather than an
+  implementation failure, and continue with available focused checks. Do not
+  terminate an app with unrelated active work just to retry a launch.
 
 ## Documentation index
 

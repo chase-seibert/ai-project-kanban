@@ -24,10 +24,20 @@
 
 - Recording the compiler sandbox failure here did not prevent repeated failed
   first attempts because setup instructions still said to retry afterward.
-  Promote recurring workarounds into the default workflow: `AGENTS.md` now
-  requires approved host execution initially, and project Codex rules allow
-  the listed Makefile targets for this checkout after Codex restarts.
+  At the time, `AGENTS.md` required approved host execution initially and
+  project Codex rules allowed the listed Makefile targets after a restart.
+  The current project instruction is to use normal workspace permissions and
+  report blocked launch/simulator checks without escalating.
 - `make lint` reports pre-existing `swift-format` indentation and line-break
   findings in untouched `DetailViews.swift` and `BoardViews.swift`. The files
   changed for sync pass targeted strict formatting; avoid broad unrelated
   reformatting while working on sync.
+- With normal workspace permissions, `make test`, `make build`, and
+  `make sim-build` completed. `make run` rebuilt the Mac app but Launch Services
+  returned `kLSNoExecutableErr` even though the bundle executable exists and
+  codesign validation passes. `make sim-launch` rebuilt the iPhone app but
+  CoreSimulatorService returned connection refused, so no simulator was
+  available. Do not terminate a currently running StageChase instance just to
+  retry: it may recover unrelated active runs on relaunch. Paired-device checks
+  remain unverified when simulator services are unavailable and physical deploy
+  is outside the task authorization.

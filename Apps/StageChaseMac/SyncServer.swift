@@ -418,13 +418,17 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
           ? .unchanged(sequence: state.sequence)
           : .snapshot(
             SyncSnapshot(
-              libraryID: state.libraryID, sequence: state.sequence, library: state.library))
+              libraryID: state.libraryID, sequence: state.sequence, library: state.library,
+              taskReadMarkers: state.taskReadMarkers,
+              projectReadMarkers: state.projectReadMarkers))
       case .fullSnapshot:
         lastRequestResult =
           "Refresh everything · sent full library with \(state.library.projects.count) projects and \(state.library.tasks.count) tasks at sequence \(state.sequence)."
         response = .snapshot(
           SyncSnapshot(
-            libraryID: state.libraryID, sequence: state.sequence, library: state.library))
+            libraryID: state.libraryID, sequence: state.sequence, library: state.library,
+            taskReadMarkers: state.taskReadMarkers,
+            projectReadMarkers: state.projectReadMarkers))
       case .command(let envelope):
         guard envelope.deviceID == deviceID else { return .error("Invalid device identity.") }
         let result = try await repository.applyRemote(envelope)
