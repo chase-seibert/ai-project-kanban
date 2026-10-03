@@ -457,7 +457,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
     }
   }
 
-  private func handleDirect(
+  func handleDirect(
     _ request: SyncDirectRequest, library: Library
   ) async throws -> SyncDirectResponse {
     switch request {
@@ -538,25 +538,9 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
         return .accepted(
           "Committed \(result.hash.prefix(12)) · \(GitService.commitMessage(latestTask.title))")
       }
-    case .recordDeployedRevision(let requestID, let projectID):
-      return try await idempotentGitRequest(request, requestID: requestID) {
-        guard var project = library.projects.first(where: { $0.id == projectID }) else {
-          return .rejected("The project is no longer available.")
-        }
-        guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-          return .rejected("Choose a project folder on the Mac before requesting Git actions.")
-        }
-        let status = try await gitService.status(in: URL(fileURLWithPath: project.directory))
-        guard let head = status.head else {
-          return .rejected("This repository has no commit to record as deployed.")
-        }
-        project.deployedCommitHash = head
-        project.deployedAt = .now
-        _ = try await repository.apply(.editProject(project))
-        let updated = try await repository.syncStateSnapshot()
-        onLibraryChanged?(updated.library)
-        return .accepted("Recorded deployed revision \(head.prefix(12)).")
-      }
+    case .recordDeployedRevision:
+      // Retain wire decoding for older clients without accepting a retired mutation.
+      return .rejected("Deployment tracking has been retired. Update StageChase on your phone.")
     }
   }
 

@@ -41,3 +41,10 @@
   retry: it may recover unrelated active runs on relaunch. Paired-device checks
   remain unverified when simulator services are unavailable and physical deploy
   is outside the task authorization.
+
+## 2026-10-03
+
+- A standalone SwiftUI preview compiled with an ad hoc `swiftc` command hit the
+  documented SwiftData macro sandbox failure although allowed Make targets passed.
+  Approved host compilation produced an isolated in-memory preview, allowing UI
+  checks without restarting the main app during unrelated active work.

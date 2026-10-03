@@ -16,6 +16,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try await testMovePersistsWhenRunnerSetupFails()
     try await testGitService()
     try await testMakeTargetService()
+    try await testRetiredDeploymentRequest()
     let promptProject = Project(name: "Prompt fixture", directory: "/tmp/prompt-fixture")
     let promptTask = WorkItem(projectID: promptProject.id, title: "Readable prompt title")
     guard
@@ -639,6 +640,31 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     print(
       "PASS: Git status tracks clean, dirty, untracked, and empty-repository states; task commits stage all changes"
     )
+  }
+
+  @MainActor static func testRetiredDeploymentRequest() async throws {
+    let repository = try LibraryRepository(inMemory: true)
+    var library = try await repository.load()
+    var project = Project(name: "Legacy deployment", directory: "/missing/unused")
+    project.deployedCommitHash = "legacy-checkpoint"
+    project.deployedAt = Date(timeIntervalSince1970: 123)
+    library.projects.append(project)
+    _ = try await repository.importLibrary(JSONEncoder().encode(library))
+    let before = try await repository.load()
+    let server = SyncServer(repository: repository)
+    let request = SyncDirectRequest.recordDeployedRevision(requestID: UUID(), projectID: project.id)
+    let decoded = try JSONDecoder().decode(
+      SyncDirectRequest.self, from: JSONEncoder().encode(request))
+    for _ in 0..<2 {
+      guard case .rejected(let message) = try await server.handleDirect(decoded, library: before),
+        message.contains("retired")
+      else { throw BoardError.invalid("A retired deployment request was not rejected") }
+    }
+    let after = try await repository.load()
+    guard after == before else {
+      throw BoardError.invalid("Retired deployment request changed the library")
+    }
+    print("PASS: Legacy deployment request decodes and rejects without changing stored data")
   }
 
   @MainActor static func testMakeTargetService() async throws {

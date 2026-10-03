@@ -19,7 +19,7 @@ enum PlanHandoffPrompt {
     let readablePlan = hasReadablePlan(for: task, project: project)
     let planAction =
       readablePlan
-      ? "Revise the existing plan at the target path, preserving useful task context and improving it for the request."
+      ? "Review the existing plan at the target path and revise it where needed, preserving useful task context and improving it for the request."
       : "Create a plan at the target path. If an attached path is present but its file is unreadable, keep that exact path and report the file problem rather than silently choosing a different path."
     let notes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
     let format = formatPrompt.trimmingCharacters(in: .whitespacesAndNewlines)

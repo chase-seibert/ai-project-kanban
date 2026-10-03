@@ -2,6 +2,17 @@
 
 ## 2026-10-03
 
+- Simplify the Mac project header with a dedicated blue Add task button, compact
+  project controls, and project-only Git details in a popover. Keep worktree and
+  model editing in Project settings; hide priority chrome on task cards/details.
+- Put task titles and key actions first, promote Reopen and Codex launch/plan
+  review in blue, collapse context and StageChase controls, and initially expand
+  only the newest run across planning and execution history.
+- Move Make output into a reopenable native modal. Dismissal keeps commands
+  running; Stop is explicit and truncated output is labeled.
+- Retire deployed-HEAD tracking on Mac and phone. Preserve inert legacy metadata
+  while rejecting old deployment requests without mutation.
+
 - Carry linked Codex thread IDs in read-only phone run snapshots so iPhone can
   open existing sessions from task detail using the existing Mac-continuation
   and copy-ID fallback. Advance the strict sync protocol to version 5. Guard

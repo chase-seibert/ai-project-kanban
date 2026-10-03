@@ -34,7 +34,7 @@ struct RootView: View {
               if model.selectedProject != nil { BoardView() } else { WelcomeView() }
               if let id = model.selectedTaskID {
                 Divider()
-                TaskDetail(taskID: id).frame(width: 340)
+                TaskDetail(taskID: id).id(id).frame(width: 340)
               } else if model.showActivity {
                 Divider()
                 ActivityPanel().frame(width: 370)
@@ -42,11 +42,6 @@ struct RootView: View {
             }
             .toolbar {
               ToolbarItemGroup {
-                Button {
-                  model.sheet = .newTask(model.boardFocusedStage)
-                } label: {
-                  Label("New task (⌘T)", systemImage: "plus")
-                }.disabled(model.selectedProject == nil).help("New task in the focused section")
                 Button {
                   model.selectedTaskID = nil
                   model.showActivity.toggle()
@@ -130,7 +125,10 @@ struct RootView: View {
         case .newProject: ProjectEditor(project: Project(name: ""), isNew: true)
         case .editProject(let project): ProjectEditor(project: project, isNew: false)
         case .newTask(let stage): NewTaskEditor(stage: stage)
-        case .task(let id): TaskDetail(taskID: id)
+        case .task(let id): TaskDetail(taskID: id).id(id)
+        #if os(macOS)
+          case .makeOutput: MakeOutputSheet()
+        #endif
         case .settings:
           NavigationStack {
             AppSettings().navigationTitle("Settings")

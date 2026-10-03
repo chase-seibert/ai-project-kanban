@@ -211,6 +211,9 @@ struct ProjectEditor: View {
           }
         #else
           if model.isConnectedPhone && !isNew {
+            Section("Repository") {
+              PhoneGitControls(project: project, taskID: nil)
+            }
             Section("Codex execution profile") {
               Picker("Permission profile", selection: $project.executionProfile) {
                 ForEach(CodexExecutionProfile.allCases) { profile in
@@ -292,200 +295,163 @@ struct ProjectEditor: View {
   struct ProjectHeaderControls: View {
     @Environment(AppModel.self) private var model
     let project: Project
-    @State private var savingWorktree = false
-    @State private var worktreeError: String?
-    @State private var showingModel = false
-    @State private var modelDraft: CodexModelConfiguration?
-    @State private var savingModel = false
-    @State private var modelError: String?
-    @State private var makeError: String?
-
-    private var effectiveModel: (configuration: CodexModelConfiguration, scope: CodexModelScope) {
-      CodexModelResolver.effective(
-        task: nil, project: project.modelOverride, global: model.globalModelConfiguration)
-    }
-
-    var body: some View {
-      VStack(alignment: .leading, spacing: 9) {
-        HStack(spacing: 10) {
-          makeTargetMenu
-          Toggle(
-            "Worktrees",
-            isOn: Binding(
-              get: {
-                model.library.projects.first(where: { $0.id == project.id })?.usesWorktrees ?? false
-              },
-              set: saveWorktreePreference)
-          )
-          .toggleStyle(.switch)
-          .accessibilityLabel("Use managed worktrees for implementation")
-          .help(
-            "Dirty repositories use an isolated worktree. Turn off to use the project folder directly."
-          )
-          .disabled(savingWorktree)
-
-          Button {
-            modelDraft = model.library.projects.first(where: { $0.id == project.id })?.modelOverride
-            modelError = nil
-            showingModel = true
-          } label: {
-            Label("\(effectiveModel.configuration.summary)", systemImage: "cpu")
-              .labelStyle(.titleAndIcon)
-              .lineLimit(1)
-          }
-          .buttonStyle(.borderless)
-          .help(
-            "Project model · \(effectiveModel.scope.title). Task model choices still take precedence."
-          )
-          .popover(isPresented: $showingModel, arrowEdge: .bottom) {
-            modelPopover.frame(width: 310).padding(14)
-          }
-
-          if savingWorktree || savingModel {
-            ProgressView().controlSize(.small).help("Saving project settings")
-          } else if let error = worktreeError ?? modelError {
-            Image(systemName: "exclamationmark.circle.fill")
-              .foregroundStyle(.orange)
-              .accessibilityLabel("Project settings save failed")
-              .help(error)
-          }
-        }
-        ProjectGitStatusView(project: project, taskID: nil, showDeployedAction: true)
-        makeTargetResult
-      }
-    }
+    @State private var showingGit = false
 
     private var currentProject: Project {
       model.library.projects.first(where: { $0.id == project.id }) ?? project
     }
+    private var gitSummary: String {
+      if model.gitStatusErrors[project.id] != nil { return "Git unavailable" }
+      guard let status = model.gitStatuses[project.id] else { return "Repository" }
+      return
+        "\(status.branch ?? "Detached HEAD") · \(status.changedFileCount == 0 ? "Clean" : "\(status.changedFileCount) changed")"
+    }
+
+    var body: some View {
+      HStack(spacing: 12) {
+        makeTargetMenu
+        Button {
+          showingGit = true
+        } label: {
+          Label(
+            gitSummary,
+            systemImage: model.gitStatusErrors[project.id] == nil
+              ? "chevron.left.forwardslash.chevron.right" : "exclamationmark.triangle"
+          )
+          .lineLimit(1)
+        }
+        .buttonStyle(.borderless)
+        .popover(isPresented: $showingGit) {
+          ProjectGitStatusView(project: currentProject, taskID: nil)
+            .frame(width: 350).padding(16)
+        }
+        Spacer(minLength: 0)
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 8) {
+            automationStatus
+            Text(
+              CodexModelResolver.effective(
+                task: nil, project: currentProject.modelOverride,
+                global: model.globalModelConfiguration
+              ).configuration.summary
+            )
+            .stageFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+          }
+          automationStatus
+        }
+        Button {
+          model.sheet = .editProject(currentProject)
+        } label: {
+          Image(systemName: "slider.horizontal.3")
+        }
+        .buttonStyle(.borderless).help("Project settings")
+        .accessibilityLabel("Project settings")
+      }
+      .tint(.primary)
+      .task(id: project.id) { await model.refreshGitStatus(projectID: project.id) }
+    }
+
+    private var automationStatus: some View {
+      let count = model.activeRuns.filter { $0.projectID == project.id }.count
+      let automatic = model.autoInvokeCodex && currentProject.automationEnabled
+      return Text(count > 0 ? "\(count) active" : automatic ? "Automatic" : "Manual")
+        .stageFont(.caption).foregroundStyle(.secondary)
+        .help(
+          "Only confirmed moves can start automatic Codex work, when both automatic-invocation settings are enabled."
+        )
+    }
 
     private var makeTargetMenu: some View {
-      Menu {
+      let service = model.makeTargetService
+      return Menu {
         if currentProject.favoriteMakeTargets.isEmpty {
-          Text("Add favorites in Project settings")
+          Button("Add favorites in Project settings…") {
+            model.sheet = .editProject(currentProject)
+          }
         } else {
           ForEach(currentProject.favoriteMakeTargets, id: \.self) { target in
             Button("Run \(target)", systemImage: "play.fill") {
               do {
                 try model.runFavoriteMakeTarget(target, projectID: currentProject.id)
-                makeError = nil
+                model.sheet = .makeOutput
+              } catch MakeTargetError.launch {
+                model.sheet = .makeOutput
               } catch {
-                makeError = error.localizedDescription
+                model.error = error.localizedDescription
               }
-            }
-            .disabled(model.makeTargetService.isRunning)
+            }.disabled(service.isRunning)
           }
         }
-        if model.makeTargetService.isRunning {
+        if service.projectID != nil {
           Divider()
-          Button(
-            "Stop \(model.makeTargetService.target)", systemImage: "stop.fill", role: .destructive
-          ) {
-            model.makeTargetService.stop()
+          Button("Show output · \(service.projectName) / \(service.target)") {
+            model.sheet = .makeOutput
+          }
+          if service.isRunning {
+            Button("Stop \(service.target)", systemImage: "stop.fill", role: .destructive) {
+              service.stop()
+            }
           }
         }
       } label: {
         Label(
-          "Make", systemImage: model.makeTargetService.isRunning ? "gearshape.2.fill" : "hammer")
+          service.projectID == project.id || service.isRunning
+            ? "Make · \(service.status.label)" : "Make",
+          systemImage: service.isRunning ? "gearshape.2" : "hammer"
+        )
+        .lineLimit(1)
       }
       .menuStyle(.borderlessButton)
       .help("Run a favorite Make target in \(currentProject.name)")
       .accessibilityIdentifier("project-make-target-menu")
     }
+  }
 
-    @ViewBuilder private var makeTargetResult: some View {
+  struct MakeOutputSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
       let service = model.makeTargetService
-      if service.projectID == project.id {
-        HStack(spacing: 6) {
+      VStack(alignment: .leading, spacing: 14) {
+        Text("\(service.projectName) / \(service.target)").stageFont(.title2, weight: .bold)
+        HStack {
           if service.isRunning { ProgressView().controlSize(.small) }
-          Text("Make · \(service.projectName) / \(service.target) · \(service.status.label)")
-            .stageFont(.caption).foregroundStyle(service.isRunning ? .orange : .secondary)
+          Text(service.status.label).stageFont(.headline)
+          if case .failed(let message) = service.status {
+            Text(message).foregroundStyle(.orange).textSelection(.enabled)
+          }
+        }
+        if service.outputWasTruncated {
+          Text("Showing the retained output tail (32 KB).").stageFont(.caption).foregroundStyle(
+            .secondary)
+        }
+        ScrollView([.horizontal, .vertical]) {
+          Text(
+            service.output.isEmpty
+              ? (service.isRunning ? "Waiting for output…" : "No output.") : service.output
+          )
+          .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(10).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
+        HStack {
+          Button("Copy output", systemImage: "doc.on.doc") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(service.copyableOutput, forType: .string)
+          }.disabled(service.output.isEmpty)
           if service.isRunning {
-            Button("Stop") { service.stop() }.buttonStyle(.borderless)
+            Button("Stop", systemImage: "stop.fill", role: .destructive) { service.stop() }
           }
-        }
-        if case .failed(let message) = service.status {
-          Text(message).stageFont(.caption).foregroundStyle(.orange)
-        }
-        if !service.output.isEmpty {
-          ScrollView {
-            Text(service.output).font(.system(.caption, design: .monospaced))
-              .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-          }
-          .frame(maxHeight: 100)
-          .padding(7)
-          .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 7))
-        }
-      } else if service.isRunning {
-        HStack {
-          ProgressView().controlSize(.small)
-          Text("\(service.target) is running in \(service.projectName)")
-            .stageFont(.caption).foregroundStyle(.secondary)
-          Button("Stop") { service.stop() }.buttonStyle(.borderless)
-        }
-      }
-      if let makeError {
-        Text(makeError).stageFont(.caption).foregroundStyle(.orange)
-      }
-    }
-
-    private var modelPopover: some View {
-      VStack(alignment: .leading, spacing: 12) {
-        Text("Project model").stageFont(.headline)
-        Text("Effective: \(effectiveModel.configuration.summary) · \(effectiveModel.scope.title)")
-          .stageFont(.caption).foregroundStyle(.secondary)
-        CodexModelOverrideEditor(
-          configuration: Binding(
-            get: { modelDraft }, set: { modelDraft = $0 }),
-          inherited: model.globalModelConfiguration,
-          inheritLabel: "Use global model settings",
-          catalog: model.modelCatalog)
-        if let error = model.modelCatalogError {
-          Text(error).stageFont(.caption).foregroundStyle(.orange)
-        }
-        if let modelError {
-          Text(modelError).stageFont(.caption).foregroundStyle(.orange)
-        }
-        HStack {
-          Button("Cancel") { showingModel = false }
-            .keyboardShortcut(.cancelAction)
           Spacer()
-          Button("Save") { saveModelPreference() }
-            .keyboardShortcut(.defaultAction)
-            .disabled(savingModel || modelDraft == project.modelOverride)
+          Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
         }
-      }
-    }
-
-    private func saveWorktreePreference(_ enabled: Bool) {
-      guard !savingWorktree,
-        var updated = model.library.projects.first(where: { $0.id == project.id })
-      else { return }
-      updated.usesWorktrees = enabled
-      savingWorktree = true
-      worktreeError = nil
-      Task {
-        let saved = await model.perform(.editProject(updated))
-        if !saved { worktreeError = model.error ?? "Could not save the worktree setting." }
-        savingWorktree = false
-      }
-    }
-
-    private func saveModelPreference() {
-      guard !savingModel,
-        var updated = model.library.projects.first(where: { $0.id == project.id })
-      else { return }
-      updated.modelOverride = modelDraft
-      savingModel = true
-      modelError = nil
-      Task {
-        if await model.perform(.editProject(updated)) {
-          showingModel = false
-        } else {
-          modelError = model.error ?? "Could not save the project model."
+        if service.isRunning {
+          Text("Closing this window keeps the command running.")
+            .stageFont(.caption).foregroundStyle(.secondary)
         }
-        savingModel = false
-      }
+      }.padding(20).frame(minWidth: 600, idealWidth: 760, minHeight: 400, idealHeight: 520).tint(
+        .primary)
     }
   }
 
@@ -493,7 +459,6 @@ struct ProjectEditor: View {
     @Environment(AppModel.self) private var model
     let project: Project
     let taskID: UUID?
-    var showDeployedAction = false
 
     private var currentProject: Project {
       model.library.projects.first(where: { $0.id == project.id }) ?? project
@@ -549,18 +514,6 @@ struct ProjectEditor: View {
           .buttonStyle(.borderless).help("Refresh Git status")
           .disabled(isBusy)
         }
-        if let hash = currentProject.deployedCommitHash {
-          HStack(spacing: 5) {
-            Text("Deployed: \(String(hash.prefix(12)))").monospaced()
-              .textSelection(.enabled)
-            if let date = currentProject.deployedAt {
-              Text("· \(date.formatted(date: .abbreviated, time: .shortened))")
-                .foregroundStyle(.secondary)
-            }
-          }
-        } else {
-          Text("No deployed revision recorded").foregroundStyle(.secondary)
-        }
         if let taskID {
           Text(
             model.taskUsesSeparateGitWorktree(taskID: taskID)
@@ -597,13 +550,6 @@ struct ProjectEditor: View {
             "Stages and commits all changes in the configured project folder with the latest completed task title."
           )
         }
-        if showDeployedAction {
-          Button("Record current HEAD as deployed") {
-            Task { await model.recordDeployedRevision(projectID: project.id) }
-          }
-          .disabled(isBusy || status?.head == nil)
-          .help("Save the latest commit hash and time as this project's deployed revision.")
-        }
         if let message = model.gitActionMessages[project.id] {
           Text(message).stageFont(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
@@ -626,7 +572,6 @@ struct ProjectEditor: View {
     @Environment(AppModel.self) private var model
     let project: Project
     let taskID: UUID?
-    var showDeployedAction = false
     @State private var confirmingCommit = false
 
     private var key: String { "\(project.id.uuidString):\(taskID?.uuidString ?? "project")" }
@@ -674,18 +619,6 @@ struct ProjectEditor: View {
             confirmingCommit = true
           }
           .disabled(busy || status?.changedFileCount == 0)
-          if showDeployedAction {
-            Button("Record deployed revision") {
-              Task { await model.recordPhoneDeployedRevision(projectID: project.id) }
-            }
-            .disabled(busy || status?.head == nil)
-          }
-        }
-        if let deployed = model.library.projects.first(where: { $0.id == project.id })?
-          .deployedCommitHash
-        {
-          Text("Deployed \(deployed.prefix(12))")
-            .stageFont(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
         if let message = model.phoneGitMessages[project.id] {
           Text(message).stageFont(.caption).foregroundStyle(.secondary)
@@ -773,6 +706,10 @@ struct TaskDetail: View {
   @State private var notesSaveTask: Task<Void, Never>?
   @State private var notesSaveMessage: String?
   @State private var deleting = false
+  @State private var contextExpanded = false
+  @State private var titleExpanded = false
+  @State private var runDisclosure = TaskRunDisclosureState()
+  @State private var feedbackSubmitting = false
   @State private var promptCopied = false
   @State private var planPromptCopied = false
   #if os(iOS)
@@ -811,392 +748,245 @@ struct TaskDetail: View {
   #else
     private var usesPlanFeedbackField: Bool { false }
   #endif
+  private var taskRuns: [AgentRun] {
+    TaskRunDisclosureState.ordered(model.library.runs.filter { $0.taskID == taskID })
+  }
+  private var attentionRuns: [AgentRun] {
+    taskRuns.filter { [.needsInput, .failed, .interrupted].contains($0.status) }
+  }
   var body: some View {
-    ScrollView {
+    Group {
       if let item {
-        VStack(alignment: .leading, spacing: 22) {
-          HStack {
-            Label(item.section.title, systemImage: item.section.symbol).stageFont(
-              .subheadline, weight: .semibold
-            ).foregroundStyle(item.section.color)
-            Text(item.status.title).stageFont(.caption, weight: .medium)
-              .padding(.horizontal, 8).padding(.vertical, 4)
-              .background(
-                item.status.isAttentionState
-                  ? Color.orange.opacity(0.12) : Color.secondary.opacity(0.10),
-                in: Capsule())
-            Spacer()
-            Button {
-              #if os(macOS)
-                model.selectedTaskID = nil
-              #else
-                dismiss()
-              #endif
-            } label: {
-              Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-            }.buttonStyle(.plain).accessibilityLabel("Close task")
-          }
-          #if os(macOS)
-            if !model.isConnectedPhone {
-              VStack(alignment: .leading, spacing: 8) {
-                Text("You run in Codex").stageFont(.headline)
-                Button("Launch Codex (⌘R)", systemImage: "arrow.up.right.square") {
-                  launchCodex()
-                }
-                .keyboardShortcut("r", modifiers: [.command])
-                .disabled(
-                  handoffActionsDisabled || codexHandoffPrompt == nil
-                    || handoffProject?.directory.isEmpty != false
-                )
-                .help(
-                  handoffProject?.directory.isEmpty == false
-                    ? "Open this project in Codex Desktop with the task prompt."
-                    : "Choose a repository folder in Project settings before launching Codex."
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Button(
-                  hasReadableAttachedPlan ? "Revise plan in Codex" : "Plan in Codex",
-                  systemImage: "arrow.up.right.square"
-                ) {
-                  launchPlanCodex()
-                }
-                .disabled(
-                  handoffActionsDisabled || planCodexHandoffPrompt == nil
-                    || handoffProject?.directory.isEmpty != false
-                )
-                .help(
-                  handoffProject?.directory.isEmpty == false
-                    ? "Open a new Codex Desktop thread with plan-only instructions."
-                    : "Choose a repository folder in Project settings before planning in Codex."
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text("StageChase runs").stageFont(.headline).padding(.top, 6)
-                Button("Execute Task", systemImage: "play.fill") {
-                  model.requestRunnerRun(item, kind: .implementation)
-                }
-                .disabled(
-                  handoffActionsDisabled || item.completed
-                    || ![.planning, .implementing].contains(item.section)
-                    || handoffProject?.directory.isEmpty != false
-                )
-                .help(
-                  ![.planning, .implementing].contains(item.section)
-                    ? "Move the task to Planning or Implementing first."
-                    : handoffProject?.directory.isEmpty == false
-                      ? "Execute this task in StageChase. You will review the model and confirm first."
-                      : "Choose a repository folder in Project settings before running this task."
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Button(
-                  hasReadableAttachedPlan ? "Revise plan with StageChase" : "Plan with StageChase",
-                  systemImage: "sparkles"
-                ) {
-                  model.requestRunnerRun(item, kind: .planning)
-                }
-                .disabled(
-                  handoffActionsDisabled || item.completed
-                    || handoffProject?.directory.isEmpty != false
-                )
-                .help(
-                  handoffProject?.directory.isEmpty == false
-                    ? "Have StageChase run a planning session for this task. You will review the model and confirm first."
-                    : "Choose a repository folder in Project settings before planning with StageChase."
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Divider().padding(.vertical, 3)
-                Button(
-                  model.taskRefreshInFlight.contains(taskID) ? "Refreshing…" : "Refresh",
-                  systemImage: "arrow.clockwise"
-                ) {
-                  Task { await model.refreshTask(taskID, preservingEdits: edited) }
-                }
-                .disabled(model.taskRefreshInFlight.contains(taskID))
-                .help("Refresh the saved task, plan, and linked Codex activity.")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let refreshMessage = model.taskRefreshMessages[taskID] {
-                  Text(refreshMessage)
-                    .stageFont(.caption)
-                    .foregroundStyle(refreshMessage.contains("failed") ? .orange : .secondary)
-                    .textSelection(.enabled)
-                }
-              }
-            }
-          #endif
-          #if os(iOS)
-            if model.isConnectedPhone {
-              VStack(alignment: .leading, spacing: 10) {
-                Label("Codex on Mac", systemImage: "desktopcomputer").stageFont(.headline)
-                HStack {
-                  Button("Plan with StageChase", systemImage: "sparkles") {
-                    requestCodexAction(.plan, item: item)
-                  }
-                  .disabled(codexActionLoading || item.completed)
-                  Button("Execute Task", systemImage: "play.fill") {
-                    requestCodexAction(.run, item: item)
-                  }
-                  .disabled(
-                    codexActionLoading || item.completed
-                      || ![.planning, .implementing].contains(item.section)
-                      || model.library.latestRun(for: item.id)?.status.isActive == true)
-                }
-                Button("Copy task context for Codex Remote", systemImage: "doc.on.doc") {
-                  let context = [
-                    "Task: \(item.title)",
-                    "Project: \(handoffProject?.name ?? "Project")",
-                    "Project ID: \(item.projectID.uuidString.lowercased())",
-                    "Task ID: \(item.id.uuidString.lowercased())",
-                    item.notes.isEmpty ? nil : "Notes:\n\(item.notes)",
-                  ].compactMap { $0 }.joined(separator: "\n\n")
-                  UIPasteboard.general.string = context
-                  phoneContextCopied = true
-                }
-                .buttonStyle(.bordered)
-                Text(
-                  "Codex Remote does not publish a supported external URL contract for choosing a workspace. Paste this context into the intended remote chat."
-                )
-                .stageFont(.caption).foregroundStyle(.secondary)
-                if phoneContextCopied {
-                  Label("Task context copied", systemImage: "checkmark.circle.fill")
-                    .stageFont(.caption).foregroundStyle(.green)
-                }
-                Text(
-                  "Tapping either action starts it on the paired Mac. A run keeps the task in its current section."
-                )
-                .stageFont(.caption).foregroundStyle(.secondary)
-                if let message = model.phoneCodexActionMessage {
-                  Text(message).stageFont(.callout)
-                    .foregroundStyle(
-                      message.localizedCaseInsensitiveContains("could not") ? .orange : .secondary
-                    )
-                    .textSelection(.enabled)
-                }
-              }
-              .padding(12)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
-            }
-          #endif
-          #if os(macOS)
-            if !model.isConnectedPhone, let project = handoffProject {
-              Divider()
-              ProjectGitStatusView(project: project, taskID: item.id)
-            }
-          #endif
-          #if os(iOS)
-            if model.isConnectedPhone, let project = handoffProject {
-              Divider()
-              PhoneGitControls(project: project, taskID: item.id)
-            }
-          #endif
-          if draft != nil {
-            TextField("Title", text: draftBinding(\.title), axis: .vertical).stageFont(
-              .title2, weight: .bold
-            ).textFieldStyle(.plain)
-              #if os(macOS)
-                .focused($focusedEditor, equals: .title)
-              #endif
-              .disabled(model.planFeedbackInFlight.contains(taskID))
-            if model.isConnectedPhone {
-              LabeledContent("Priority", value: draft?.priority?.title ?? "No priority")
-            } else {
-              HStack {
-                Text("Priority").foregroundStyle(.secondary)
-                Picker(
-                  "Priority",
-                  selection: Binding(
-                    get: { draft?.priority },
-                    set: {
-                      draft?.priority = $0
-                      edited = true
+        VStack(alignment: .leading, spacing: 0) {
+          taskHeader(item)
+          Divider()
+          ScrollViewReader { proxy in
+            ScrollView {
+              VStack(alignment: .leading, spacing: 20) {
+                if !attentionRuns.isEmpty {
+                  Menu {
+                    ForEach(attentionRuns) { run in
+                      Button(
+                        "\(run.kind.rawValue.capitalized) · \(run.status.title) · \(run.createdAt.formatted(date: .abbreviated, time: .shortened))"
+                      ) {
+                        runDisclosure.setExpanded(true, for: run.id)
+                        proxy.scrollTo(run.id, anchor: .top)
+                      }
                     }
+                  } label: {
+                    Label(
+                      "\(attentionRuns.count) run(s) need attention",
+                      systemImage: "exclamationmark.circle")
+                  }.foregroundStyle(.orange)
+                }
+                runHistory(item)
+                DisclosureGroup(isExpanded: $contextExpanded) {
+                  TextEditor(text: contextBinding).frame(minHeight: 110).scrollContentBackground(
+                    .hidden
                   )
-                ) {
-                  Text("No priority").tag(TaskPriority?.none)
-                  ForEach(TaskPriority.allCases) { priority in
-                    Text("\(priority.rawValue) · \(priority.title)").tag(
-                      TaskPriority?.some(priority))
+                  #if os(macOS)
+                    .focused($focusedEditor, equals: usesPlanFeedbackField ? .planFeedback : .notes)
+                  #endif
+                  .padding(8).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
+                  .disabled(model.planFeedbackInFlight.contains(taskID))
+                  Text(
+                    usesPlanFeedbackField
+                      ? "Feedback appends to the saved plan when you leave this field."
+                      : "Changes save automatically."
+                  )
+                  .stageFont(.caption).foregroundStyle(.secondary)
+                  if let notesSaveMessage {
+                    Text(notesSaveMessage).stageFont(.caption)
+                      .foregroundStyle(notesSaveMessage.hasPrefix("Could") ? .red : .secondary)
+                  }
+                  #if os(macOS)
+                    if usesPlanFeedbackField, !model.planFeedbackDraft(for: taskID).isEmpty {
+                      Button("Save feedback") { appendPlanFeedbackOnBlur() }
+                        .disabled(
+                          edited || feedbackSubmitting
+                            || model.planFeedbackInFlight.contains(taskID))
+                    }
+                    if usesPlanFeedbackField, let message = model.planFeedbackMessages[taskID] {
+                      Text(message.text).stageFont(.caption)
+                        .foregroundStyle(message.isError ? .red : .secondary)
+                        .textSelection(.enabled)
+                    }
+                  #endif
+
+                } label: {
+                  VStack(alignment: .leading, spacing: 3) {
+                    Text(usesPlanFeedbackField ? "Context & plan feedback" : "Task context")
+                    Text(contextSummary).stageFont(.caption).foregroundStyle(.secondary)
                   }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                Spacer()
-              }
-              .disabled(model.planFeedbackInFlight.contains(taskID))
-            }
-            VStack(alignment: .leading, spacing: 8) {
-              Text(usesPlanFeedbackField ? "TASK CONTEXT AND PLAN FEEDBACK" : "TASK CONTEXT")
-                .stageFont(.caption, weight: .semibold).foregroundStyle(.secondary)
-              TextEditor(text: contextBinding).frame(minHeight: 110).scrollContentBackground(
-                .hidden
-              )
-              #if os(macOS)
-                .focused($focusedEditor, equals: usesPlanFeedbackField ? .planFeedback : .notes)
-              #endif
-              .padding(8).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
-              .disabled(model.planFeedbackInFlight.contains(taskID))
-              Text(
-                usesPlanFeedbackField
-                  ? "Feedback appends to the saved plan when you leave this field."
-                  : "Changes save automatically."
-              )
-              .stageFont(.caption).foregroundStyle(.secondary)
-              if let notesSaveMessage {
-                Text(notesSaveMessage).stageFont(.caption)
-                  .foregroundStyle(notesSaveMessage.hasPrefix("Could") ? .red : .secondary)
-              }
-              #if os(macOS)
-                if usesPlanFeedbackField, let message = model.planFeedbackMessages[taskID] {
-                  Text(message.text).stageFont(.caption)
-                    .foregroundStyle(message.isError ? .red : .secondary)
-                    .textSelection(.enabled)
-                }
-              #endif
-            }
-            if !model.isConnectedPhone {
-              VStack(alignment: .leading, spacing: 8) {
-                Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(
-                  .secondary)
-                Text(item.planPath ?? "No saved plan").stageFont(.callout).foregroundStyle(
-                  .secondary
-                )
-                .disabled(model.planFeedbackInFlight.contains(taskID))
                 #if os(macOS)
-                  if let path = item.planPath,
-                    let project = model.library.projects.first(where: { $0.id == item.projectID }),
-                    hasReadablePlan(path: path, project: project)
-                  {
-                    Button("Open plan", systemImage: "doc.text") {
-                      NSWorkspace.shared.open(
-                        URL(fileURLWithPath: project.directory).appendingPathComponent(path))
-                    }
+                  DisclosureGroup("StageChase runs") {
+                    VStack(alignment: .leading, spacing: 8) {
+                      Button("Execute Task", systemImage: "play.fill") {
+                        model.requestRunnerRun(item, kind: .implementation)
+                      }
+                      .disabled(
+                        handoffActionsDisabled || item.completed
+                          || ![.planning, .implementing].contains(item.section)
+                          || handoffProject?.directory.isEmpty != false
+                      )
+                      .help(
+                        ![.planning, .implementing].contains(item.section)
+                          ? "Move the task to Planning or Implementing first."
+                          : handoffProject?.directory.isEmpty == false
+                            ? "Execute this task in StageChase. You will review the model and confirm first."
+                            : "Choose a repository folder in Project settings before running this task."
+                      )
+                      .frame(maxWidth: .infinity, alignment: .leading)
+                      Button(
+                        hasReadableAttachedPlan
+                          ? "Revise plan with StageChase" : "Plan with StageChase",
+                        systemImage: "sparkles"
+                      ) {
+                        model.requestRunnerRun(item, kind: .planning)
+                      }
+                      .disabled(
+                        handoffActionsDisabled || item.completed
+                          || handoffProject?.directory.isEmpty != false
+                      )
+                      .help(
+                        handoffProject?.directory.isEmpty == false
+                          ? "Have StageChase run a planning session for this task. You will review the model and confirm first."
+                          : "Choose a repository folder in Project settings before planning with StageChase."
+                      )
+                      .frame(maxWidth: .infinity, alignment: .leading)
+
+                    }.padding(.top, 8)
                   }
                 #endif
-              }
-            }
-            #if os(iOS)
-              if model.isConnectedPhone {
-                VStack(alignment: .leading, spacing: 10) {
-                  HStack {
-                    Text("SAVED PLAN").stageFont(.caption, weight: .semibold)
-                      .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(planMarkdown == nil ? "Open plan" : "Reload", systemImage: "doc.text") {
-                      loadPlanFromMac(item)
+                #if os(iOS)
+                  if model.isConnectedPhone {
+                    DisclosureGroup("StageChase runs") {
+                      HStack {
+                        Button("Plan with StageChase", systemImage: "sparkles") {
+                          requestCodexAction(.plan, item: item)
+                        }
+                        .disabled(codexActionLoading || item.completed)
+                        Button("Execute Task", systemImage: "play.fill") {
+                          requestCodexAction(.run, item: item)
+                        }
+                        .disabled(
+                          codexActionLoading || item.completed
+                            || ![.planning, .implementing].contains(item.section)
+                            || model.library.latestRun(for: item.id)?.status.isActive == true)
+                      }
+                      Button("Copy task context for Codex Remote", systemImage: "doc.on.doc") {
+                        let context = [
+                          "Task: \(item.title)",
+                          "Project: \(handoffProject?.name ?? "Project")",
+                          "Project ID: \(item.projectID.uuidString.lowercased())",
+                          "Task ID: \(item.id.uuidString.lowercased())",
+                          item.notes.isEmpty ? nil : "Notes:\n\(item.notes)",
+                        ].compactMap { $0 }.joined(separator: "\n\n")
+                        UIPasteboard.general.string = context
+                        phoneContextCopied = true
+                      }
+                      .buttonStyle(.bordered)
+                      Text(
+                        "Codex Remote does not publish a supported external URL contract for choosing a workspace. Paste this context into the intended remote chat."
+                      )
+                      .stageFont(.caption).foregroundStyle(.secondary)
+                      if phoneContextCopied {
+                        Label("Task context copied", systemImage: "checkmark.circle.fill")
+                          .stageFont(.caption).foregroundStyle(.green)
+                      }
+                      Text(
+                        "Tapping either action starts it on the paired Mac. A run keeps the task in its current section."
+                      )
+                      .stageFont(.caption).foregroundStyle(.secondary)
+                      if let message = model.phoneCodexActionMessage {
+                        Text(message).stageFont(.callout)
+                          .foregroundStyle(
+                            message.localizedCaseInsensitiveContains("could not")
+                              ? .orange : .secondary
+                          )
+                          .textSelection(.enabled)
+                      }
                     }
-                    .disabled(planLoading)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
                   }
-                  if planLoading { ProgressView("Loading plan from Mac…") }
-                  if let planLoadError {
-                    Text(planLoadError).stageFont(.callout).foregroundStyle(.orange)
-                  }
-                  if let planMarkdown {
-                    PlanMarkdownView(markdown: planMarkdown)
-                  }
+                #endif
+
+                DisclosureGroup("More details") {
+                  VStack(alignment: .leading, spacing: 12) {
+                    if !model.isConnectedPhone {
+                      VStack(alignment: .leading, spacing: 8) {
+                        Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(
+                          .secondary)
+                        Text(item.planPath ?? "No saved plan").stageFont(.callout).foregroundStyle(
+                          .secondary
+                        )
+                        .disabled(model.planFeedbackInFlight.contains(taskID))
+
+                      }
+                    }
+                    #if os(iOS)
+                      if model.isConnectedPhone {
+                        VStack(alignment: .leading, spacing: 10) {
+                          HStack {
+                            Text("SAVED PLAN").stageFont(.caption, weight: .semibold)
+                              .foregroundStyle(.secondary)
+                            Spacer()
+                            Button(
+                              planMarkdown == nil ? "Open plan" : "Reload", systemImage: "doc.text"
+                            ) {
+                              loadPlanFromMac(item)
+                            }
+                            .disabled(planLoading)
+                          }
+                          if planLoading { ProgressView("Loading plan from Mac…") }
+                          if let planLoadError {
+                            Text(planLoadError).stageFont(.callout).foregroundStyle(.orange)
+                          }
+                          if let planMarkdown {
+                            PlanMarkdownView(markdown: planMarkdown)
+                          }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
+                      }
+                    #endif
+                    #if os(macOS)
+                      DisclosureGroup("Codex model") {
+                        CodexModelOverrideEditor(
+                          configuration: Binding(
+                            get: { draft?.modelOverride },
+                            set: {
+                              draft?.modelOverride = $0
+                              edited = true
+                            }),
+                          inherited: model.inheritedConfiguration(for: draft ?? item),
+                          inheritLabel: "Use project model settings",
+                          catalog: model.modelCatalog)
+                      }
+                    #endif
+
+                    Button("Delete task", role: .destructive) { deleting = true }
+                      .buttonStyle(.borderless)
+                      .disabled(model.planFeedbackInFlight.contains(taskID))
+                  }.padding(.top, 8)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
-              }
-            #endif
-            if edited {
-              Button("Save changes (⌘Return)") { saveTaskEdits() }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.return, modifiers: [.command])
-            }
-            #if os(macOS)
-              DisclosureGroup("Codex model") {
-                CodexModelOverrideEditor(
-                  configuration: Binding(
-                    get: { draft?.modelOverride },
-                    set: {
-                      draft?.modelOverride = $0
-                      edited = true
-                    }),
-                  inherited: model.inheritedConfiguration(for: draft ?? item),
-                  inheritLabel: "Use project model settings",
-                  catalog: model.modelCatalog)
-              }
-            #endif
-          }
-          HStack {
-            Spacer()
-            Button(item.completed ? "Reopen" : "Complete", systemImage: "checkmark.circle") {
-              setTaskCompleted(!item.completed)
+              }.padding(16).tint(.primary)
             }
           }
-          Divider()
-          VStack(alignment: .leading, spacing: 12) {
-            Label("Codex activity", systemImage: "sparkles").stageFont(.headline)
-            if let update = item.latestCodexUpdate {
-              Text("Latest Codex update").stageFont(.caption, weight: .semibold)
-                .foregroundStyle(.secondary)
-              Text(update).textSelection(.enabled)
-              if let date = item.latestCodexUpdateAt {
-                Text(date.formatted(date: .abbreviated, time: .shortened))
-                  .stageFont(.caption2).foregroundStyle(.secondary)
-              }
-            }
-            let taskRuns = model.library.runs.filter { $0.taskID == taskID }
-            let planRuns = taskRuns.filter { $0.kind == .planning }.sorted {
-              $0.createdAt > $1.createdAt
-            }
-            let executionRuns = taskRuns.filter { $0.kind != .planning }.sorted {
-              $0.createdAt > $1.createdAt
-            }
-            if !planRuns.isEmpty {
-              Text("Plan activity").stageFont(.subheadline, weight: .semibold)
-              ForEach(planRuns) { RunDetail(run: $0) }
-            }
-            if !executionRuns.isEmpty {
-              Text("Task execution").stageFont(.subheadline, weight: .semibold)
-              ForEach(executionRuns) { RunDetail(run: $0) }
-            }
-            if taskRuns.isEmpty {
-              Text("No agent has worked on this task.").stageFont(.subheadline, weight: .medium)
-              #if os(iOS)
-                Text(
-                  model.isConnectedPhone
-                    ? "Use the Codex on Mac buttons above to request a plan or run. The Mac confirms each StageChase run before Codex starts."
-                    : model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
-                      ? "Confirmed moves can start Codex. Task placement stays under your control."
-                      : "Launch the task in Codex Desktop. Task placement stays under your control."
-                )
-                .stageFont(.callout).foregroundStyle(.secondary)
-              #else
-                Text(
-                  model.autoInvokeCodex && model.selectedProject?.automationEnabled == true
-                    ? "Confirmed moves can start Codex. Task placement stays under your control."
-                    : "Launch the task in Codex Desktop. Task placement stays under your control."
-                )
-                .stageFont(.callout).foregroundStyle(.secondary)
-              #endif
-            }
-          }
-          if !model.isConnectedPhone {
-            Divider()
-            Button("Delete task (Delete)", role: .destructive) { deleting = true }
-              .buttonStyle(.borderless)
-              .disabled(model.planFeedbackInFlight.contains(taskID))
-          } else {
-            Divider()
-            Button("Delete task", role: .destructive) { deleting = true }
-              .disabled(model.planFeedbackInFlight.contains(taskID))
-          }
-          if model.isConnectedPhone, let run = model.library.latestRun(for: taskID),
-            run.status.isActive || [.needsInput, .interrupted].contains(run.status)
-          {
-            Text("Continue on Mac to manage this Codex run.").stageFont(.callout)
-              .foregroundStyle(.secondary)
-          }
-        }.padding(20)
+        }
       } else {
         ContentUnavailableView("Task unavailable", systemImage: "doc.questionmark")
       }
     }.background(Palette.card)
       .task(id: taskID) {
         draft = item
+        contextExpanded = false
+        titleExpanded = false
+        runDisclosure.select(taskID: taskID, runs: taskRuns)
         edited = false
         promptCopied = false
         planPromptCopied = false
@@ -1214,7 +1004,24 @@ struct TaskDetail: View {
           }
         #endif
       }
-      .onChange(of: item?.revision) { _, _ in if !edited { draft = item } }
+      .onChange(of: taskRuns.map(\.id)) { _, _ in
+        runDisclosure.select(taskID: taskID, runs: taskRuns)
+      }
+      .onChange(of: contextExpanded) { _, expanded in
+        #if os(macOS)
+          if !expanded, focusedEditor == .planFeedback {
+            focusedEditor = nil
+            appendPlanFeedbackOnBlur()
+          }
+        #endif
+      }
+      .onChange(of: item) { previous, current in
+        guard !edited else { return }
+        var refreshed = current
+        // A completed debounce must not replace text typed during its save.
+        if let notes = draft?.notes, notes != previous?.notes { refreshed?.notes = notes }
+        draft = refreshed
+      }
       .onChange(of: draft?.notes) { _, value in
         guard !usesPlanFeedbackField, let value else { return }
         scheduleNotesSave(value)
@@ -1224,6 +1031,11 @@ struct TaskDetail: View {
           if previous == .planFeedback, current != .planFeedback { appendPlanFeedbackOnBlur() }
         }
       #endif
+      .onDisappear {
+        #if os(macOS)
+          appendPlanFeedbackOnBlur()
+        #endif
+      }
       .onChange(of: model.saveTaskEditRequestedID) { _, requestedID in
         guard requestedID == taskID else { return }
         model.saveTaskEditRequestedID = nil
@@ -1243,6 +1055,179 @@ struct TaskDetail: View {
         }.keyboardShortcut(.defaultAction)
       }
   }
+  private func taskHeader(_ item: WorkItem) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top) {
+        TextField("Title", text: draftBinding(\.title), axis: .vertical)
+          .stageFont(.title2, weight: .bold).textFieldStyle(.plain)
+          .lineLimit(titleExpanded ? 1...10 : 1...3)
+          #if os(macOS)
+            .focused($focusedEditor, equals: .title)
+          #endif
+          .disabled(model.planFeedbackInFlight.contains(taskID))
+        Button {
+          #if os(macOS)
+            model.selectedTaskID = nil
+          #else
+            dismiss()
+          #endif
+        } label: {
+          Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+        }.buttonStyle(.plain).accessibilityLabel("Close task")
+      }
+      if item.title.count > 100 {
+        Button(titleExpanded ? "Collapse title" : "Expand title") { titleExpanded.toggle() }
+          .buttonStyle(.borderless).stageFont(.caption)
+      }
+      HStack(spacing: 6) {
+        Text(item.section.title).foregroundStyle(item.section.color)
+        Text("· \(item.status.title)").foregroundStyle(.secondary)
+        Spacer(minLength: 0)
+        if item.completed {
+          Button("Reopen", systemImage: "arrow.uturn.backward") { setTaskCompleted(false) }
+            .buttonStyle(.borderedProminent).tint(.blue)
+        } else {
+          Button("Complete", systemImage: "checkmark.circle") { setTaskCompleted(true) }
+            .buttonStyle(.bordered)
+        }
+      }.stageFont(.caption)
+      if edited {
+        Button("Save changes (⌘Return)") { saveTaskEdits() }
+          .buttonStyle(.borderedProminent).tint(.blue)
+          .keyboardShortcut(.return, modifiers: [.command])
+      }
+      #if os(macOS)
+        VStack(alignment: .leading, spacing: 8) {
+          Button("Launch in Codex", systemImage: "arrow.up.right.square") {
+            launchCodex()
+          }
+          .keyboardShortcut("r", modifiers: [.command])
+          .disabled(
+            handoffActionsDisabled || codexHandoffPrompt == nil
+              || handoffProject?.directory.isEmpty != false
+          )
+          .help(
+            handoffProject?.directory.isEmpty == false
+              ? "Open this project in Codex Desktop with the task prompt."
+              : "Choose a repository folder in Project settings before launching Codex."
+          )
+          .buttonStyle(.borderedProminent).tint(.blue)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          Button(
+            hasReadableAttachedPlan ? "Review plan in Codex" : "Plan in Codex",
+            systemImage: "arrow.up.right.square"
+          ) {
+            launchPlanCodex()
+          }
+          .disabled(
+            handoffActionsDisabled || planCodexHandoffPrompt == nil
+              || handoffProject?.directory.isEmpty != false
+          )
+          .help(
+            handoffProject?.directory.isEmpty == false
+              ? "Open a new Codex Desktop thread with plan-only instructions."
+              : "Choose a repository folder in Project settings before planning in Codex."
+          )
+          .buttonStyle(.borderedProminent).tint(.blue)
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+        }
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 10) { secondaryActions }
+          VStack(alignment: .leading, spacing: 8) { secondaryActions }
+        }.buttonStyle(.borderless).stageFont(.caption).tint(.primary)
+        if item.planPath != nil, !hasReadableAttachedPlan {
+          Text("The saved plan is missing or empty. Plan in Codex can repair it at the same path.")
+            .stageFont(.caption).foregroundStyle(.orange)
+        }
+        if let message = model.taskRefreshMessages[taskID] {
+          Text(message).stageFont(.caption).foregroundStyle(.secondary).lineLimit(2).help(message)
+        }
+      #endif
+    }.padding(16)
+  }
+
+  #if os(macOS)
+    @ViewBuilder private var secondaryActions: some View {
+      if let thread = taskRuns.first(where: { $0.threadID != nil })?.threadID {
+        Button("Open existing thread") { model.openCodexSession(thread) }
+      }
+      if hasReadableAttachedPlan, let path = item?.planPath, let project = handoffProject {
+        Button("Open plan") {
+          if let url = try? PlanFileStore.resolve(
+            projectDirectory: project.directory, relativePath: path)
+          {
+            NSWorkspace.shared.open(url)
+          }
+        }
+      }
+      Button(
+        model.taskRefreshInFlight.contains(taskID) ? "Refreshing…" : "Refresh",
+        systemImage: "arrow.clockwise"
+      ) {
+        Task { await model.refreshTask(taskID, preservingEdits: edited) }
+      }
+      .disabled(model.taskRefreshInFlight.contains(taskID))
+      .help("Refresh the saved task, plan, and linked Codex activity.")
+
+      Menu {
+        Button("Copy task prompt") { copyCodexPrompt() }
+        Button("Copy plan prompt") { copyPlanCodexPrompt() }
+      } label: {
+        Image(systemName: "ellipsis")
+      }
+      .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Copy Codex instructions")
+    }
+  #endif
+
+  private var contextSummary: String {
+    #if os(macOS)
+      if let message = model.planFeedbackMessages[taskID], message.isError { return message.text }
+      if !model.planFeedbackDraft(for: taskID).isEmpty { return "Unsaved feedback" }
+    #endif
+    if let notesSaveMessage, notesSaveMessage.hasPrefix("Could") { return notesSaveMessage }
+    return (draft?.notes.isEmpty == false) ? "Notes available" : "Add context when needed"
+  }
+
+  private func runHistory(_ item: WorkItem) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Codex activity").stageFont(.headline)
+      if let update = item.latestCodexUpdate, update != taskRuns.first?.summary {
+        Text(update).stageFont(.callout).textSelection(.enabled)
+        if let date = item.latestCodexUpdateAt {
+          Text(date, format: .dateTime.month().day().hour().minute())
+            .stageFont(.caption).foregroundStyle(.secondary)
+        }
+      }
+      ForEach(taskRuns) { run in
+        DisclosureGroup(
+          isExpanded: Binding(
+            get: { runDisclosure.expandedIDs.contains(run.id) },
+            set: { runDisclosure.setExpanded($0, for: run.id) }
+          )
+        ) {
+          RunDetail(run: run).padding(.top, 8)
+        } label: {
+          VStack(alignment: .leading, spacing: 3) {
+            Text(
+              "\(run.id == taskRuns.first?.id ? "Latest run" : "Earlier run") · \(run.kind.rawValue.capitalized)"
+            )
+            .stageFont(.subheadline, weight: .medium)
+            Text(
+              "\(run.status.title) · \(run.source == .codexDesktop ? "Codex Desktop" : "StageChase")"
+            )
+            .stageFont(.caption).foregroundStyle(.secondary)
+            Text(run.createdAt, format: .dateTime.month().day().hour().minute())
+              .stageFont(.caption2).foregroundStyle(.secondary)
+          }
+        }.id(run.id)
+      }
+      if taskRuns.isEmpty {
+        Text("No Codex runs yet.").stageFont(.callout).foregroundStyle(.secondary)
+      }
+    }
+  }
+
   private var contextBinding: Binding<String> {
     #if os(macOS)
       if usesPlanFeedbackField { return planFeedbackBinding }
@@ -1254,9 +1239,12 @@ struct TaskDetail: View {
     guard item?.notes != value else { return }
     notesSaveTask?.cancel()
     notesSaveMessage = "Saving…"
+    let savingTaskID = taskID
     notesSaveTask = Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(650))
-      guard !Task.isCancelled, let currentItem = self.item else { return }
+      guard !Task.isCancelled,
+        let currentItem = model.library.tasks.first(where: { $0.id == savingTaskID })
+      else { return }
       if await model.perform(
         .saveNotes(currentItem.id, value, expectedRevision: currentItem.revision))
       {
@@ -1268,18 +1256,22 @@ struct TaskDetail: View {
         }
       } else {
         notesSaveMessage = "Could not save context. Your draft is still here."
+        contextExpanded = true
       }
     }
   }
 
   #if os(macOS)
     private func appendPlanFeedbackOnBlur() {
-      guard usesPlanFeedbackField, !edited, let item else { return }
+      guard usesPlanFeedbackField, !edited, !feedbackSubmitting, let item else { return }
       let text = model.planFeedbackDraft(for: taskID)
       guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+      feedbackSubmitting = true
       Task {
+        defer { feedbackSubmitting = false }
         let saved = await model.appendPlanFeedback(
           taskID: taskID, expectedRevision: item.revision, text: text)
+        if !saved { contextExpanded = true }
         notesSaveMessage =
           saved
           ? "Feedback saved to plan."
@@ -1352,7 +1344,10 @@ struct TaskDetail: View {
 
   #if os(macOS)
     private var handoffActionsDisabled: Bool {
-      edited || model.planFeedbackInFlight.contains(taskID)
+      edited || draft?.notes != item?.notes
+        || !model.planFeedbackDraft(for: taskID).trimmingCharacters(in: .whitespacesAndNewlines)
+          .isEmpty
+        || model.planFeedbackInFlight.contains(taskID)
         || model.library.latestRun(for: taskID)?.status.isActive == true
     }
 

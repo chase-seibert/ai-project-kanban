@@ -154,67 +154,75 @@ struct BoardHeader: View {
           VStack(alignment: .leading, spacing: 5) {
             Text(model.selectedProject?.name ?? "Your projects").stageFont(
               .largeTitle, weight: .bold)
-            Text("A little clarity. A lot of forward motion.").foregroundStyle(.secondary)
           }
           Spacer()
-          Text("\(model.library.items(in: model.selectedProjectID ?? UUID()).count) open tasks")
-            .stageFont(.subheadline).foregroundStyle(.secondary).padding(.top, 10)
+          Text("\(model.library.items(in: model.selectedProjectID ?? UUID()).count) open")
+            .stageFont(.subheadline).foregroundStyle(.secondary)
+          Button("Add task", systemImage: "plus") {
+            model.sheet = .newTask(model.boardFocusedStage)
+          }
+          .buttonStyle(.borderedProminent).tint(.blue)
+          .disabled(model.selectedProject == nil)
+          .help("Add task in the focused section (⌘T)")
+          .accessibilityIdentifier("project-add-task")
         }
         if let project = model.selectedProject {
           ProjectHeaderControls(project: project)
         }
       #endif
-      HStack(spacing: 8) {
-        Image(
-          systemName: automaticInvocationEnabled ? "sparkles" : "pause.circle"
-        )
-        .foregroundStyle(automaticInvocationEnabled ? .purple : .secondary)
-        VStack(alignment: .leading, spacing: 2) {
-          Text(automationTitle).stageFont(.subheadline, weight: .medium)
+      #if os(iOS)
+        HStack(spacing: 8) {
+          Image(
+            systemName: automaticInvocationEnabled ? "sparkles" : "pause.circle"
+          )
+          .foregroundStyle(automaticInvocationEnabled ? .purple : .secondary)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(automationTitle).stageFont(.subheadline, weight: .medium)
+            #if os(iOS)
+              Text(currentPhoneSubtitle).stageFont(.caption).foregroundStyle(.secondary)
+            #else
+              Text(boardSubtitle).stageFont(.caption).foregroundStyle(.secondary)
+            #endif
+          }
+          Spacer(minLength: 6)
           #if os(iOS)
-            Text(currentPhoneSubtitle).stageFont(.caption).foregroundStyle(.secondary)
-          #else
-            Text(boardSubtitle).stageFont(.caption).foregroundStyle(.secondary)
+            Button {
+              Task { await model.refreshFromMac(manual: true) }
+            } label: {
+              if model.syncClient.isSyncing {
+                ProgressView().controlSize(.small)
+              } else {
+                Label("Refresh", systemImage: "arrow.clockwise")
+              }
+            }
+            .buttonStyle(.bordered)
+            .disabled(
+              !model.isConnectedPhone || model.syncClient.isSyncing
+                || model.syncClient.hasUnsavedEndpoint
+            )
+            .accessibilityIdentifier("board-refresh-from-mac")
           #endif
-        }
-        Spacer(minLength: 6)
+          if !model.isConnectedPhone {
+            Button {
+              if let project = model.selectedProject { model.sheet = .editProject(project) }
+            } label: {
+              Image(systemName: "slider.horizontal.3")
+            }.buttonStyle(.borderless).help("Project settings")
+          }
+        }.padding(12).background(Palette.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
         #if os(iOS)
-          Button {
-            Task { await model.refreshFromMac(manual: true) }
-          } label: {
-            if model.syncClient.isSyncing {
-              ProgressView().controlSize(.small)
-            } else {
-              Label("Refresh", systemImage: "arrow.clockwise")
+          if model.isConnectedPhone {
+            Text(model.syncClient.lastResultMessage).stageFont(.caption).foregroundStyle(.secondary)
+            if let error = model.syncClient.error {
+              Text(error).stageFont(.caption).foregroundStyle(.orange)
             }
           }
-          .buttonStyle(.bordered)
-          .disabled(
-            !model.isConnectedPhone || model.syncClient.isSyncing
-              || model.syncClient.hasUnsavedEndpoint
-          )
-          .accessibilityIdentifier("board-refresh-from-mac")
         #endif
-        if !model.isConnectedPhone {
-          Button {
-            if let project = model.selectedProject { model.sheet = .editProject(project) }
-          } label: {
-            Image(systemName: "slider.horizontal.3")
-          }.buttonStyle(.borderless).help("Project settings")
-        }
-      }.padding(12).background(Palette.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
-      #if os(iOS)
-        if model.isConnectedPhone {
-          Text(model.syncClient.lastResultMessage).stageFont(.caption).foregroundStyle(.secondary)
-          if let error = model.syncClient.error {
-            Text(error).stageFont(.caption).foregroundStyle(.orange)
+        #if os(iOS)
+          if model.isConnectedPhone, let project = model.selectedProject {
+            PhoneGitControls(project: project, taskID: nil)
           }
-        }
-      #endif
-      #if os(iOS)
-        if model.isConnectedPhone, let project = model.selectedProject {
-          PhoneGitControls(project: project, taskID: nil, showDeployedAction: true)
-        }
+        #endif
       #endif
     }.padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
   }
@@ -528,9 +536,6 @@ struct TaskCard: View {
   private var cardContents: some View {
     VStack(alignment: .leading, spacing: 10) {
       if isEditingTitle {
-        if let priority = item.priority {
-          priorityLabel(priority)
-        }
         HStack(spacing: 6) {
           TextField("Task title", text: $titleDraft, axis: .vertical)
             .textFieldStyle(.roundedBorder)
@@ -560,20 +565,6 @@ struct TaskCard: View {
           .disabled(savingTitle)
         }
       } else {
-        Button {
-          openDetails()
-        } label: {
-          VStack(alignment: .leading, spacing: 10) {
-            if let priority = item.priority {
-              priorityLabel(priority)
-            }
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Open task details for \(item.title)")
-
         #if os(iOS)
           Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
             .strikethrough(item.completed)

@@ -114,7 +114,7 @@ the last saved run/error state. Refresh is user-triggered and never starts,
 retries, stops, or approves a Codex turn.
 
 Mac task detail also has a separate plan handoff. `PlanHandoffPrompt` builds
-plan-only instructions for Plan in Codex and Revise plan in Codex, keeping implementation completion clauses
+plan-only instructions for Plan in Codex and Review plan in Codex, keeping implementation completion clauses
 out of this flow. It includes the current Mac-local plan-format preference.
 New plans target a normalized task-title slug with the full stable task UUID as
 a collision-safe suffix under `to-do/`; an explicit saved path is preserved for
@@ -143,9 +143,10 @@ never enter the offline edit queue. Requests contain project/task IDs and an
 operation ID; GitService resolves the configured project folder or the task's
 recorded worktree on the Mac. The response includes bounded status fields and
 action text, never filesystem paths. The Mac persists receipts for successful
-commit and deployed-revision requests so a replay with the same operation ID
-returns its original result. Project deployed hash/time continue to travel in
-the existing replica fields. No external Codex URL contract for selecting a
+commit requests so a replay with the same operation ID returns its original
+result. Legacy deployment requests are rejected before any mutation; direct
+requests never enter the offline queue, so rejection is terminal. Existing
+deployed hash/time replica fields remain inert for backward compatibility. No external Codex URL contract for selecting a
 remote host/workspace is defined in the official documentation; phone task
 context remains copyable instead of constructing an unsupported remote URL.
 
@@ -228,42 +229,37 @@ StageChase/Worktrees when the checkout is dirty. Only the approved plan is copie
 other uncommitted changes stay in the original checkout. The working folder is
 recorded and shown. Worktrees are retained, never auto-deleted.
 
-## Mac Git status, task commits, and deployed revision
+## Project Git status and commits
 
 `GitService` runs argument-based Git commands against the configured project
-folder on a utility task. It derives the current branch, full `HEAD` hash, and
-staged, unstaged, and untracked change counts from Git each time; these values
-are transient and are never copied to the phone. This reflects commits made
-outside StageChase as soon as status is refreshed. Task detail displays the
-recorded working folder for that task's latest run when one exists; otherwise
-it displays shared project status and says clearly that changed files are not
-assigned to the task.
+folder on a utility task. The Mac header summary opens `ProjectGitStatusView`
+in a popover with branch, HEAD, staged/unstaged/untracked counts, refresh, and
+commit feedback. Task details no longer instantiate Mac or phone Git controls.
+The existing task-worktree service/wire operations remain for compatibility,
+but new task-detail UI has no commit action.
 
-The explicit **Commit all changes for this task** action stages all non-ignored
-working-tree changes (`git add -A`) in the task's recorded run folder (or the
-project folder when no run folder is recorded), then commits them using the task
-title as a single-line message. There is no file or message picker. The action is never
-triggered by a Codex run, task transition, MCP request, or phone synchronization.
-An empty repository or clean worktree cannot create an empty task commit.
+**Commit all project changes** targets only the configured project folder, using
+the most recently completed task's normalized title. Completion time is independent
+of edits; older records fall back to updatedAt, then task ID for ties. No completed
+task means no project commit. Per-project busy state and refresh behavior remain.
+Paired phones retain explicit project-level Git access through direct requests.
 
-The project header also offers an explicit **Commit all project changes** action.
-It always targets the configured project folder, even when a task has a separate
-recorded worktree, and uses the title of the most recently completed task in
-that project as the normalized one-line commit message. Completion time is
-stored separately from ordinary task edits. Older completed tasks without that
-timestamp use `updatedAt` as a best-effort recency value, with the
-lexicographically greatest task ID winning equal timestamps. A project without
-a completed task cannot use this action. Git actions share per-project busy
-state and feedback; Git status refreshes after success or failure. This remains
-a Mac-only user action.
+Deployment tracking has no active UI or local mutation entry point. The legacy
+`recordDeployedRevision` wire case remains decodable but returns a retired-action
+rejection without consulting Git or modifying the repository. Optional stored and
+replicated deployed hash/time fields remain inert; no migration deletes them.
 
-Each project optionally stores a deployed commit hash and recording timestamp
-in its normal Codable record. The Mac project controls record the current `HEAD`
-when the user confirms a deployment. This checkpoint is a manual reference;
-it does not observe deployment systems and may become stale if deployment or
-branch changes happen elsewhere. Older project records decode with no
-checkpoint. The checkpoint is included in the phone's project replica, while
-local repository paths and Git contents remain Mac-only.
+## Task inspector presentation
+
+`TaskDetail` separates a fixed title/status/action header from its scrollable
+body. `TaskRunDisclosureState` holds transient task/run IDs and expansion choices;
+it is neither persisted nor synced. Runs sort by createdAt descending and stable
+ID for ties, regardless of kind/source. Selection expands only the latest; a new
+latest collapses its predecessor while routine updates preserve user choices.
+Context and feedback use disclosure state with the existing draft/save bindings.
+A synchronous submission guard prevents duplicate blur/collapse feedback requests.
+The rail and phone task sheet are keyed by task ID to isolate drafts across selection.
+Blue primary-action tint is explicit and does not change semantic stage colors.
 
 ## Favorite Make targets
 
@@ -277,7 +273,12 @@ control-character values.
 its configured directory, and launches `/usr/bin/make` directly with one target
 argument and that directory as its working folder. It captures stdout and
 stderr into a bounded in-memory buffer, keeps one app-wide process active, and
-reports running, succeeded, failed, or stopped state in the project header.
+reports running, succeeded, failed, or stopped state compactly in the header.
+`AppSheet.makeOutput` uses the shared presenter to display `MakeOutputSheet`.
+The service outlives sheet dismissal; Show output reopens the retained result.
+Output truncation is explicit in the sheet and copied text. Stop remains distinct
+from Close/Escape. The original project/target identity belongs to the service,
+not whichever board is currently selected.
 This local action is separate from task placement/completion, Codex runs, Git
 commits, and phone-triggered work.
 

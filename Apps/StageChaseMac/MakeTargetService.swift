@@ -25,6 +25,10 @@ enum MakeTargetStatus: Equatable {
   private(set) var projectName = ""
   private(set) var target = ""
   private(set) var output = ""
+  private(set) var outputWasTruncated = false
+  var copyableOutput: String {
+    (outputWasTruncated ? "[Retained output tail (32 KB)]\n" : "") + output
+  }
   private(set) var isRunning = false
   private let maximumOutputBytes = 32_000
   private var process: Process?
@@ -53,6 +57,7 @@ enum MakeTargetStatus: Equatable {
     self.projectName = project.name
     self.target = normalized
     self.output = ""
+    self.outputWasTruncated = false
     self.status = .running
     self.isRunning = true
     self.stopping = false
@@ -116,6 +121,7 @@ enum MakeTargetStatus: Equatable {
   private func append(_ value: String) {
     output.append(value)
     if output.utf8.count > maximumOutputBytes {
+      outputWasTruncated = true
       output = String(decoding: output.utf8.suffix(maximumOutputBytes), as: UTF8.self)
     }
   }

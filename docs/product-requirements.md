@@ -81,38 +81,35 @@
 These requirements are implemented in part and remain unverified on devices.
 Phone confirmation for automated transitions remains open.
 
-## Git status and deployed revision
+## Project Git status and commits
 
-- As a user, I want the Mac project header and task detail to show the current
-  branch, `HEAD` commit hash, and shared working-tree status, so I can see
-  changes and commits made either inside or outside StageChase.
-- As a user, I want a direct task action to stage all non-ignored project
-  changes and commit them with a single-line version of the task title, so I do
-  not need to select files or write a separate message.
-- As a user, I want a project-header action to stage and commit all changes in
-  the configured project folder using the title of the most recently completed
-  task in that project, so I can save shared project work without opening a
-  task.
-- Completed tasks retain their completion time across later edits; older
-  completed records without a completion time use their update time as a
-  best-effort fallback. A project with no completed task cannot create a
-  project commit, and clean repositories do not create empty commits.
-- As a user, I want to record the current `HEAD` as a project's deployed
-  revision, so I can compare the deployment checkpoint with current code.
-- Git status comes from the configured Mac project folder, or from the latest
-  run's recorded worktree when one exists. Task detail shows shared project
-  status without claiming individual file ownership; branch-to-task association
-  is deferred.
-- Git operations are explicit Mac actions. Codex runs, task moves, MCP reads or
-  writes, and phone synchronization never commit. Recording a deployed revision
-  is manual and can become stale when deployments happen elsewhere.
-- The deployed hash and timestamp are optional backward-compatible project
-  fields. Phone replicas may display this checkpoint, but never receive local
-  repository paths or status contents.
-- A paired iPhone can request project/task status and explicitly confirm task or
-  project commits, or record the deployed revision. These authenticated direct
-  requests run on the Mac, stay online-only, and return no filesystem paths.
-  Commit operation IDs are deduplicated on the Mac.
+- The Mac project header provides a compact repository summary. Its popover
+  shows branch, HEAD, change counts, refresh, and **Commit all project changes**.
+  Task details contain no Git status or commit controls on either platform.
+- Project commits stage all non-ignored changes in the configured project folder,
+  using the most recently completed task's title. Separate task worktrees are
+  not included. Completion timestamps and the existing legacy fallback determine
+  recency; a project with no completed task cannot commit, and clean repositories
+  do not create empty commits.
+- Git actions stay explicit. Runs, task moves, MCP writes, and background phone
+  refresh never commit. Paired-phone project Git actions are authenticated,
+  online-only requests with deduplicated operation IDs and no returned local paths.
+- Marking HEAD as deployed is retired. The app does not infer deployment from
+  Make commands. Legacy optional hash/time fields decode and round-trip as inert
+  compatibility data. Legacy direct deployment writes receive a terminal rejection.
+
+## Simplified task actions
+
+- Add task has a dedicated blue project-header button and uses the focused section.
+- Task title comes first. Launch in Codex and Review plan in Codex (or Plan in Codex
+  without a readable plan) use blue primary styling. Review is plan-only.
+- Reopen is a blue action beside status for completed tasks. Complete stays visible
+  for open tasks. Neither task completion nor reopening is inferred from a run.
+- One chronological run history initially expands only the newest run. Older runs
+  expand on demand, with failures and required input discoverable from attention rows.
+- Context/feedback, StageChase controls, and additional metadata start collapsed.
+  Save errors reveal the editor and retain its draft. Priority is hidden on cards
+  and in the normal detail form without altering its stored values or ordering.
 
 ## Favorite Make targets
 
@@ -120,8 +117,10 @@ Phone confirmation for automated transitions remains open.
   Mac Project Settings, so that frequently used project actions are easy to
   find.
 - As a user, I want to explicitly run one of a project's favorites from its Mac
-  board header, stop an active target, and see bounded output and the result,
+  board header, stop an active target, and see bounded output in a native modal,
   so that I can run common repository actions without leaving the board.
+- Closing the output modal keeps the command running. Make retains a compact
+  result and Show output entry; errors never push terminal output into the board.
 - Favorites are project-specific Codable data and round-trip through phone
   snapshots. Settings and execution remain Mac-only. Runs use the latest saved
   project folder, one target argument, and one app-wide active process; they
@@ -141,8 +140,8 @@ Phone confirmation for automated transitions remains open.
   project and task overrides, so that each run uses a deliberate model choice.
 - As a user, I want confirmed runs and retries to keep their saved model and
   reasoning effort, so that later settings changes do not silently alter work.
-- As a user, I want to change a project's worktree preference and model from its
-  Mac board header, so project run choices are quick to see and edit.
+- As a user, I want to change a project's worktree preference and model in
+  Project settings, keeping the board header focused on frequent actions.
 - As a user, I want worktrees off by default for existing and new projects,
   while retaining an opt-in isolated checkout for dirty repositories.
 - As a user, I want unavailable models and unsupported reasoning choices to
@@ -223,7 +222,7 @@ Phone confirmation for automated transitions remains open.
   start work from phone polling or replica updates.
 - As a user, I want external `begin_task` to distinguish planning from task
   execution while older callers default to generic task activity, so the task
-  history keeps those workflows separate.
+  history identifies each workflow by kind.
 - As a user, I want `begin_task` clients to pass the exact current Codex Desktop
   thread ID when their client exposes it, so StageChase can link the run as soon
   as it is recorded without guessing from a title or task text. When the client
@@ -231,14 +230,14 @@ Phone confirmation for automated transitions remains open.
 - As a user, I want the linked task card to show a spinner and the latest short
   Codex message only while a confirmed turn is busy, so waiting, finished, or
   disconnected sessions are not shown as processing.
-- As a user, I want plan runs and task execution runs shown in separate task
-  detail sections, so planning progress is not confused with implementation.
+- As a user, I want one newest-first task history with clear run-kind labels,
+  so I can distinguish planning from implementation while expanding older runs only when needed.
 - Linking or reconnecting observes an existing thread only; it never submits,
   interrupts, or closes a turn.
 
 ## Manual plan handoff
 
-- As a user, I want a contextual Plan in Codex or Revise plan in Codex action
+- As a user, I want a contextual Plan in Codex or Review plan in Codex action
   in Mac task detail, so I can create or revise a plan without authorizing
   implementation.
 - As a user, I want both actions to use identical plan-only instructions with
@@ -246,7 +245,7 @@ Phone confirmation for automated transitions remains open.
   intended project-relative path, so copying and launching produce the same
   plan workflow.
 - As a user, I want the StageChase planning action grouped separately from the
-  Plan in Codex and Revise plan in Codex handoffs, so I can tell which actions
+  Plan in Codex and Review plan in Codex handoffs, so I can tell which actions
   start work inside the app and which open Desktop for me.
 - As a user, I want a new plan to use a normalized task-title slug plus its full
   task UUID under `to-do/` and a revision to preserve its attached path, so

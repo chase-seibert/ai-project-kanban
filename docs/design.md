@@ -4,11 +4,20 @@ Mac sidebar and iPhone Projects tab are the main entry points. New Project opens
 a blank form with a fresh identity; Project Settings edits the chosen project.
 Switching projects clears task selection and search.
 
-On Mac, Project Settings stores an ordered list of favorite Make target names.
-The project header offers an explicit Run action for each favorite and a Stop
-action while a target is active. It shows the selected project, target, running
-or final result, and bounded process output. Settings and execution are Mac-only;
-favorite names travel in project snapshots so phone refreshes do not discard them.
+The Mac project header has two compact rows: project name, open-task count,
+and a dedicated blue **Add task** button; then Make, a repository summary,
+automation/model information, and Project settings. Add task uses the focused
+section, matching Command-T. The generic toolbar plus is removed; lane capture
+and menu/keyboard commands remain. The slogan and verbose automation banner
+are no longer shown on the Mac board.
+
+Project Settings stores an ordered list of favorite Make targets. Running a
+favorite opens a native output sheet with project, target, status, Copy output,
+Stop, and Close. Closing or pressing Escape leaves the process running. Make
+keeps a compact result in the header and offers Show output to reopen it.
+The service retains a bounded output tail and labels truncation. Failure does
+not reopen a dismissed sheet. Settings and execution remain Mac-only;
+favorites travel in project snapshots so phone refreshes preserve them.
 
 The board has three sections in order: Inbox, Planning, and Implementing. Mac
 shows them as three side-by-side columns with independently vertical-scrolling
@@ -17,7 +26,9 @@ colored, icon-led task-status capsule; plan and Codex run details stay out of
 cards, with saved plans and the latest run available in task detail and run
 history in Activity. Status capsules use the same styling on Mac and iPhone.
 Waiting, Error, Quota, and Review sort ahead of ordinary statuses in that order,
-then priority and the user's stable rank decide order.
+then priority and the user's stable rank decide order. Priority labels and the
+normal detail picker are hidden; stored priority, sorting, and menu/keyboard
+commands remain available.
 Section headers offer named + buttons. On iPhone, + opens the same task sheet
 used by the task composer, and there is no extra Add task row at the bottom of a
 lane. Mac keeps inline multiline capture. Cards drag between sections or onto
@@ -50,12 +61,12 @@ does not show the connection-status card above its tasks.
 Paired iPhone users can tap **Refresh** in the board header to request the latest
 Mac state; the button shows sync progress and the most recent result. Pull-to-
 refresh remains available. A paired project header also shows Mac-backed Git
-status, confirmed project commit, and deployed-revision actions. Task detail
-shows Git status and a confirmed task-worktree commit action.
+status and confirmed project commit actions in Project settings. Task details have no Git or
+deployment controls on either platform.
 
 Mac task detail is an inspector; iPhone uses a sheet. Title, task context, saved
 plan, status, and manual completion share the model. Plans and Codex run state do
-not restrict section placement. Title and priority drafts require Save; ordinary
+not restrict section placement. Title and model drafts require Save; ordinary
 task context saves automatically. Stale revisions
 produce an error. Task detail and the Activity screen show compact
 Codex run status and progress instead of a long chronological event timeline.
@@ -65,7 +76,12 @@ overwrite its Done status; unsaved detail drafts remain available to save.
 On iPhone, completion and reopening use revision-checked queued edits. Task
 deletion requires an explicit confirmation and the Mac rejects deletion while
 a run is active.
-The Activity screen lists active runs; task detail keeps the latest run. Full
+The Activity screen lists active runs. Task detail merges planning, implementation,
+and external runs into one newest-first history. Only the latest run starts
+expanded; older runs are individually expandable. A new run expands and collapses
+the previous latest, while ordinary status updates preserve expansion choices.
+Switching tasks resets the disclosure defaults. Attention rows expose older runs
+that need input or failed without expanding all history. Full
 event records remain stored; open a run in Codex on Mac to inspect its session.
 On iPhone, a run with a linked Codex thread ID shows **Open in Codex**. StageChase
 tries the Codex thread URL and, if no app can open it, directs the user to
@@ -102,20 +118,25 @@ rename prompt-launched threads; Codex Desktop controls their displayed names.
 After success, that prompt directs Codex to move the task to
 Review through MCP while preserving its current completion flag. Enabling automation alone
 never starts work.
-Mac task detail also offers **Plan in Codex** or **Revise plan in Codex**
+Mac task detail also offers **Plan in Codex** or **Review plan in Codex**
 actions. They use the plan-only prompt, include the Mac plan-format
 preference, and open a new thread without submitting a turn. The labels identify
-whether Codex will create a first plan or revise a readable attached plan. New
+whether Codex will create a first plan or review and revise a readable attached plan. New
 plans use a normalized task-title slug plus the full lowercase task UUID under
 `to-do/`; revisions retain the attached path. Plan prompts also start with the
 exact task title. Codex attaches the saved Markdown plan through MCP and sets
 the status to Ready while preserving task completion. Launching the
 action does not itself change task state.
-Task detail groups actions into vertically stacked **You run in Codex** and
-**StageChase runs** sections so labels remain readable. Each section has a
-task-run action and a planning action; Refresh is below both groups. Plan with
-StageChase starts a confirmed planning run from any task section and leaves the
-task in place.
+Mac task detail has a fixed title-first header above a scrolling body. Launch in
+Codex and Review plan in Codex are blue primary actions. Completed tasks have a
+blue Reopen button beside status; open tasks have Complete in the same position.
+Existing-thread access, Open plan, Refresh, and prompt-copy actions are secondary.
+Long titles can expand. Context and plan feedback, StageChase run controls, and
+additional metadata are initially collapsed. Save failures reveal the context
+editor; collapse and focus changes must not append feedback twice. The iPhone
+shares title-first detail and collapsible history/context, retaining its native
+phone-specific actions. Completion remains explicit and independent of run state.
+
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
 last successful refresh. A separate Connection tab on phone and in Mac Settings
 shows progress, the saved endpoint, and timestamped framed exchange sizes and
@@ -135,25 +156,16 @@ with High reasoning. Catalog discovery is a Settings/confirmation action and
 does not start a turn. The iPhone loads the desktop catalog when project settings
 are opened and can change the project's inherited or overridden model.
 
-The Mac project board header exposes that project's effective model and a
-compact override editor, plus a **Use worktrees** toggle. The model follows
-task → project → global precedence. Worktrees default off for new projects and
-for projects decoded from older library data. When enabled, a dirty repository
-uses a managed worktree for a new implementation run; when disabled, the run
-uses the project folder directly. Clean repositories and planning runs use the
-project folder either way. A confirmed run records its selected worktree
-setting; a retry reuses its saved working folder. Preference changes affect
-future confirmed runs and do not alter saved run snapshots.
+Project Settings exposes model and worktree preferences; the header shows a
+compact effective-model summary with no worktree toggle. Model precedence remains
+task → project → global. Worktrees default off; when enabled, dirty implementation
+runs use an isolated checkout. Existing run snapshots and retry folders do not
+change when preferences change.
 
-The Mac project header shows the current Git branch, `HEAD`, working-tree
-change count, and recorded deployed revision, with explicit refresh and
-deployment-recording controls. Task detail shows its latest run's working
-folder status when available, or shared project status otherwise, alongside a
-direct **Commit all changes for this task** action. It stages every repository
-change in that working folder and uses the task title as the commit message,
-without a file selection or message editor. The detail copy makes clear that
-shared checkout files are not mapped to individual tasks. Git actions remain
-unavailable on iPhone.
+The Mac repository summary opens a project popover with current branch, HEAD,
+change counts, refresh, project commit, and result/error feedback. Task detail
+has no Git block. Deployment tracking is retired on Mac and phone; legacy stored
+hash/time values are inert compatibility metadata and are not displayed.
 
 The project header's **Commit all project changes** action stages changes only
 in the configured project folder. Its message comes from the most recently

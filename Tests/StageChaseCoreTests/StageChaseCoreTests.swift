@@ -118,7 +118,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let revisionPrompt = PlanHandoffPrompt.make(
     for: task, project: project, formatPrompt: "Use concise sections.")
   #expect(PlanHandoffPrompt.planPath(for: task) == "custom/plans/my-plan.md")
-  #expect(revisionPrompt.contains("Revise the existing plan"))
+  #expect(revisionPrompt.contains("Review the existing plan"))
   #expect(revisionPrompt.contains("custom/plans/my-plan.md"))
   #expect(revisionPrompt.contains("Use concise sections."))
 
@@ -1523,4 +1523,54 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     library.items(in: project.id, section: .implementing).map(\.title) == [
       "New implementation", "Old implementation",
     ])
+}
+
+@Test func taskRunDisclosuresKeepLatestOpenAndUserChoicesAcrossUpdates() {
+  let project = Project(name: "Inspector")
+  let task = WorkItem(projectID: project.id, title: "Mixed runs")
+  var older = AgentRun(task: task, kind: .planning)
+  older.createdAt = Date(timeIntervalSince1970: 10)
+  var latest = AgentRun(task: task, kind: .implementation)
+  latest.createdAt = Date(timeIntervalSince1970: 20)
+  latest.source = .codexDesktop
+  var state = TaskRunDisclosureState()
+  state.select(taskID: task.id, runs: [older, latest])
+  #expect(state.expandedIDs == [latest.id])
+  #expect(TaskRunDisclosureState.ordered([older, latest]).map(\.id) == [latest.id, older.id])
+
+  state.setExpanded(true, for: older.id)
+  state.setExpanded(false, for: latest.id)
+  latest.status = .succeeded
+  latest.updatedAt = Date(timeIntervalSince1970: 100)
+  state.select(taskID: task.id, runs: [latest, older])
+  #expect(state.expandedIDs == [older.id])
+
+  var newest = AgentRun(task: task, kind: .task)
+  newest.createdAt = Date(timeIntervalSince1970: 30)
+  state.setExpanded(true, for: latest.id)
+  state.select(taskID: task.id, runs: [older, newest, latest])
+  #expect(state.expandedIDs == [older.id, newest.id])
+  state.select(taskID: task.id, runs: [newest, latest])
+  #expect(state.expandedIDs == [newest.id])
+
+  let other = WorkItem(projectID: project.id, title: "Other")
+  let otherRun = AgentRun(task: other, kind: .planning)
+  state.select(taskID: other.id, runs: [newest, otherRun])
+  #expect(state.expandedIDs == [otherRun.id])
+  state.select(taskID: task.id, runs: [latest, newest])
+  #expect(state.expandedIDs == [newest.id])
+  state.select(taskID: task.id, runs: [])
+  #expect(state.expandedIDs.isEmpty)
+  #expect(state.latestID == nil)
+}
+
+@Test func taskRunOrderingBreaksTimestampTiesDeterministically() {
+  let task = WorkItem(projectID: UUID(), title: "Same timestamp")
+  var a = AgentRun(task: task, kind: .planning)
+  var b = AgentRun(task: task, kind: .task)
+  a.id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+  b.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+  a.createdAt = Date(timeIntervalSince1970: 10)
+  b.createdAt = a.createdAt
+  #expect(TaskRunDisclosureState.ordered([b, a]).map(\.id) == [a.id, b.id])
 }

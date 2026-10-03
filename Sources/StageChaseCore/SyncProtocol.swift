@@ -86,6 +86,7 @@ public enum SyncDirectRequest: Codable, Sendable {
     requestID: UUID, projectID: UUID, taskID: UUID?, expectedRevision: Int?)
   case commitTask(requestID: UUID, projectID: UUID, taskID: UUID, expectedRevision: Int)
   case commitProject(requestID: UUID, projectID: UUID)
+  /// Legacy wire case only. The Mac rejects this retired action without mutation.
   case recordDeployedRevision(requestID: UUID, projectID: UUID)
 }
 

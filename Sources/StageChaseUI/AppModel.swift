@@ -422,11 +422,6 @@ import UniformTypeIdentifiers
         .commitProject(requestID: UUID(), projectID: projectID), projectID: projectID)
     }
 
-    func recordPhoneDeployedRevision(projectID: UUID) async {
-      await performPhoneGitAction(
-        .recordDeployedRevision(requestID: UUID(), projectID: projectID), projectID: projectID)
-    }
-
     func pairPhone() async {
       do {
         let libraryID = try await syncClient.pair()
@@ -1083,32 +1078,6 @@ import UniformTypeIdentifiers
       }
     }
 
-    func recordDeployedRevision(projectID: UUID) async {
-      guard !gitBusyProjectIDs.contains(projectID),
-        var project = library.projects.first(where: { $0.id == projectID })
-      else { return }
-      gitBusyProjectIDs.insert(projectID)
-      gitActionMessages[projectID] = nil
-      defer { gitBusyProjectIDs.remove(projectID) }
-      do {
-        let status = try await gitService.status(in: URL(fileURLWithPath: project.directory))
-        guard let head = status.head else {
-          throw GitServiceError.command("This repository has no commit to record as deployed.")
-        }
-        gitStatuses[projectID] = status
-        gitStatusErrors[projectID] = nil
-        project.deployedCommitHash = head
-        project.deployedAt = Date()
-        guard await perform(.editProject(project)) else {
-          throw BoardError.invalid(error ?? "Could not save the deployed revision.")
-        }
-        gitActionMessages[projectID] = "Recorded deployed revision \(head.prefix(12))."
-      } catch {
-        gitActionMessages[projectID] = error.localizedDescription
-        await refreshGitStatus(projectID: projectID)
-      }
-    }
-
     func taskUsesSeparateGitWorktree(taskID: UUID) -> Bool {
       guard let item = library.tasks.first(where: { $0.id == taskID }),
         let project = library.projects.first(where: { $0.id == item.projectID }),
@@ -1633,6 +1602,9 @@ enum AppSheet: Identifiable {
   case newTask(WorkflowSection)
   case task(UUID)
   case settings
+  #if os(macOS)
+    case makeOutput
+  #endif
   var id: String {
     switch self {
     case .newProject: "new-project"
@@ -1640,6 +1612,9 @@ enum AppSheet: Identifiable {
     case .newTask(let stage): "new-task-\(stage.id)"
     case .task(let id): id.uuidString
     case .settings: "settings"
+    #if os(macOS)
+      case .makeOutput: "make-output"
+    #endif
     }
   }
 }

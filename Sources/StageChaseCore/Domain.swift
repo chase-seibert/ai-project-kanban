@@ -337,6 +337,7 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var usesWorktrees = false
   public var modelOverride: CodexModelConfiguration?
   public var executionProfile: CodexExecutionProfile = .workspaceAccessNoPrompts
+  /// Legacy inert metadata retained for library and replica compatibility.
   public var deployedCommitHash: String?
   public var deployedAt: Date?
   public var favoriteMakeTargets: [String] = []
@@ -553,6 +554,39 @@ public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
     self.modelConfiguration = modelConfiguration
     self.usesWorktrees = usesWorktrees
     self.executionProfile = executionProfile
+  }
+}
+
+/// Transient task inspector state; never persisted or included in sync snapshots.
+public struct TaskRunDisclosureState: Equatable, Sendable {
+  public private(set) var taskID: UUID?
+  public private(set) var latestID: UUID?
+  public private(set) var expandedIDs: Set<UUID> = []
+  public init() {}
+
+  public static func ordered(_ runs: [AgentRun]) -> [AgentRun] {
+    runs.sorted {
+      $0.createdAt == $1.createdAt
+        ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
+    }
+  }
+
+  public mutating func select(taskID: UUID, runs: [AgentRun]) {
+    let ordered = Self.ordered(runs.filter { $0.taskID == taskID })
+    let next = ordered.first?.id
+    if self.taskID != taskID {
+      expandedIDs = Set(next.map { [$0] } ?? [])
+    } else if next != latestID {
+      if let latestID { expandedIDs.remove(latestID) }
+      if let next { expandedIDs.insert(next) }
+    }
+    expandedIDs.formIntersection(Set(ordered.map(\.id)))
+    self.taskID = taskID
+    latestID = next
+  }
+
+  public mutating func setExpanded(_ expanded: Bool, for runID: UUID) {
+    if expanded { expandedIDs.insert(runID) } else { expandedIDs.remove(runID) }
   }
 }
 
