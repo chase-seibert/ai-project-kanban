@@ -317,8 +317,9 @@ generated JSON schema was checked for exact request spellings.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Protocol version 4 adds synchronized task and project read
-markers and acknowledgment commands. Version 3 and older clients are rejected
+sanitized snapshots. Protocol version 5 adds the linked Codex thread ID to
+read-only run snapshots; version 4 added synchronized task and project read
+markers and acknowledgment commands. Version 4 and older clients are rejected
 explicitly; they must update before syncing with this build. Queued phone edits
 remain a small allowlist (create/edit/move/reorder/complete/delete and read
 acknowledgments) with expected task revisions where applicable. Each command carries

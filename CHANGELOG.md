@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-03
+
+- Carry linked Codex thread IDs in read-only phone run snapshots so iPhone can
+  open existing sessions from task detail using the existing Mac-continuation
+  and copy-ID fallback. Advance the strict sync protocol to version 5. Guard
+  the Mac-only Make target editor helper from the phone build.
+
 ## 2026-10-02
 
 - Add project-specific favorite Make targets to Mac Project Settings and an

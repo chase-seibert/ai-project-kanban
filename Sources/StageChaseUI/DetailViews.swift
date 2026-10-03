@@ -272,18 +272,20 @@ struct ProjectEditor: View {
     }
   }
 
-  private var canAddMakeTarget: Bool {
-    let target = makeTargetDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    return !target.isEmpty && !target.hasPrefix("-")
-      && !project.favoriteMakeTargets.contains(target)
-  }
+  #if os(macOS)
+    private var canAddMakeTarget: Bool {
+      let target = makeTargetDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+      return !target.isEmpty && !target.hasPrefix("-")
+        && !project.favoriteMakeTargets.contains(target)
+    }
 
-  private func addMakeTarget() {
-    let target = makeTargetDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard canAddMakeTarget, (try? MakeTargetService.validate(target)) != nil else { return }
-    project.favoriteMakeTargets.append(target)
-    makeTargetDraft = ""
-  }
+    private func addMakeTarget() {
+      let target = makeTargetDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard canAddMakeTarget, (try? MakeTargetService.validate(target)) != nil else { return }
+      project.favoriteMakeTargets.append(target)
+      makeTargetDraft = ""
+    }
+  #endif
 }
 
 #if os(macOS)

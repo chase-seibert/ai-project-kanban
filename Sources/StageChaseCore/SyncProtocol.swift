@@ -3,9 +3,9 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
-  // Version 4 adds shared task/project read markers and acknowledgment commands.
+  // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 4
+  public static let version = 5
   public static let maximumMessageBytes = 1_048_576
   public static let maximumPairingSecretBytes = 64
 }
@@ -265,6 +265,8 @@ public struct SyncRun: Codable, Equatable, Identifiable, Sendable {
   public var projectID: UUID
   public var kind: RunKind
   public var status: RunStatus
+  /// Allows the phone to open the same saved Codex session as Mac task detail.
+  public var threadID: String?
   public var summary: String
   public var updatedAt: Date
 
@@ -274,6 +276,7 @@ public struct SyncRun: Codable, Equatable, Identifiable, Sendable {
     projectID = run.projectID
     kind = run.kind
     status = run.status
+    threadID = run.threadID
     summary = run.summary
     updatedAt = run.updatedAt
   }
@@ -381,6 +384,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       run.taskID = syncRun.taskID
       run.projectID = syncRun.projectID
       run.status = syncRun.status
+      run.threadID = syncRun.threadID
       run.summary = syncRun.summary
       run.updatedAt = syncRun.updatedAt
       return run

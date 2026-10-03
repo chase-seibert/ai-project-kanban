@@ -67,9 +67,10 @@ deletion requires an explicit confirmation and the Mac rejects deletion while
 a run is active.
 The Activity screen lists active runs; task detail keeps the latest run. Full
 event records remain stored; open a run in Codex on Mac to inspect its session.
-On iPhone, StageChase tries the Codex thread URL and, if no app can open it,
-directs the user to continue on Mac and lets them copy the session ID. The phone
-cannot manage the Mac runner.
+On iPhone, a run with a linked Codex thread ID shows **Open in Codex**. StageChase
+tries the Codex thread URL and, if no app can open it, directs the user to
+continue on Mac and lets them copy the session ID. Runs without a linked ID do
+not show the action. The phone cannot manage the Mac runner.
 Mac and paired iPhone Project settings expose a per-project Codex execution profile. The safe
 default uses workspace-write and disables approval prompts. Full access is an
 explicit choice with filesystem and network scope explained beside the picker.

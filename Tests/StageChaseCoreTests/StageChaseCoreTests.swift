@@ -281,6 +281,29 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(try legacySnapshot.replica().projects[0].favoriteMakeTargets.isEmpty)
 }
 
+@Test func syncSnapshotRoundTripsOptionalCodexThreadIDs() throws {
+  let project = Project(name: "Session handoff")
+  let task = WorkItem(projectID: project.id, title: "Open from iPhone")
+  var linkedRun = AgentRun(task: task, kind: .implementation)
+  linkedRun.threadID = "desktop-thread-123"
+  let unlinkedRun = AgentRun(task: task, kind: .planning)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  library.runs = [linkedRun, unlinkedRun]
+
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 1, library: library)
+  let encoded = try JSONEncoder().encode(snapshot)
+  let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
+  let replica = try decoded.replica()
+
+  #expect(decoded.version == 5)
+  #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
+  #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
+  #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
+  #expect(replica.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
+}
+
 @Test func remoteCommandsAreTransactionalRevisionCheckedAndIdempotent() async throws {
   let repository = try LibraryRepository(inMemory: true)
   let project = Project(name: "Shared")
@@ -411,7 +434,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 4)
+  #expect(snapshot.version == 5)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }
