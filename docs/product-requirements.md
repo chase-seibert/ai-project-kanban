@@ -39,12 +39,16 @@
 - As a user, I want to switch projects by tapping the selected project name on
   iPhone, so I can move between boards without returning to the project list.
 - As a user, I want the iPhone board's bottom controls to select Inbox,
-  Planning, and Implementing, so I can change lanes without reaching the top
-  section strip. Horizontal paging remains available.
+  Planning, and Implementing using the standard iOS tab bar, so I get familiar
+  navigation and the system's native tab-bar material.
 - As a user, I want Connection at the top of the iPhone board and the status
   card removed, so sync remains reachable while tasks gain vertical space.
 - As a user, I want Activity and Settings to remain available from the board's
   overflow menu, so changing the bottom navigation does not remove those views.
+- As a user, I want Project Git in the project menu, so I can inspect the
+  paired Mac repository and confirm a project-wide commit from my phone.
+- As a user, I want task details to push onto the iPhone navigation stack, so
+  the standard back button and swipe-back gesture return me to the board.
 - As a user, I want the iPhone to offer a truthful Codex handoff, so it opens a
   supported thread URL or explains that I need to continue on Mac and can copy
   the session ID.
@@ -260,20 +264,30 @@ Phone confirmation for automated transitions remains open.
 
 ## iPhone task controls and Codex settings
 
-- As a user, I want the + at the top of an iPhone section to open the shared
-  Add Task sheet for that section, so task creation works consistently across
-  sections. Remove Add Task from the overflow menu and remove the extra Add Task
-  row at the bottom of each phone lane.
+- As a user, I want one blue Add task button in the iPhone board toolbar to add
+  a task to the currently focused section, so the main creation action is easy
+  to find. Keep lane-specific + controls on Mac and remove duplicate per-lane
+  phone buttons and Add Task rows.
 - As a user, I want a single tap on a task title to open task detail and a double
   tap to edit the title inline, so opening a task is the default phone action.
 - As a user, I want task detail buttons to ask StageChase on my paired Mac to
   prepare a planning run or a task run, so I can start either workflow from the
-  phone. The Mac verifies the task revision; both requests still require the
-  existing Mac confirmation before Codex starts.
+  phone. The phone tap confirms the request, and the Mac verifies the task
+  revision before starting Codex.
 - As a user, I want to open a saved plan from phone task detail and read its
   Markdown inline, so the plan is available without leaving the task. The phone
   requests the bounded file contents only when I open it, and does not receive
   the Mac's project path.
+- Project Git is reachable from the selected project's board menu. The phone
+  reads Git status and requests a confirmed project-wide commit through the
+  authenticated paired-Mac connection; it never runs Git against a phone-local
+  path. Task detail has no Git action.
+- On phone task detail, keep the title first and show Reopen, **Launch in
+  Codex**, **Plan in Codex**, and **Copy prompt** before optional details.
+  Launch and Plan are explicit revision-checked requests to start the task or
+  planning run on the paired Mac; the user's tap is confirmation. Copy prompt
+  provides a StageChase-aware prompt for another Codex chat. Keep task context
+  collapsed initially and saved-plan reading under More details.
 - As a user, I want to change a project's Codex execution profile and model from
   paired iPhone Project settings, so future confirmed Mac runs use my choices.
   Existing run snapshots remain unchanged, and the full-access profile keeps its
@@ -284,9 +298,9 @@ Phone confirmation for automated transitions remains open.
 - A paired iPhone can mark a task complete or reopen it with the latest task
   revision, and can delete it after confirmation. The Mac rejects stale edits
   and deletion during an active run. These actions do not start or manage Codex.
-- The iPhone board has an explicit Refresh control that reports progress and the
-  latest result. It uses the same queued-edit-first manual refresh as
-  pull-to-refresh.
+- The iPhone board overflow menu has a Refresh from Mac action that reports
+  progress and the latest result. It uses the same queued-edit-first manual
+  refresh as pull-to-refresh.
 - No documented external Codex URL contract currently establishes how to select
   a remote host/workspace and pass task context. Do not construct a remote URL;
   keep task context copyable until Codex documents that contract.

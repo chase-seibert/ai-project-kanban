@@ -1600,7 +1600,6 @@ enum AppSheet: Identifiable {
   case newProject
   case editProject(Project)
   case newTask(WorkflowSection)
-  case task(UUID)
   case settings
   #if os(macOS)
     case makeOutput
@@ -1610,7 +1609,6 @@ enum AppSheet: Identifiable {
     case .newProject: "new-project"
     case .editProject(let project): "edit-\(project.id)"
     case .newTask(let stage): "new-task-\(stage.id)"
-    case .task(let id): id.uuidString
     case .settings: "settings"
     #if os(macOS)
       case .makeOutput: "make-output"

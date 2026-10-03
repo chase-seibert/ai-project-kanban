@@ -29,6 +29,7 @@ enum Palette {
 
 struct BoardView: View {
   @Environment(AppModel.self) private var model
+  var onOpenTask: ((UUID) -> Void)?
   @State private var focusedStage: WorkflowSection? = .inbox
   @State private var editingTaskID: UUID?
   var body: some View {
@@ -40,9 +41,10 @@ struct BoardView: View {
         GeometryReader { geometry in
           HStack(alignment: .top, spacing: 14) {
             ForEach(WorkflowSection.allCases) { section in
-              BoardLane(section: section, editingTaskID: $editingTaskID).frame(
-                maxWidth: .infinity, maxHeight: .infinity, alignment: .top
-              ).id(section)
+              BoardLane(section: section, editingTaskID: $editingTaskID, onOpenTask: onOpenTask)
+                .frame(
+                  maxWidth: .infinity, maxHeight: .infinity, alignment: .top
+                ).id(section)
             }
           }
           .padding(.horizontal, 20)
@@ -51,68 +53,31 @@ struct BoardView: View {
         }
       #else
         GeometryReader { geometry in
-          let width = laneWidth(geometry.size.width)
-          ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 14) {
-              ForEach(WorkflowSection.allCases) { stage in
-                BoardLane(section: stage, editingTaskID: $editingTaskID).frame(
-                  width: width, height: max(220, geometry.size.height - 20)
-                ).id(stage)
-              }
+          TabView(
+            selection: Binding(
+              get: { focusedStage ?? .inbox },
+              set: {
+                focusedStage = $0
+                model.boardFocusedStage = $0
+              })
+          ) {
+            ForEach(WorkflowSection.allCases) { section in
+              BoardLane(section: section, editingTaskID: $editingTaskID, onOpenTask: onOpenTask)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .tabItem { Label(section.title, systemImage: section.symbol) }
+                .tag(section)
+                .accessibilityIdentifier("board-section-\(section.rawValue)")
             }
-            .scrollTargetLayout()
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
-            .frame(minWidth: geometry.size.width, alignment: .topLeading)
           }
-          .scrollPosition(id: $focusedStage, anchor: .leading)
           .onChange(of: model.boardFocusedStage) { _, value in focusedStage = value }
-          .onChange(of: focusedStage) { _, value in
-            if let value { model.boardFocusedStage = value }
-          }
-          #if os(iOS)
-            .scrollTargetBehavior(.viewAligned)
-          #endif
+          .toolbarBackground(.visible, for: .tabBar)
         }
       #endif
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Palette.canvas)
-    #if os(iOS)
-      .safeAreaInset(edge: .bottom, spacing: 0) {
-        HStack(spacing: 6) {
-          ForEach(WorkflowSection.allCases) { section in
-            Button {
-              withAnimation(.snappy) {
-                focusedStage = section
-                model.boardFocusedStage = section
-              }
-            } label: {
-              VStack(spacing: 4) {
-                Image(systemName: section.symbol).font(.system(size: 19, weight: .semibold))
-                Text(section.title).font(.caption.weight(.semibold)).lineLimit(1)
-                .minimumScaleFactor(0.8)
-              }
-              .foregroundStyle(focusedStage == section ? section.color : .secondary)
-              .frame(maxWidth: .infinity, minHeight: 50)
-              .background(
-                focusedStage == section ? section.color.opacity(0.14) : .clear,
-                in: RoundedRectangle(cornerRadius: 12)
-              )
-              .contentShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(section.title)
-            .accessibilityAddTraits(focusedStage == section ? .isSelected : [])
-            .accessibilityIdentifier("board-section-\(section.rawValue)")
-          }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
-      }
-    #endif
     .onAppear { focusedStage = model.boardFocusedStage }
     #if os(macOS)
       .background(BoardKeyboardMonitor(model: model))
@@ -138,11 +103,6 @@ struct BoardView: View {
       }
     #endif
   }
-  #if os(iOS)
-    private func laneWidth(_ width: CGFloat) -> CGFloat {
-      min(420, max(270, width - 48))
-    }
-  #endif
 }
 
 struct BoardHeader: View {
@@ -263,6 +223,7 @@ struct BoardLane: View {
   @Environment(AppModel.self) private var model
   let section: WorkflowSection
   @Binding var editingTaskID: UUID?
+  var onOpenTask: ((UUID) -> Void)?
   @State private var draft = ""
   @State private var adding = false
   @State private var targeted = false
@@ -279,25 +240,23 @@ struct BoardLane: View {
         )
         .padding(.horizontal, 7).padding(.vertical, 3).background(.quaternary, in: Capsule())
         Spacer(minLength: 0)
-        Button {
-          #if os(iOS)
-            model.sheet = .newTask(section)
-          #else
+        #if os(macOS)
+          Button {
             adding = true
             captureFocused = true
-          #endif
-        } label: {
-          Image(systemName: "plus")
-        }
-        .buttonStyle(.borderless).help("Add to \(section.title)").accessibilityLabel(
-          "Add task to \(section.title)")
+          } label: {
+            Image(systemName: "plus")
+          }
+          .buttonStyle(.borderless).help("Add to \(section.title)").accessibilityLabel(
+            "Add task to \(section.title)")
+        #endif
       }
       Text(section.subtitle).stageFont(.caption).foregroundStyle(.secondary)
       Rectangle().fill(section.color.opacity(0.5)).frame(height: 2)
       ScrollView(.vertical) {
         LazyVStack(alignment: .leading, spacing: 10) {
           ForEach(model.items(section)) { item in
-            TaskCard(item: item, editingTaskID: $editingTaskID)
+            TaskCard(item: item, editingTaskID: $editingTaskID, onOpenTask: onOpenTask)
           }
           if model.items(section).isEmpty && !adding {
             VStack(spacing: 8) {
@@ -307,7 +266,7 @@ struct BoardLane: View {
                 .subheadline)
               Text(
                 model.search.isEmpty
-                  ? "Use + to add a task to this section." : "Try another search."
+                  ? "Use Add task to add a task to this section." : "Try another search."
               ).stageFont(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity).padding(.vertical, 30)
           }
@@ -442,6 +401,7 @@ struct TaskCard: View {
   @Environment(AppModel.self) private var model
   let item: WorkItem
   @Binding var editingTaskID: UUID?
+  var onOpenTask: ((UUID) -> Void)?
   @State private var titleDraft = ""
   @State private var savingTitle = false
   @FocusState private var titleFieldFocused: Bool
@@ -654,7 +614,7 @@ struct TaskCard: View {
       model.boardSelectedTaskID = item.id
       model.boardFocusedStage = item.section
     #else
-      model.sheet = .task(item.id)
+      onOpenTask?(item.id)
     #endif
   }
 

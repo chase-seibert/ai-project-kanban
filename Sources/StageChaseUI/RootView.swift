@@ -73,30 +73,50 @@ struct RootView: View {
               .navigationDestination(for: PhoneDestination.self) { destination in
                 switch destination {
                 case .board:
-                  BoardView()
+                  BoardView(onOpenTask: { phonePath.append(.task($0)) })
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                       ToolbarItem(placement: .principal) {
                         phoneProjectPicker
                       }
-                      ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button {
-                          phonePath.append(.connection)
-                        } label: {
-                          Image(systemName: "network")
+                      ToolbarItem(placement: .topBarTrailing) {
+                        Button("Add task", systemImage: "plus") {
+                          model.sheet = .newTask(model.boardFocusedStage)
                         }
-                        .accessibilityLabel("Connection")
-
+                        .buttonStyle(.borderedProminent).tint(.blue)
+                        .disabled(model.selectedProject == nil)
+                        .accessibilityIdentifier("phone-add-task")
+                      }
+                      ToolbarItem(placement: .secondaryAction) {
                         Menu {
                           Toggle("Show completed", isOn: $model.showCompleted)
+                          Button(
+                            model.syncClient.isSyncing ? "Refreshing…" : "Refresh from Mac",
+                            systemImage: "arrow.clockwise"
+                          ) {
+                            Task { await model.refreshFromMac(manual: true) }
+                          }
+                          .disabled(
+                            !model.isConnectedPhone || model.syncClient.isSyncing
+                              || model.syncClient.hasUnsavedEndpoint
+                          )
+                          Button("Connection", systemImage: "network") {
+                            phonePath.append(.connection)
+                          }
                           Button("Activity", systemImage: "waveform.path.ecg") {
                             phonePath.append(.activity)
                           }
                           Button("Settings", systemImage: "gearshape") {
                             phonePath.append(.settings)
                           }
-                          if model.isConnectedPhone, let project = model.selectedProject {
+                          if let project = model.selectedProject {
                             Divider()
+                            Button(
+                              "Project Git", systemImage: "chevron.left.forwardslash.chevron.right"
+                            ) {
+                              phonePath.append(.projectGit(project.id))
+                            }
+                            .disabled(!model.isConnectedPhone)
                             Button("Project settings", systemImage: "slider.horizontal.3") {
                               model.sheet = .editProject(project)
                             }
@@ -113,6 +133,23 @@ struct RootView: View {
                   SyncConnectionView().navigationTitle("Connection")
                 case .settings:
                   AppSettings().navigationTitle("Settings")
+                case .task(let id):
+                  TaskDetail(taskID: id).id(id)
+                    .navigationTitle("")
+                    .navigationBarTitleDisplayMode(.inline)
+                case .projectGit(let id):
+                  if let project = model.library.projects.first(where: { $0.id == id }) {
+                    ScrollView {
+                      PhoneGitControls(project: project, taskID: nil).padding(16)
+                    }
+                    .navigationTitle("Project Git")
+                    .navigationBarTitleDisplayMode(.inline)
+                  } else {
+                    ContentUnavailableView(
+                      "Project unavailable", systemImage: "folder.questionmark"
+                    )
+                    .navigationTitle("Project Git")
+                  }
                 }
               }
           }
@@ -125,7 +162,6 @@ struct RootView: View {
         case .newProject: ProjectEditor(project: Project(name: ""), isNew: true)
         case .editProject(let project): ProjectEditor(project: project, isNew: false)
         case .newTask(let stage): NewTaskEditor(stage: stage)
-        case .task(let id): TaskDetail(taskID: id).id(id)
         #if os(macOS)
           case .makeOutput: MakeOutputSheet()
         #endif
@@ -220,8 +256,29 @@ struct RootView: View {
     .task(id: scenePhase) {
       model.undoManager = undoManager
       await model.load()
-      if model.isPreview && ProcessInfo.processInfo.arguments.contains("--preview-board") {
-        phonePath = [.board]
+      if model.isPreview {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--preview-task"), var task = model.library.tasks.first {
+          let completedPreview = !arguments.contains("--preview-active-task")
+          task.section = .implementing
+          task.status = completedPreview ? .done : .ready
+          task.completed = completedPreview
+          task.completedAt = completedPreview ? .now : nil
+          model.library.tasks[0] = task
+          model.library.runs = [RunKind.task, .implementation, .planning].enumerated().map {
+            index, kind in
+            var run = AgentRun(task: task, kind: kind)
+            run.source = .codexDesktop
+            run.status = .succeeded
+            run.summary = index == 2 ? "Latest update is ready for review." : "Earlier run details."
+            run.createdAt = .now.addingTimeInterval(TimeInterval(-index * 3600))
+            run.updatedAt = run.createdAt
+            return run
+          }
+          phonePath = [.board, .task(task.id)]
+        } else if arguments.contains("--preview-board") {
+          phonePath = [.board]
+        }
       }
       #if os(iOS)
         guard scenePhase == .active else { return }
@@ -269,6 +326,8 @@ struct RootView: View {
 
 private enum PhoneDestination: Hashable {
   case board
+  case task(UUID)
+  case projectGit(UUID)
   case activity
   case connection
   case settings
@@ -343,15 +402,17 @@ struct ProjectSidebar: View {
             #endif
           }
         }
-        if !model.isConnectedPhone {
-          Button {
-            model.sheet = .newProject
-          } label: {
-            Label("New project", systemImage: "plus.circle").padding(.vertical, 6)
+        #if os(macOS)
+          if !model.isConnectedPhone {
+            Button {
+              model.sheet = .newProject
+            } label: {
+              Label("New project", systemImage: "plus.circle").padding(.vertical, 6)
+            }
+            .buttonStyle(.plain).foregroundStyle(Color.accentColor).accessibilityIdentifier(
+              "new-project")
           }
-          .buttonStyle(.plain).foregroundStyle(Color.accentColor).accessibilityIdentifier(
-            "new-project")
-        }
+        #endif
       } header: {
         Text("YOUR PROJECTS")
       }

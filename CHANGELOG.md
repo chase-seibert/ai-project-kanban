@@ -12,6 +12,15 @@
   running; Stop is explicit and truncated output is labeled.
 - Retire deployed-HEAD tracking on Mac and phone. Preserve inert legacy metadata
   while rejecting old deployment requests without mutation.
+- Use the native iOS tab bar for Inbox, Planning, and Implementing, preserving
+  the system's current tab-bar material. Keep one blue Add task action for the
+  focused lane and move refresh and connection choices into the overflow menu.
+- Put Launch in Codex, Plan in Codex, and Copy prompt beside Reopen in phone
+  task details. Launch and Plan are explicit, revision-checked requests to the
+  paired Mac; task context and saved-plan reading stay in collapsed details.
+- Push phone task details onto the standard navigation stack with the native
+  back button and swipe-back gesture. Add Project Git to the project menu so
+  phone users can review status and confirm a paired-Mac project commit.
 
 - Carry linked Codex thread IDs in read-only phone run snapshots so iPhone can
   open existing sessions from task detail using the existing Mac-continuation

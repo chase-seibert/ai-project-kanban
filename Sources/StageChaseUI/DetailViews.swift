@@ -707,6 +707,7 @@ struct TaskDetail: View {
   @State private var notesSaveMessage: String?
   @State private var deleting = false
   @State private var contextExpanded = false
+  @State private var moreDetailsExpanded = false
   @State private var titleExpanded = false
   @State private var runDisclosure = TaskRunDisclosureState()
   @State private var feedbackSubmitting = false
@@ -859,62 +860,7 @@ struct TaskDetail: View {
                     }.padding(.top, 8)
                   }
                 #endif
-                #if os(iOS)
-                  if model.isConnectedPhone {
-                    DisclosureGroup("StageChase runs") {
-                      HStack {
-                        Button("Plan with StageChase", systemImage: "sparkles") {
-                          requestCodexAction(.plan, item: item)
-                        }
-                        .disabled(codexActionLoading || item.completed)
-                        Button("Execute Task", systemImage: "play.fill") {
-                          requestCodexAction(.run, item: item)
-                        }
-                        .disabled(
-                          codexActionLoading || item.completed
-                            || ![.planning, .implementing].contains(item.section)
-                            || model.library.latestRun(for: item.id)?.status.isActive == true)
-                      }
-                      Button("Copy task context for Codex Remote", systemImage: "doc.on.doc") {
-                        let context = [
-                          "Task: \(item.title)",
-                          "Project: \(handoffProject?.name ?? "Project")",
-                          "Project ID: \(item.projectID.uuidString.lowercased())",
-                          "Task ID: \(item.id.uuidString.lowercased())",
-                          item.notes.isEmpty ? nil : "Notes:\n\(item.notes)",
-                        ].compactMap { $0 }.joined(separator: "\n\n")
-                        UIPasteboard.general.string = context
-                        phoneContextCopied = true
-                      }
-                      .buttonStyle(.bordered)
-                      Text(
-                        "Codex Remote does not publish a supported external URL contract for choosing a workspace. Paste this context into the intended remote chat."
-                      )
-                      .stageFont(.caption).foregroundStyle(.secondary)
-                      if phoneContextCopied {
-                        Label("Task context copied", systemImage: "checkmark.circle.fill")
-                          .stageFont(.caption).foregroundStyle(.green)
-                      }
-                      Text(
-                        "Tapping either action starts it on the paired Mac. A run keeps the task in its current section."
-                      )
-                      .stageFont(.caption).foregroundStyle(.secondary)
-                      if let message = model.phoneCodexActionMessage {
-                        Text(message).stageFont(.callout)
-                          .foregroundStyle(
-                            message.localizedCaseInsensitiveContains("could not")
-                              ? .orange : .secondary
-                          )
-                          .textSelection(.enabled)
-                      }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
-                  }
-                #endif
-
-                DisclosureGroup("More details") {
+                DisclosureGroup(isExpanded: $moreDetailsExpanded) {
                   VStack(alignment: .leading, spacing: 12) {
                     if !model.isConnectedPhone {
                       VStack(alignment: .leading, spacing: 8) {
@@ -952,6 +898,7 @@ struct TaskDetail: View {
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
+                        .id("saved-plan-preview")
                       }
                     #endif
                     #if os(macOS)
@@ -973,9 +920,21 @@ struct TaskDetail: View {
                       .buttonStyle(.borderless)
                       .disabled(model.planFeedbackInFlight.contains(taskID))
                   }.padding(.top, 8)
+                } label: {
+                  Text("More details")
                 }
               }.padding(16).tint(.primary)
             }
+            #if os(iOS)
+              .onChange(of: planMarkdown) { _, value in
+                guard value != nil else { return }
+                withAnimation { proxy.scrollTo("saved-plan-preview", anchor: .top) }
+              }
+              .onChange(of: planLoadError) { _, error in
+                guard error != nil else { return }
+                withAnimation { proxy.scrollTo("saved-plan-preview", anchor: .top) }
+              }
+            #endif
           }
         }
       } else {
@@ -985,6 +944,7 @@ struct TaskDetail: View {
       .task(id: taskID) {
         draft = item
         contextExpanded = false
+        moreDetailsExpanded = false
         titleExpanded = false
         runDisclosure.select(taskID: taskID, runs: taskRuns)
         edited = false
@@ -993,6 +953,7 @@ struct TaskDetail: View {
         #if os(iOS)
           planMarkdown = nil
           planLoadError = nil
+          phoneContextCopied = false
           model.phoneCodexActionMessage = nil
         #endif
         #if os(macOS)
@@ -1065,15 +1026,13 @@ struct TaskDetail: View {
             .focused($focusedEditor, equals: .title)
           #endif
           .disabled(model.planFeedbackInFlight.contains(taskID))
-        Button {
-          #if os(macOS)
+        #if os(macOS)
+          Button {
             model.selectedTaskID = nil
-          #else
-            dismiss()
-          #endif
-        } label: {
-          Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-        }.buttonStyle(.plain).accessibilityLabel("Close task")
+          } label: {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+          }.buttonStyle(.plain).accessibilityLabel("Close task")
+        #endif
       }
       if item.title.count > 100 {
         Button(titleExpanded ? "Collapse title" : "Expand title") { titleExpanded.toggle() }
@@ -1091,6 +1050,59 @@ struct TaskDetail: View {
             .buttonStyle(.bordered)
         }
       }.stageFont(.caption)
+      #if os(iOS)
+        VStack(alignment: .leading, spacing: 8) {
+          Button {
+            requestCodexAction(.run, item: item)
+          } label: {
+            Label("Launch in Codex", systemImage: "arrow.up.right.square")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.borderedProminent).tint(.blue)
+          .disabled(
+            codexActionLoading || item.completed
+              || ![.planning, .implementing].contains(item.section)
+              || model.library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive })
+          )
+          .accessibilityHint("Starts this task with Codex on the paired Mac.")
+
+          Button {
+            requestCodexAction(.plan, item: item)
+          } label: {
+            Label("Plan in Codex", systemImage: "sparkles")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.borderedProminent).tint(.blue)
+          .disabled(
+            codexActionLoading || item.completed
+              || model.library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive })
+          )
+          .accessibilityHint("Starts a planning run with Codex on the paired Mac.")
+
+          Button {
+            copyPhonePrompt(for: item)
+          } label: {
+            Label("Copy prompt", systemImage: "doc.on.doc")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.bordered)
+
+          if phoneContextCopied {
+            Label("Prompt copied", systemImage: "checkmark.circle.fill")
+              .stageFont(.caption).foregroundStyle(.green)
+          }
+          if let message = model.phoneCodexActionMessage {
+            Text(message).stageFont(.caption)
+              .foregroundStyle(
+                message.localizedCaseInsensitiveContains("could not")
+                  || message.localizedCaseInsensitiveContains("pair") ? .orange : .secondary
+              )
+              .textSelection(.enabled)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 8)
+      #endif
       if edited {
         Button("Save changes (⌘Return)") { saveTaskEdits() }
           .buttonStyle(.borderedProminent).tint(.blue)
@@ -1288,6 +1300,22 @@ struct TaskDetail: View {
         await model.requestCodexFromMac(item, action: action)
         codexActionLoading = false
       }
+    }
+
+    private func copyPhonePrompt(for item: WorkItem) {
+      let notes = item.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+      let projectName = handoffProject?.name ?? "Project"
+      UIPasteboard.general.string = """
+        Work on this existing StageChase task in the project repository. Follow the repository's AGENTS.md instructions. Read the task with the StageChase MCP server first and verify the returned project and task IDs match before making changes.
+
+        Project: \(projectName)
+        Project ID: \(item.projectID.uuidString.lowercased())
+        Task ID: \(item.id.uuidString.lowercased())
+        Task: \(item.title)
+        Notes:
+        \(notes.isEmpty ? "(No additional notes.)" : notes)
+        """
+      phoneContextCopied = true
     }
 
     private func loadPlanFromMac(_ item: WorkItem) {

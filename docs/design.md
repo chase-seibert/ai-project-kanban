@@ -29,9 +29,10 @@ Waiting, Error, Quota, and Review sort ahead of ordinary statuses in that order,
 then priority and the user's stable rank decide order. Priority labels and the
 normal detail picker are hidden; stored priority, sorting, and menu/keyboard
 commands remain available.
-Section headers offer named + buttons. On iPhone, + opens the same task sheet
-used by the task composer, and there is no extra Add task row at the bottom of a
-lane. Mac keeps inline multiline capture. Cards drag between sections or onto
+Mac section headers keep named + buttons and inline multiline capture. On
+iPhone, one blue **Add task** toolbar button creates a task in the currently
+focused section; per-lane + buttons are removed to avoid a second Add task
+control. There is no extra Add task row at the bottom of a lane. Cards drag between sections or onto
 another card to reorder within a section. On Mac, a single click on a card title
 opens task detail and a double-click starts inline title editing; the card
 menu's **Edit title** action remains available. On iPhone, a single title tap
@@ -50,21 +51,21 @@ creates one task. When automatic invocation is enabled for Planning or Implement
 bulk capture is directed to Inbox so each later move retains its explicit run
 confirmation.
 
-iPhone uses a horizontally paged board with bottom section controls: one
-readable lane plus a hint of its neighbor, not five squeezed desktop columns. Generated launch
-configuration enables the full display rather than iOS compatibility framing.
+iPhone uses the native tab bar to switch between Inbox, Planning, and
+Implementing, with one readable lane per tab rather than five squeezed desktop
+columns. The system tab bar supplies the current iOS material and appearance.
+Generated launch configuration enables the full display rather than iOS
+compatibility framing.
 On iPhone, the selected project name in the navigation bar opens a project
-switcher. The board's bottom controls select Inbox, Planning, or Implementing
-and stay in sync with horizontal paging. Connection is a top-bar action; Activity
-and Settings remain available from the board's overflow menu. The phone board
-does not show the connection-status card above its tasks.
-Paired iPhone users can tap **Refresh** in the board header to request the latest
-Mac state; the button shows sync progress and the most recent result. Pull-to-
-refresh remains available. A paired project header also shows Mac-backed Git
-status and confirmed project commit actions in Project settings. Task details have no Git or
-deployment controls on either platform.
+switcher. The native bottom tabs select Inbox, Planning, or Implementing and
+stay in sync with the focused section used by Add task. The overflow menu contains
+completed items, **Refresh from Mac**, Connection, Activity, Settings, and
+Project Git and Project settings. Project Git status and the confirmed project
+commit action route through the paired Mac. Pull-to-refresh also remains
+available. Task details have no Git or deployment controls on either platform.
 
-Mac task detail is an inspector; iPhone uses a sheet. Title, task context, saved
+Mac task detail is an inspector; iPhone pushes a task screen in its navigation
+stack. The system back button and edge-swipe gesture return to the board. Title, task context, saved
 plan, status, and manual completion share the model. Plans and Codex run state do
 not restrict section placement. Title and model drafts require Save; ordinary
 task context saves automatically. Stale revisions
@@ -76,6 +77,13 @@ overwrite its Done status; unsaved detail drafts remain available to save.
 On iPhone, completion and reopening use revision-checked queued edits. Task
 deletion requires an explicit confirmation and the Mac rejects deletion while
 a run is active.
+On iPhone, the title stays first. **Reopen**, **Launch in Codex**, **Plan in
+Codex**, and **Copy prompt** appear before secondary details. Launch and Plan
+are explicit, revision-checked requests to start the selected Codex action on
+the paired Mac; a tap is the user's confirmation. Copy prompt produces a
+StageChase-aware task prompt for pasting into another Codex chat. Saved-plan
+review remains available inside collapsed details. Task context and other
+details start collapsed.
 The Activity screen lists active runs. Task detail merges planning, implementation,
 and external runs into one newest-first history. Only the latest run starts
 expanded; older runs are individually expandable. A new run expands and collapses
