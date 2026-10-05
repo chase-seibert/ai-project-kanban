@@ -47,6 +47,8 @@
   overflow menu, so changing the bottom navigation does not remove those views.
 - As a user, I want Project Git in the project menu, so I can inspect the
   paired Mac repository and confirm a project-wide commit from my phone.
+- As a user, I want to create a project from my iPhone, so a new project is
+  added to the paired Mac library and appears on both devices.
 - As a user, I want task details to push onto the iPhone navigation stack, so
   the standard back button and swipe-back gesture return me to the board.
 - As a user, I want the iPhone to offer a truthful Codex handoff, so it opens a

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-05
+
+- Let users create projects from a paired iPhone. The project name is sent as
+  an explicit queued sync command and created in the Mac library; advance the
+  strict sync protocol to version 6.
+
 ## 2026-10-03
 
 - Simplify the Mac project header with a dedicated blue Add task button, compact

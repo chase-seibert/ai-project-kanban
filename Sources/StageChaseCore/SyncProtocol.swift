@@ -3,9 +3,10 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 5
+  public static let version = 6
   public static let maximumMessageBytes = 1_048_576
   public static let maximumPairingSecretBytes = 64
 }
@@ -56,6 +57,7 @@ public struct SyncEnvelope: Codable, Equatable, Sendable {
 
 /// The wire command allowlist does not expose `Mutation` or server-owned fields.
 public enum SyncCommand: Codable, Equatable, Sendable {
+  case createProject(id: UUID, name: String)
   case createTask(id: UUID, projectID: UUID, title: String, notes: String, stage: WorkflowStage)
   case editTask(id: UUID, title: String, notes: String)
   case moveTask(id: UUID, stage: WorkflowStage)
@@ -143,6 +145,13 @@ public enum SyncCommandValidator {
       throw BoardError.invalid("This phone uses an unsupported synchronization protocol version.")
     }
     switch envelope.command {
+    case .createProject(let id, let name):
+      guard envelope.expectedRevision == nil,
+        !library.projects.contains(where: { $0.id == id })
+      else { throw BoardError.invalid("This project already exists or cannot be created now.") }
+      var project = Project(name: name)
+      project.id = id
+      return .createProject(project)
     case .createTask(let id, let projectID, let title, let notes, let stage):
       guard envelope.expectedRevision == nil,
         library.projects.contains(where: { $0.id == projectID })

@@ -651,6 +651,9 @@ import UniformTypeIdentifiers
         let wireCommand: SyncCommand
         let revision: Int?
         switch command {
+        case .createProject(let project):
+          wireCommand = .createProject(id: project.id, name: project.name)
+          revision = nil
         case .createTask(let item, let configuration):
           guard configuration == nil else {
             throw BoardError.invalid("Confirm automated work on the Mac.")

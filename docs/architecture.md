@@ -318,14 +318,15 @@ generated JSON schema was checked for exact request spellings.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Protocol version 5 adds the linked Codex thread ID to
-read-only run snapshots; version 4 added synchronized task and project read
-markers and acknowledgment commands. Version 4 and older clients are rejected
-explicitly; they must update before syncing with this build. Queued phone edits
-remain a small allowlist (create/edit/move/reorder/complete/delete and read
-acknowledgments) with expected task revisions where applicable. Each command carries
-the phone edit timestamp captured when queued and the device's monotonic client
-sequence. A stale task edit is rebased only when its source timestamp is newer
+sanitized snapshots. Protocol version 6 adds explicit project creation from a
+paired phone; version 5 adds the linked Codex thread ID to read-only run
+snapshots; version 4 added synchronized task and project read markers and
+acknowledgment commands. Version 5 and older clients are rejected explicitly;
+they must update before syncing with this build. Queued phone edits remain a
+small allowlist (project/task creation, task edit/move/reorder/complete/delete,
+and read acknowledgments) with expected task revisions where applicable. Each
+command carries the phone edit timestamp captured when queued and the device's
+monotonic client sequence. A stale task edit is rebased only when its source timestamp is newer
 than the Mac task timestamp. Exact timestamp ties favor the Mac; ties between
 phone writes use device ID and then client sequence. Phone timestamps more than
 five minutes in the future are capped at that boundary. Accepted phone timestamps

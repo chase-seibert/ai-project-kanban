@@ -434,7 +434,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 5)
+  #expect(snapshot.version == 6)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }

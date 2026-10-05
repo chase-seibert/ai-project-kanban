@@ -65,9 +65,7 @@ struct RootView: View {
               .navigationTitle("Projects")
               .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                  if !model.isConnectedPhone {
-                    Button("New project", systemImage: "plus") { model.sheet = .newProject }
-                  }
+                  Button("New project", systemImage: "plus") { model.sheet = .newProject }
                 }
               }
               .navigationDestination(for: PhoneDestination.self) { destination in
