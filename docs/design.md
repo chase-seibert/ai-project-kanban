@@ -11,6 +11,21 @@ section, matching Command-T. The generic toolbar plus is removed; lane capture
 and menu/keyboard commands remain. The slogan and verbose automation banner
 are no longer shown on the Mac board.
 
+The Mac and iPhone Projects Lists show Codex session and weekly capacity, reset
+times, weekly pacing, and flex-credit value when reported. The Mac refreshes
+from its local Codex login every five minutes while StageChase is active and
+offers a manual refresh. Pulling down on the iPhone Projects List requests a
+full refresh from the paired Mac, resolving queued phone edits before replacing
+the local replica. The paired iPhone receives only the timestamped usage
+snapshot, never credentials. Its home-screen widget and circular or rectangular
+Lock Screen widgets show the last synced reading and update after a phone sync.
+Quota bars use red, yellow, and green remaining-capacity segments; weekly bars
+also mark the reset-anchored expected remaining point with a red dotted line.
+The Mac menu bar shows matching red/yellow/green status circles for session and
+weekly capacity and opens a refreshable usage panel. In the Mac Projects List,
+refresh and last-updated status sit at the lower right of the usage panel.
+Failed refreshes preserve the last-good numbers with a stale indicator.
+
 Project Settings stores an ordered list of favorite Make targets. Running a
 favorite opens a native output sheet with project, target, status, Copy output,
 Stop, and Close. Closing or pressing Escape leaves the process running. Make

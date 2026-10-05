@@ -25,16 +25,45 @@
   its project marker and selecting a project never clears task markers.
   Model configuration is a global Mac preference with optional project/task
   overrides; queued runs save the resolved model, effort, policy, and source.
+  The Mac Projects List and `MenuBarExtra` show Codex usage, backed by a Mac-only
+  observable `CodexUsageService`. Shared quota presentation logic colors the
+  remaining-capacity bars and provides the status circles, including weekly
+  pacing against the reset-anchored expected remaining amount. It reads the existing Codex auth file or
+  `Codex Auth` Keychain item, refreshes usage every five minutes while the app
+  is active, and retains the last successful snapshot after failures. Tokens
+  remain in Codex's own credential stores. Only the sanitized, timestamped
+  quota snapshot is sent to paired phones and cached in the phone/widget App
+  Group; it contains no auth material or task/library data.
 - `Apps/StageChaseMac/`: one singleton `Window` scene for the board and its
   in-window sheets/inspectors, native commands, `AgentConnection` protocol,
   JSONL `CodexConnection`, and `CodexRunner` coordinator. The standard Settings
   command routes to the Settings sheet rather than a separate scene.
 - `Apps/StageChasePhone/`: iPhone scene using the shared UI and repository.
+- `Apps/StageChaseWidget/`: WidgetKit home- and Lock Screen usage widget. It
+  reads only the latest phone App Group snapshot and never contacts Codex or the
+  Mac directly.
 - `Tests/`: reducer/persistence regressions and an offline process-level
   app-server fixture for progress, completion, blocked work, permission profiles, and stop.
 
 Xcode synchronized source groups compile shared files directly into each app.
 SwiftPM exposes StageChaseCore for tests. App targets do not import it separately.
+
+## Mac Codex usage
+
+`Sources/StageChaseCore/CodexUsage.swift` contains the fixture-testable response
+mapper, quota windows, flex-credit conversion, and reset-anchored weekly pacing.
+The Mac-only provider keeps HTTP transport and auth-file/Keychain access
+injectable, refreshes OAuth credentials with compare-before-save protection,
+and reports safe status text for missing login, API-key-only login, expired
+login, rate limiting, and network/schema failures. A failed refresh leaves the
+last successful reading visible as stale. Refresh runs only while the Mac app
+is active; neither board loading nor the phone replica waits on it, and no Codex
+turn is started or managed. Mac and iPhone Projects Lists use the same quota
+summary. On the phone, the read-only `usage` sync response refreshes this small
+snapshot without retransmitting the unchanged task library. The WidgetKit
+extension displays the phone's last-good snapshot in home-screen and circular
+or rectangular Lock Screen families; opening the phone app and syncing with a
+paired Mac is required to refresh it.
 
 ## Runner lifecycle
 
@@ -318,10 +347,10 @@ generated JSON schema was checked for exact request spellings.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Protocol version 6 adds explicit project creation from a
-paired phone; version 5 adds the linked Codex thread ID to read-only run
+sanitized snapshots. Protocol version 7 adds timestamped Codex usage snapshots;
+version 6 adds explicit project creation from a paired phone; version 5 adds the linked Codex thread ID to read-only run
 snapshots; version 4 added synchronized task and project read markers and
-acknowledgment commands. Version 5 and older clients are rejected explicitly;
+acknowledgment commands. Version 6 and older clients are rejected explicitly;
 they must update before syncing with this build. Queued phone edits remain a
 small allowlist (project/task creation, task edit/move/reorder/complete/delete,
 and read acknowledgments) with expected task revisions where applicable. Each

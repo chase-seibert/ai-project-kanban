@@ -122,6 +122,7 @@ import UniformTypeIdentifiers
   #if os(macOS)
     static let mcpServerEnabledPreferenceKey = "mcpServerEnabled"
     var runner: CodexRunner?
+    let codexUsageService = CodexUsageService()
     var syncServer: SyncServer?
     var mcpServer: MCPServer?
     var gitStatuses: [UUID: GitRepositoryStatus] = [:]
@@ -136,6 +137,19 @@ import UniformTypeIdentifiers
 
   #if os(iOS)
     var isConnectedPhone: Bool { syncClient.isPaired }
+    var codexUsageSnapshot: CodexUsageSnapshot? { syncClient.codexUsageSnapshot }
+    var codexUsageStatus: String {
+      guard let snapshot = syncClient.codexUsageSnapshot else {
+        return
+          isConnectedPhone
+          ? "Waiting for the Mac usage snapshot" : "Pair with your Mac to see usage"
+      }
+      return "Updated \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))"
+    }
+    var codexUsageIsStale: Bool {
+      guard let snapshot = syncClient.codexUsageSnapshot else { return false }
+      return Date.now.timeIntervalSince(snapshot.fetchedAt) > 30 * 60
+    }
   #else
     var isConnectedPhone: Bool { false }
   #endif
@@ -267,6 +281,10 @@ import UniformTypeIdentifiers
     }
 
     private func configureSyncServer(_ server: SyncServer) {
+      codexUsageService.onSnapshot = { [weak server] snapshot in
+        server?.codexUsageSnapshot = snapshot
+      }
+      server.codexUsageSnapshot = codexUsageService.snapshot
       server.onLibraryChanged = { [weak self] library in self?.library = library }
       server.onPhoneModelCatalogRequest = { [weak self] in
         guard let self else { throw BoardError.invalid("The StageChase model is unavailable.") }

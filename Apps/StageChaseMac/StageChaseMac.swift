@@ -3,6 +3,7 @@ import SwiftUI
 
 @main struct StageChaseMacApp: App {
   @State private var model = AppModel()
+  @State private var showsCodexUsageMenuBarItem = true
   @AppStorage("textScale") private var textScale = 1.0
   var body: some Scene {
     Window("StageChase", id: "main") {
@@ -82,6 +83,12 @@ import SwiftUI
           Button("Actual Text Size") { textScale = 1 }.keyboardShortcut("0")
         }
       }
+    MenuBarExtra(isInserted: $showsCodexUsageMenuBarItem) {
+      CodexUsageMenuBarPanel(service: model.codexUsageService)
+    } label: {
+      CodexUsageMenuBarLabel(service: model.codexUsageService)
+    }
+    .menuBarExtraStyle(.window)
   }
 }
 

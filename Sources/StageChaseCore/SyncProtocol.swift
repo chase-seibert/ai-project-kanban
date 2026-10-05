@@ -3,10 +3,11 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 7 adds sanitized Codex quota snapshots for phone display and widgets.
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 6
+  public static let version = 7
   public static let maximumMessageBytes = 1_048_576
   public static let maximumPairingSecretBytes = 64
 }
@@ -302,11 +303,13 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
   public var activity: [Activity]
   public var taskReadMarkers: [UUID: TaskChangeReadMarker]
   public var projectReadMarkers: [UUID: TaskChangeReadMarker]
+  public var codexUsage: CodexUsageSnapshot?
 
   public init(
     libraryID: UUID, sequence: UInt64, library: Library,
     taskReadMarkers: [UUID: TaskChangeReadMarker] = [:],
-    projectReadMarkers: [UUID: TaskChangeReadMarker] = [:]
+    projectReadMarkers: [UUID: TaskChangeReadMarker] = [:],
+    codexUsage: CodexUsageSnapshot? = nil
   ) {
     version = SyncProtocol.version
     self.libraryID = libraryID
@@ -326,11 +329,12 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     }
     self.taskReadMarkers = taskReadMarkers
     self.projectReadMarkers = projectReadMarkers
+    self.codexUsage = codexUsage
   }
 
   private enum CodingKeys: String, CodingKey {
     case version, libraryID, sequence, projects, tasks, runs, activity, taskReadMarkers,
-      projectReadMarkers
+      projectReadMarkers, codexUsage
   }
 
   public init(from decoder: Decoder) throws {
@@ -347,6 +351,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     projectReadMarkers =
       try values.decodeIfPresent([UUID: TaskChangeReadMarker].self, forKey: .projectReadMarkers)
       ?? [:]
+    codexUsage = try values.decodeIfPresent(CodexUsageSnapshot.self, forKey: .codexUsage)
   }
 
   public func replica() throws -> Library {
@@ -511,6 +516,7 @@ public enum SyncClientRequest: Codable, Sendable {
 
 public enum SyncServerResponse: Codable, Sendable {
   case snapshot(SyncSnapshot)
+  case usage(CodexUsageSnapshot)
   case unchanged(sequence: UInt64)
   case command(SyncCommandResult)
   case direct(SyncDirectResponse)

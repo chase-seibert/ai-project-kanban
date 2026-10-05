@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Observation
 import UIKit
+import WidgetKit
 
 private struct StoredPhonePairing: Codable {
   var endpoint: String
@@ -18,6 +19,8 @@ private struct PhoneOutbox: Codable {
 /// Phone-side paired client. Pairing credentials live in Keychain; outbox and replica are separate.
 @MainActor @Observable final class SyncClient {
   private static let keychainService = "com.cseibert.StageChase.phone-sync"
+  private static let usageAppGroup = "group.com.cseibert.StageChase"
+  private static let usageSnapshotKey = "codexUsageSnapshot-v1"
   private static let automaticSyncPreferenceKey = "phoneAutomaticSyncEnabled"
   @ObservationIgnored private let preferences: UserDefaults
   var endpoint = ""
@@ -36,6 +39,7 @@ private struct PhoneOutbox: Codable {
   var lastSuccessfulSync: Date?
   var credential: SyncClientCredential?
   var error: String?
+  private(set) var codexUsageSnapshot: CodexUsageSnapshot?
   var outbox: [SyncEnvelope] = []
   var conflictedOperationID: UUID?
   private var lastSequence: UInt64 = 0
@@ -54,6 +58,11 @@ private struct PhoneOutbox: Codable {
       .first!.appendingPathComponent("StageChase", isDirectory: true)
     outboxURL = base.appendingPathComponent("PhoneSyncOutbox-v1.json")
     networkEventsURL = base.appendingPathComponent("PhoneSyncNetworkEvents-v1.json")
+    if let defaults = UserDefaults(suiteName: Self.usageAppGroup),
+      let data = defaults.data(forKey: Self.usageSnapshotKey)
+    {
+      codexUsageSnapshot = try? JSONDecoder().decode(CodexUsageSnapshot.self, from: data)
+    }
     do {
       if let data = try KeychainVault.read(service: Self.keychainService, account: "pairing") {
         let saved = try JSONDecoder().decode(StoredPhonePairing.self, from: data)
@@ -223,6 +232,15 @@ private struct PhoneOutbox: Codable {
     let snapshot: SyncSnapshot
     switch response {
     case .snapshot(let value): snapshot = value
+    case .usage(let value):
+      saveUsageSnapshot(value)
+      lastServerSequence = cursor
+      try save(
+        endpoint: endpoint, credential: credential, lastSequence: lastSequence,
+        lastServerSequence: cursor)
+      lastSuccessfulSync = .now
+      status = "Connected"
+      return nil
     case .unchanged(let sequence):
       lastServerSequence = sequence
       try save(
@@ -237,6 +255,7 @@ private struct PhoneOutbox: Codable {
     guard snapshot.libraryID == credential.libraryID else {
       throw BoardError.invalid("The Mac returned a snapshot for another library.")
     }
+    saveUsageSnapshot(snapshot.codexUsage)
     lastServerSequence = snapshot.sequence
     try save(
       endpoint: endpoint, credential: credential, lastSequence: lastSequence,
@@ -244,6 +263,17 @@ private struct PhoneOutbox: Codable {
     lastSuccessfulSync = .now
     status = "Connected"
     return snapshot
+  }
+
+  private func saveUsageSnapshot(_ value: CodexUsageSnapshot?) {
+    codexUsageSnapshot = value
+    guard let defaults = UserDefaults(suiteName: Self.usageAppGroup) else { return }
+    if let value, let data = try? JSONEncoder().encode(value) {
+      defaults.set(data, forKey: Self.usageSnapshotKey)
+    } else if value == nil {
+      defaults.removeObject(forKey: Self.usageSnapshotKey)
+    }
+    WidgetCenter.shared.reloadAllTimelines()
   }
 
   func send(_ envelope: SyncEnvelope) async throws -> SyncCommandResult {

@@ -69,6 +69,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
   var lastRequestResult = "No phone request received yet."
   var networkEvents: [SyncNetworkEvent] = []
   var eventLogError: String?
+  var codexUsageSnapshot: CodexUsageSnapshot?
   var onLibraryChanged: ((Library) -> Void)?
   var onPhoneCodexAction: ((UUID, Int, SyncPhoneCodexAction) async throws -> String)?
   var onPhoneModelCatalogRequest:
@@ -413,14 +414,18 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
           isUnchanged
           ? "Refresh library · no new changes; server sequence \(state.sequence)."
           : "Refresh library · sent \(state.library.projects.count) projects and \(state.library.tasks.count) tasks at sequence \(state.sequence)."
-        response =
-          isUnchanged
-          ? .unchanged(sequence: state.sequence)
-          : .snapshot(
+        if isUnchanged, let codexUsageSnapshot {
+          response = .usage(codexUsageSnapshot)
+        } else if isUnchanged {
+          response = .unchanged(sequence: state.sequence)
+        } else {
+          response = .snapshot(
             SyncSnapshot(
               libraryID: state.libraryID, sequence: state.sequence, library: state.library,
               taskReadMarkers: state.taskReadMarkers,
-              projectReadMarkers: state.projectReadMarkers))
+              projectReadMarkers: state.projectReadMarkers,
+              codexUsage: codexUsageSnapshot))
+        }
       case .fullSnapshot:
         lastRequestResult =
           "Refresh everything · sent full library with \(state.library.projects.count) projects and \(state.library.tasks.count) tasks at sequence \(state.sequence)."
@@ -428,7 +433,8 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
           SyncSnapshot(
             libraryID: state.libraryID, sequence: state.sequence, library: state.library,
             taskReadMarkers: state.taskReadMarkers,
-            projectReadMarkers: state.projectReadMarkers))
+            projectReadMarkers: state.projectReadMarkers,
+            codexUsage: codexUsageSnapshot))
       case .command(let envelope):
         guard envelope.deviceID == deviceID else { return .error("Invalid device identity.") }
         let result = try await repository.applyRemote(envelope)

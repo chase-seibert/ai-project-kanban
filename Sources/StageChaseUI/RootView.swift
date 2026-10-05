@@ -254,6 +254,13 @@ struct RootView: View {
     .task(id: scenePhase) {
       model.undoManager = undoManager
       await model.load()
+      #if os(macOS)
+        if scenePhase == .active {
+          model.codexUsageService.start()
+        } else {
+          model.codexUsageService.stop()
+        }
+      #endif
       if model.isPreview {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--preview-task"), var task = model.library.tasks.first {
@@ -336,6 +343,18 @@ struct ProjectSidebar: View {
   var onOpen: (() -> Void)?
   var body: some View {
     List {
+      Section {
+        #if os(macOS)
+          CodexUsagePanel()
+        #else
+          CodexUsageSummary(
+            snapshot: model.codexUsageSnapshot,
+            status: model.codexUsageStatus,
+            isStale: model.codexUsageIsStale)
+        #endif
+      } header: {
+        Text("CODEX USAGE")
+      }
       Section {
         ForEach(model.library.projects) { project in
           let unreadCount = model.unreadProjectChangeCount(project.id)
@@ -433,6 +452,11 @@ struct ProjectSidebar: View {
         Text("PREVIEW · No real automation").stageFont(.caption).foregroundStyle(.orange)
       }
     }
+    #if os(iOS)
+      .refreshable {
+        await model.refreshFromMac(manual: true, forceFullSnapshot: true)
+      }
+    #endif
     #if os(macOS)
       .listStyle(.sidebar).navigationTitle("StageChase")
       .safeAreaInset(edge: .bottom) {

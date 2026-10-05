@@ -8,10 +8,12 @@ BUNDLE_ID := com.cseibert.StageChasePhone
 SIM_DEVICE_NAME ?= iPhone 17 Pro
 SIM_DESTINATION ?= platform=iOS Simulator,name=$(SIM_DEVICE_NAME)
 GENERIC_SIM_DESTINATION := generic/platform=iOS Simulator
+GENERIC_DEVICE_DESTINATION := generic/platform=iOS
 DEVICE_ID ?= 00008150-000E41422E40401C
 DEVELOPMENT_TEAM ?= 96NAC4VTEN
+PHONE_DEVELOPMENT_TEAM ?= $(DEVELOPMENT_TEAM)
 
-.PHONY: setup format lint test runner-test sync-test codex-check build run clean sim-build sim-launch phone-build phone-install phone-launch phone-deploy
+.PHONY: setup format lint test runner-test sync-test codex-check build run clean sim-build sim-launch phone-verify phone-build phone-install phone-launch phone-deploy
 
 runner-test:
 	mkdir -p build/verification
@@ -67,8 +69,12 @@ sim-launch: sim-build
 	xcrun simctl install "$$UDID" "$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)-iphonesimulator/$(APP_NAME).app"; \
 	xcrun simctl launch "$$UDID" $(BUNDLE_ID)
 
+phone-verify:
+	xcodebuild -project $(PROJECT) -scheme $(PHONE_SCHEME) -showdestinations
+	xcrun devicectl list devices
+
 phone-build:
-	xcodebuild -project $(PROJECT) -scheme $(PHONE_SCHEME) -configuration $(CONFIGURATION) -destination 'platform=iOS,id=$(DEVICE_ID)' -derivedDataPath $(DERIVED_DATA) CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=$(DEVELOPMENT_TEAM) -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+	xcodebuild -project $(PROJECT) -scheme $(PHONE_SCHEME) -configuration $(CONFIGURATION) -destination '$(GENERIC_DEVICE_DESTINATION)' -derivedDataPath $(DERIVED_DATA) CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=$(PHONE_DEVELOPMENT_TEAM) -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 
 phone-install:
 	xcrun devicectl device install app --device $(DEVICE_ID) "$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)-iphoneos/$(APP_NAME).app"

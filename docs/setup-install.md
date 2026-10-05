@@ -11,11 +11,18 @@ make sim-launch
 make phone-deploy
 ```
 
-`DEVELOPMENT_TEAM` defaults to the existing personal team `96NAC4VTEN`.
-`DEVICE_ID` selects the previously paired iPhone and can be overridden. Mac
-builds are Apple Development signed. Device deployment builds, installs, then
-launches sequentially, even with parallel make. Simulator builds skip signing.
-The launcher supports traditional Simulator locations and this Xcode's DeviceHub.
+`DEVELOPMENT_TEAM` defaults to `96NAC4VTEN` for Mac and iPhone signing, matching
+Sideline Save, CalorieTracker, and StrengthLog. `PHONE_DEVELOPMENT_TEAM`
+defaults to the same team and can be overridden independently. `DEVICE_ID`
+selects the previously paired iPhone and can be overridden. The iOS app and
+widget both require `group.com.cseibert.StageChase`; Xcode must have that App
+Group enabled for both bundle identifiers before it can create matching device
+profiles. `phone-build` signs for generic iOS so its build does not depend on
+device discovery; `phone-deploy` then installs and launches on `DEVICE_ID`
+sequentially. Run `make phone-verify` to inspect Xcode's device destinations and
+CoreDevice discovery, following Sideline Save's preflight. Simulator builds skip
+signing. The launcher supports traditional Simulator locations and this Xcode's
+DeviceHub.
 
 ### Codex build permissions
 

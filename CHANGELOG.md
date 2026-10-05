@@ -2,6 +2,19 @@
 
 ## 2026-10-05
 
+- Match the Codex usage reference's red/yellow/green quota bars and weekly pace
+  marker, add a traffic-light menu bar item with a refreshable usage panel, and
+  move Mac refresh/last-updated controls to the panel's lower right.
+- Show Codex session and weekly capacity in the Mac and iPhone Projects Lists,
+  including reset times, weekly pacing, and reported flex credits. Refresh from
+  the local Mac Codex login every five minutes while active, sync only the
+  sanitized usage snapshot to paired phones, and share its last-good value with
+  home- and Lock Screen widgets through an App Group. Credentials stay on Mac.
+- Advance the strict sync protocol to version 7 for phone Codex usage snapshots.
+- Add pull-to-refresh to the iPhone Projects List as a full refresh from the
+  paired Mac; queued phone edits are reconciled before the local replica is
+  replaced. Add the system-provided container background to Lock Screen widget
+  families so they work in the widget gallery.
 - Let users create projects from a paired iPhone. The project name is sent as
   an explicit queued sync command and created in the Mac library; advance the
   strict sync protocol to version 6.
