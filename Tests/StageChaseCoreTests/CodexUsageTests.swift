@@ -50,7 +50,7 @@ import Testing
   #expect(CodexQuotaStatus.red.emoji == "🔴")
 
   #expect(CodexQuotaStatus.fromRemainingPercent(16, expectedRemainingPercent: 50) == .yellow)
-  #expect(CodexQuotaStatus.fromRemainingPercent(32.5, expectedRemainingPercent: 50) == .green)
+  #expect(CodexQuotaStatus.fromRemainingPercent(32.5, expectedRemainingPercent: 50) == .yellow)
 }
 
 @Test func codexQuotaBarSegmentsRemainingCapacityAndMarksWeeklyPace() {
@@ -64,7 +64,7 @@ import Testing
   #expect(weekly.remainingFraction == 0.6)
   #expect(weekly.paceMarkerFraction == 0.5)
   #expect(abs(weekly.redBoundaryFraction - 0.15) < 0.000001)
-  #expect(abs(weekly.greenBoundaryFraction - 0.325) < 0.000001)
+  #expect(abs(weekly.greenBoundaryFraction - 0.4) < 0.000001)
   #expect(session.remainingFraction == 0.2)
   #expect(session.paceMarkerFraction == nil)
 }

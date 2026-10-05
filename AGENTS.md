@@ -24,7 +24,9 @@ this file only adds repository-specific guidance.
 Prefer Makefile targets over ad hoc commands:
 
 - `make test` — run shared model tests.
-- `make build` / `make run` — build or launch the Mac app.
+- `make build` — build the Mac app.
+- `make relaunch` / `make run` — build, gracefully quit every running
+  StageChase Mac instance, and launch this checkout's app bundle.
 - `make sim-build` / `make sim-launch` — build or launch the iPhone app in Simulator.
 - `make phone-build`, `make phone-install`, `make phone-launch`,
   `make phone-deploy` — physical-device workflow.
@@ -140,11 +142,19 @@ never start, stop, retry, or approve Codex work.
   tool.
 
 ## Instructions
-- For app code changes, rebuild and attempt to relaunch the affected app or
-  apps. If the environment prevents launch, report the failed check and what
-  remains unverified; treat that as a verification limitation rather than an
-  implementation failure, and continue with available focused checks. Do not
-  terminate an app with unrelated active work just to retry a launch.
+- For Mac app code changes, rebuild and use `make relaunch` when the StageChase
+  Activity view has no active runs owned by the Mac runner. Graceful app exit
+  can interrupt those direct in-app Codex runs, so wait for them to finish
+  before relaunching. A task launched with **Launch Codex** runs in Codex
+  Desktop and does not block a StageChase relaunch. Do not infer active
+  execution from a task's stage or plan; check the Activity view.
+- `make relaunch` gracefully quits every running StageChase Mac instance and
+  opens this checkout's built app only after all instances exit. It times out
+  without opening another copy if an instance does not quit. Prefer it over
+  `make run`'s former open-only behavior. If the environment prevents launch,
+  report the failed check and what remains unverified; treat that as a
+  verification limitation rather than an implementation failure, and continue
+  with available focused checks.
 
 ## Documentation index
 

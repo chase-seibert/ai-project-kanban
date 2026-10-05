@@ -180,12 +180,9 @@ private struct CodexQuotaBar: View {
     var body: some View {
       HStack(spacing: 3) {
         if let snapshot = service.snapshot {
-          ForEach(menuWindows(snapshot)) { window in
-            let pace = expectedRemainingPercent(for: window, now: .now)
-            Text(
-              CodexQuotaStatus.fromRemainingPercent(
-                window.remainingPercent, expectedRemainingPercent: pace
-              ).emoji)
+          let windows = menuWindows(snapshot)
+          Text(combinedStatus(for: windows, now: .now).emoji)
+          ForEach(windows) { window in
             Text("\(Int(window.remainingPercent.rounded()))%")
               .monospacedDigit()
           }
@@ -205,8 +202,11 @@ private struct CodexQuotaBar: View {
       guard let snapshot = service.snapshot else {
         return "Codex usage, \(service.status)"
       }
-      let metrics = menuWindows(snapshot).map { window in
-        let pace = expectedRemainingPercent(for: window, now: .now)
+      let now = Date.now
+      let windows = menuWindows(snapshot)
+      let overall = combinedStatus(for: windows, now: now).rawValue
+      let metrics = windows.map { window in
+        let pace = expectedRemainingPercent(for: window, now: now)
         let light = CodexQuotaStatus.fromRemainingPercent(
           window.remainingPercent, expectedRemainingPercent: pace
         ).rawValue
@@ -214,7 +214,18 @@ private struct CodexQuotaBar: View {
           "\(window.kind), \(Int(window.remainingPercent.rounded())) percent remaining, \(light)"
       }
       let stale = service.isStale ? ", showing stale usage" : ""
-      return "Codex usage, \(metrics.joined(separator: ", "))\(stale)"
+      return "Codex usage, overall \(overall), \(metrics.joined(separator: ", "))\(stale)"
+    }
+
+    private func combinedStatus(for windows: [CodexQuotaWindow], now: Date) -> CodexQuotaStatus {
+      let statuses = windows.map { window in
+        CodexQuotaStatus.fromRemainingPercent(
+          window.remainingPercent,
+          expectedRemainingPercent: expectedRemainingPercent(for: window, now: now))
+      }
+      if statuses.contains(.red) { return .red }
+      if statuses.contains(.yellow) { return .yellow }
+      return .green
     }
 
     private func menuWindows(_ snapshot: CodexUsageSnapshot) -> [CodexQuotaWindow] {

@@ -2,9 +2,16 @@
 
 ## 2026-10-05
 
+- Add `make relaunch` to gracefully quit existing StageChase instances before
+  opening the built Mac app; `make run` now uses the same flow. The agent
+  workflow checks for active Mac-runner Codex turns first, while Codex Desktop
+  launches remain safe to leave running.
 - Match the Codex usage reference's red/yellow/green quota bars and weekly pace
-  marker, add a traffic-light menu bar item with a refreshable usage panel, and
-  move Mac refresh/last-updated controls to the panel's lower right.
+  marker. Weekly green now begins 10 percentage points below pace, with the red
+  cutoff at 30% of pace. The menu bar combines session and weekly status using
+  the less favorable color while keeping both percentages visible. Add a
+  refreshable usage panel, and move Mac refresh/last-updated controls to the
+  panel's lower right.
 - Show Codex session and weekly capacity in the Mac and iPhone Projects Lists,
   including reset times, weekly pacing, and reported flex credits. Refresh from
   the local Mac Codex login every five minutes while active, sync only the

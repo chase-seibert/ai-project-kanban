@@ -44,23 +44,25 @@ public enum CodexQuotaStatus: String, Equatable, Sendable {
   ) -> Self {
     let boundaries = remainingPercentBoundaries(
       expectedRemainingPercent: expectedRemainingPercent)
-    if percent <= boundaries.redUpperBound { return .red }
     if percent >= boundaries.greenLowerBound { return .green }
+    if percent <= boundaries.redUpperBound { return .red }
     return .yellow
   }
 
   public static func remainingPercentBoundaries(
     expectedRemainingPercent: Double?
   ) -> (redUpperBound: Double, greenLowerBound: Double) {
-    let paceScale: Double
-    if let expectedRemainingPercent, expectedRemainingPercent > 0 {
-      paceScale = expectedRemainingPercent / 100
-    } else {
-      paceScale = 1
+    if let expectedRemainingPercent {
+      let pace = min(max(expectedRemainingPercent, 0), 100)
+      let greenLowerBound = max(pace - 10, 0)
+      // Keep the session's red proportion, measured against the weekly pace.
+      // Near reset, cap red at green so the weekly bands cannot cross.
+      let redUpperBound = min(redUpperBoundRemainingPercent * pace / 100, greenLowerBound)
+      return (redUpperBound, greenLowerBound)
     }
     return (
-      redUpperBoundRemainingPercent * paceScale,
-      greenLowerBoundRemainingPercent * paceScale
+      redUpperBoundRemainingPercent,
+      greenLowerBoundRemainingPercent
     )
   }
 }

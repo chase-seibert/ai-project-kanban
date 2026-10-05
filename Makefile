@@ -13,7 +13,7 @@ DEVICE_ID ?= 00008150-000E41422E40401C
 DEVELOPMENT_TEAM ?= 96NAC4VTEN
 PHONE_DEVELOPMENT_TEAM ?= $(DEVELOPMENT_TEAM)
 
-.PHONY: setup format lint test runner-test sync-test codex-check build run clean sim-build sim-launch phone-verify phone-build phone-install phone-launch phone-deploy
+.PHONY: setup format lint test runner-test sync-test codex-check build run relaunch clean sim-build sim-launch phone-verify phone-build phone-install phone-launch phone-deploy
 
 runner-test:
 	mkdir -p build/verification
@@ -46,8 +46,11 @@ sync-test:
 build:
 	xcodebuild -project $(PROJECT) -scheme $(MAC_SCHEME) -configuration $(CONFIGURATION) -destination 'platform=macOS' -derivedDataPath $(DERIVED_DATA) CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=$(DEVELOPMENT_TEAM) CODE_SIGN_IDENTITY='Apple Development' build
 
-run: build
-	open "$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)/StageChaseMac.app"
+run: relaunch
+
+relaunch: build
+	swift scripts/relaunch-mac-app.swift
+	open "$(CURDIR)/$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)/StageChaseMac.app"
 
 clean:
 	xcodebuild -project $(PROJECT) -scheme $(MAC_SCHEME) -configuration $(CONFIGURATION) -derivedDataPath $(DERIVED_DATA) clean

@@ -21,9 +21,14 @@ snapshot, never credentials. Its home-screen widget and circular or rectangular
 Lock Screen widgets show the last synced reading and update after a phone sync.
 Quota bars use red, yellow, and green remaining-capacity segments; weekly bars
 also mark the reset-anchored expected remaining point with a red dotted line.
-The Mac menu bar shows matching red/yellow/green status circles for session and
-weekly capacity and opens a refreshable usage panel. In the Mac Projects List,
-refresh and last-updated status sit at the lower right of the usage panel.
+Session thresholds remain red through 30% and green from 65%. Weekly green
+starts 10 percentage points below the pace marker, while the red cutoff is 30%
+of the expected remaining amount; values between those cutoffs are yellow.
+The Mac menu bar shows one status light for session and weekly capacity: red if
+either quota is red, yellow if neither is red and either is yellow, and green
+only if both are green. Both remaining percentages stay visible. Selecting it
+opens a refreshable usage panel. In the Mac Projects List, refresh and
+last-updated status sit at the lower right of the usage panel.
 Failed refreshes preserve the last-good numbers with a stale indicator.
 
 Project Settings stores an ordered list of favorite Make targets. Running a

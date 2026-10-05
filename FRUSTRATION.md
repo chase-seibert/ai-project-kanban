@@ -12,12 +12,15 @@
 
 ## 2026-10-01
 
-- A rebuild/relaunch check found `make run` reused a stale StageChase process; the
-  sandbox denied signaling it, and `open` then reported `kLSNoExecutableErr`
-  even though the rebuilt executable was present. Closing the stale process
-  with host access and launching the exact bundle through the desktop app
-  controller worked. Improve the relaunch workflow so it reliably quits stale
-  instances and opens the rebuilt bundle.
+- `make run` used to reopen a stale StageChase process, and `open` sometimes
+  returned `kLSNoExecutableErr` even when the rebuilt executable was present.
+  `make relaunch` now requests graceful termination of all StageChase instances,
+  waits for them to exit, and opens the exact built bundle. On this host, `open`
+  still returns `kLSNoExecutableErr`; launching the exact checkout through the
+  desktop app controller works. Running the bundle executable directly exits
+  with status 134, so keep launching the app bundle. Check Activity before
+  relaunching: wait for Mac-runner Codex turns to finish; Codex Desktop launches
+  do not block it.
 - A nested `codex exec` could not reach StageChase's loopback MCP endpoint from its sandbox, even after allowing workspace writes. The StageChase settings UI showed the listener as stopped on a later check; restarting it and making a direct local MCP request worked. Avoid repeated nested CLI attempts: verify the listener is active and use the MCP connection in the current session, or report that the tools are unavailable.
 
 ## 2026-10-02
@@ -37,10 +40,10 @@
   returned `kLSNoExecutableErr` even though the bundle executable exists and
   codesign validation passes. `make sim-launch` rebuilt the iPhone app but
   CoreSimulatorService returned connection refused, so no simulator was
-  available. Do not terminate a currently running StageChase instance just to
-  retry: it may recover unrelated active runs on relaunch. Paired-device checks
-  remain unverified when simulator services are unavailable and physical deploy
-  is outside the task authorization.
+  available. Before relaunching, check Activity and defer only while a Codex run
+  is owned by the Mac runner; Launch Codex sessions continue independently in
+  Codex Desktop. Paired-device checks remain unverified when simulator services
+  are unavailable and physical deploy is outside the task authorization.
 
 ## 2026-10-03
 

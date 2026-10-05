@@ -27,8 +27,9 @@
   overrides; queued runs save the resolved model, effort, policy, and source.
   The Mac Projects List and `MenuBarExtra` show Codex usage, backed by a Mac-only
   observable `CodexUsageService`. Shared quota presentation logic colors the
-  remaining-capacity bars and provides the status circles, including weekly
-  pacing against the reset-anchored expected remaining amount. It reads the existing Codex auth file or
+  remaining-capacity bars and combines session and weekly status into one menu
+  bar light using the less favorable status. Weekly status uses pacing against
+  the reset-anchored expected remaining amount. It reads the existing Codex auth file or
   `Codex Auth` Keychain item, refreshes usage every five minutes while the app
   is active, and retains the last successful snapshot after failures. Tokens
   remain in Codex's own credential stores. Only the sanitized, timestamped
@@ -52,6 +53,9 @@ SwiftPM exposes StageChaseCore for tests. App targets do not import it separatel
 
 `Sources/StageChaseCore/CodexUsage.swift` contains the fixture-testable response
 mapper, quota windows, flex-credit conversion, and reset-anchored weekly pacing.
+Shared quota presentation keeps the session cutoffs at 30% red and 65% green.
+For weekly windows, green starts 10 percentage points below expected remaining
+capacity and red ends at 30% of that expected amount.
 The Mac-only provider keeps HTTP transport and auth-file/Keychain access
 injectable, refreshes OAuth credentials with compare-before-save protection,
 and reports safe status text for missing login, API-key-only login, expired
