@@ -39,6 +39,78 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.runs[0].status == .queued)
 }
 
+@Test func taskAttachmentFilesStayOutsideSnapshotAndArchiveSeparatesImageBytes() throws {
+  let png = try #require(
+    Data(
+      base64Encoded:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j78kAAAAASUVORK5CYII="
+    ))
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let attachment = try TaskAttachmentFiles.save(
+    png, id: UUID(), displayName: "screen.png", mediaType: "image/png", baseURL: root)
+  #expect(try TaskAttachmentFiles.read(attachment, baseURL: root) == png)
+
+  let project = Project(name: "Attachment")
+  var task = WorkItem(projectID: project.id, title: "Keep a screenshot")
+  task.attachments = [attachment]
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  let snapshotData = try JSONEncoder.syncEncoder.encode(
+    SyncSnapshot(libraryID: UUID(), sequence: 1, library: library))
+  #expect(snapshotData.range(of: png) == nil)
+  let snapshot = try JSONDecoder.syncDecoder.decode(SyncSnapshot.self, from: snapshotData)
+  #expect(snapshot.tasks.first?.attachments.first?.sha256 == attachment.sha256)
+
+  let archive = try BackupArchive.encode(library, baseURL: root)
+  let restored = try BackupArchive.decode(archive)
+  #expect(restored.library.tasks.first?.attachments == [attachment])
+  #expect(restored.assets[attachment.id] == png)
+}
+
+@Test func oldTaskJsonDecodesWithNoAttachmentsAndInvalidImagesAreRejected() throws {
+  let legacy = Data(
+    "{\"projectID\":\"00000000-0000-0000-0000-000000000001\",\"title\":\"Legacy\"}".utf8)
+  let task = try JSONDecoder().decode(WorkItem.self, from: legacy)
+  #expect(task.attachments.isEmpty)
+  #expect(throws: BoardError.self) {
+    try TaskAttachmentFiles.validate(Data([0x89, 0x50, 0x4e, 0x47]), mediaType: "image/png")
+  }
+}
+
+@Test func attachmentMetadataMutationIsRevisionCheckedAndSyncedWithoutImageBytes() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Attachment sync")
+  _ = try await repository.apply(.createProject(project))
+  var task = WorkItem(projectID: project.id, title: "Attach image")
+  _ = try await repository.apply(.createTask(task))
+  let attachment = TaskAttachment(
+    displayName: "shot.jpg", mediaType: "image/jpeg", byteCount: 3,
+    sha256: String(repeating: "a", count: 64), transferState: .pendingUpload)
+  let state = try await repository.syncStateSnapshot()
+  task = try #require(state.library.tasks.first)
+  let envelope = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), expectedRevision: task.revision,
+    command: .setTaskAttachments(id: task.id, attachments: [attachment]))
+  guard case .applied(_, let snapshot) = try await repository.applyRemote(envelope) else {
+    Issue.record("The attachment metadata update should be accepted.")
+    return
+  }
+  #expect(snapshot.tasks.first?.attachments.first?.sha256 == attachment.sha256)
+  let snapshotJSON = try JSONEncoder.syncEncoder.encode(snapshot)
+  #expect(snapshotJSON.range(of: Data("image-bytes".utf8)) == nil)
+
+  var stale = envelope
+  stale.operationID = UUID()
+  stale.clientSequence = 2
+  stale.expectedRevision = task.revision
+  guard case .conflict = try await repository.applyRemote(stale) else {
+    Issue.record("A stale attachment edit should conflict.")
+    return
+  }
+}
+
 @Test func explicitStageChasePlanningCanStartFromInboxWithoutMovingTask() throws {
   let project = Project(name: "Inbox planning", directory: "/tmp/inbox-planning")
   let task = WorkItem(projectID: project.id, title: "Plan before implementation")
@@ -297,7 +369,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 7)
+  #expect(decoded.version == 8)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -434,7 +506,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 7)
+  #expect(snapshot.version == 8)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }

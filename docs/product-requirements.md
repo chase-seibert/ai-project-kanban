@@ -59,6 +59,21 @@
   applicable record wins across Mac and iPhone while exact timestamp ties favor
   the Mac.
 
+## Task image attachments
+
+- As a user, I want to attach an existing image from Mac or iPhone task detail,
+  preview it, and remove it, so visual context stays with the task.
+- On Mac, users can also paste an image from the clipboard into task attachments.
+- As a user, I want paired devices to share attachment metadata during normal
+  sync and transfer each image only when attaching or opening its preview, so
+  snapshots stay small and previews work on demand.
+- Image bytes live in separate durable files. Task records, SQLite rows, and
+  snapshots contain stable IDs, media type, size, checksum, and display name
+  only. Accept JPEG, PNG, and HEIC up to 4 MB and 8,192 pixels per dimension.
+- Backups package task/library JSON and separate image files in a versioned
+  archive. Legacy JSON-only backups remain restorable when they contain no image
+  references, and restore still requires an empty library.
+
 ## Experimental local Wi-Fi sync
 
 - As a user, I want to pair my iPhone with the Mac using a temporary code,

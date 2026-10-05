@@ -334,6 +334,8 @@ private struct PhoneOutbox: Codable {
     case .commitTask: "Commit task changes"
     case .commitProject: "Commit project changes"
     case .recordDeployedRevision: "Record deployed revision"
+    case .uploadAttachment: "Upload task image"
+    case .downloadAttachment: "Download task image"
     }
   }
 

@@ -547,6 +547,43 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
     case .recordDeployedRevision:
       // Retain wire decoding for older clients without accepting a retired mutation.
       return .rejected("Deployment tracking has been retired. Update StageChase on your phone.")
+    case .uploadAttachment(_, let taskID, let expectedRevision, let attachment, let bytes):
+      guard let item = library.tasks.first(where: { $0.id == taskID }),
+        let existing = item.attachments.first(where: { $0.id == attachment.id }),
+        existing.sha256 == attachment.sha256, existing.byteCount == bytes.count,
+        existing.mediaType == attachment.mediaType
+      else { return .rejected("The task or attached image changed. Refresh and try again.") }
+      if existing.transferState == .available {
+        _ = try TaskAttachmentFiles.read(existing)
+        return .accepted("Image is already available on the Mac.")
+      }
+      guard item.revision == expectedRevision else {
+        return .rejected("The task changed on the Mac. Refresh and retry the image upload.")
+      }
+      do {
+        _ = try TaskAttachmentFiles.save(
+          bytes, id: attachment.id, displayName: attachment.displayName,
+          mediaType: attachment.mediaType)
+        var updated = item.attachments
+        guard let index = updated.firstIndex(where: { $0.id == attachment.id }) else {
+          throw BoardError.missing
+        }
+        updated[index].transferState = .available
+        let changed = try await repository.apply(
+          .setTaskAttachments(taskID, updated, expectedRevision: item.revision))
+        onLibraryChanged?(changed)
+        return .accepted("Image uploaded and verified.")
+      } catch {
+        try? TaskAttachmentFiles.remove(attachment.id)
+        throw error
+      }
+    case .downloadAttachment(_, let taskID, let expectedRevision, let attachmentID):
+      guard let item = library.tasks.first(where: { $0.id == taskID }),
+        item.revision == expectedRevision,
+        let attachment = item.attachments.first(where: { $0.id == attachmentID }),
+        attachment.transferState == .available
+      else { return .rejected("The task or image changed. Refresh and try again.") }
+      return .attachment(try TaskAttachmentFiles.read(attachment))
     }
   }
 

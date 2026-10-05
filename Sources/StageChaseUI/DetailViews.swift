@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(macOS)
   import AppKit
@@ -6,6 +7,7 @@ import SwiftUI
 
 #if os(iOS)
   import UIKit
+  import PhotosUI
 #endif
 
 struct CodexModelFields: View {
@@ -713,6 +715,13 @@ struct TaskDetail: View {
   @State private var feedbackSubmitting = false
   @State private var promptCopied = false
   @State private var planPromptCopied = false
+  @State private var importingAttachment = false
+  @State private var showingAttachmentPreview = false
+  @State private var attachmentPreviewData: Data?
+  @State private var attachmentError: String?
+  #if os(iOS)
+    @State private var selectedPhoto: PhotosPickerItem?
+  #endif
   #if os(iOS)
     @State private var planMarkdown: String?
     @State private var planLoadError: String?
@@ -781,6 +790,7 @@ struct TaskDetail: View {
                   }.foregroundStyle(.orange)
                 }
                 runHistory(item)
+                taskAttachments(item)
                 DisclosureGroup(isExpanded: $contextExpanded) {
                   TextEditor(text: contextBinding).frame(minHeight: 110).scrollContentBackground(
                     .hidden
@@ -1015,7 +1025,147 @@ struct TaskDetail: View {
           }
         }.keyboardShortcut(.defaultAction)
       }
+      .fileImporter(
+        isPresented: $importingAttachment, allowedContentTypes: [.image],
+        allowsMultipleSelection: false
+      ) { result in
+        switch result {
+        case .success(let urls):
+          guard let url = urls.first else { return }
+          let scoped = url.startAccessingSecurityScopedResource()
+          defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+          do {
+            let mediaType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? ""
+            Task {
+              await addAttachment(
+                try Data(contentsOf: url), name: url.lastPathComponent, mediaType: mediaType)
+            }
+          } catch { attachmentError = error.localizedDescription }
+        case .failure(let error): attachmentError = error.localizedDescription
+        }
+      }
+      #if os(iOS)
+        .onChange(of: selectedPhoto) { _, photo in
+          guard let photo else { return }
+          Task {
+            do {
+              guard let data = try await photo.loadTransferable(type: Data.self) else {
+                throw BoardError.invalid("The selected image could not be loaded.")
+              }
+              let mediaType = photo.supportedContentTypes.first?.preferredMIMEType ?? ""
+              await addAttachment(data, name: "Screenshot", mediaType: mediaType)
+            } catch { attachmentError = error.localizedDescription }
+            selectedPhoto = nil
+          }
+        }
+      #endif
+      .sheet(isPresented: $showingAttachmentPreview) {
+        AttachmentPreview(data: attachmentPreviewData)
+          .padding()
+          .frame(minWidth: 360, minHeight: 320)
+      }
   }
+
+  @ViewBuilder private func taskAttachments(_ item: WorkItem) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Text("Images").stageFont(.headline)
+        Spacer()
+        #if os(iOS)
+          PhotosPicker(selection: $selectedPhoto, matching: .images) {
+            Label("Attach", systemImage: "paperclip")
+          }.disabled(item.attachments.count >= TaskAttachmentFiles.maximumCount)
+        #else
+          HStack(spacing: 8) {
+            Button("Paste", systemImage: "document.on.clipboard") {
+              pasteClipboardImage()
+            }
+            .disabled(item.attachments.count >= TaskAttachmentFiles.maximumCount)
+            Button("Attach", systemImage: "paperclip") { importingAttachment = true }
+              .disabled(item.attachments.count >= TaskAttachmentFiles.maximumCount)
+          }
+        #endif
+      }
+      if item.attachments.isEmpty {
+        Text("No images attached.").stageFont(.callout).foregroundStyle(.secondary)
+      }
+      ForEach(item.attachments) { attachment in
+        HStack(spacing: 8) {
+          Button {
+            Task {
+              do {
+                attachmentPreviewData = try await model.taskAttachmentData(
+                  taskID: item.id, attachmentID: attachment.id)
+                showingAttachmentPreview = true
+                attachmentError = nil
+              } catch { attachmentError = error.localizedDescription }
+            }
+          } label: {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(attachment.displayName).lineLimit(1)
+              Text(
+                attachment.transferState == .pendingUpload
+                  ? "Pending upload"
+                  : "Available · \(ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file))"
+              )
+              .stageFont(.caption).foregroundStyle(.secondary)
+            }
+          }.buttonStyle(.plain)
+          Spacer()
+          Button(role: .destructive) {
+            Task {
+              _ = await model.removeTaskAttachment(taskID: item.id, attachmentID: attachment.id)
+            }
+          } label: {
+            Image(systemName: "trash")
+          }.buttonStyle(.borderless).accessibilityLabel("Remove \(attachment.displayName)")
+        }
+      }
+      if let attachmentError {
+        Text(attachmentError).stageFont(.caption).foregroundStyle(.orange).textSelection(.enabled)
+      }
+      Text("Images stay in separate files. Previews download only when opened.")
+        .stageFont(.caption).foregroundStyle(.secondary)
+    }
+  }
+
+  private func addAttachment(_ bytes: Data, name: String, mediaType: String) async {
+    let saved = await model.addTaskAttachment(
+      taskID: taskID, bytes: bytes, displayName: name, mediaType: mediaType)
+    if !saved { attachmentError = model.error ?? "Could not attach this image." }
+  }
+
+  #if os(macOS)
+    private func pasteClipboardImage() {
+      let pasteboard = NSPasteboard.general
+      if let png = pasteboard.data(forType: .png) {
+        Task { await addAttachment(png, name: "Pasted image.png", mediaType: "image/png") }
+        return
+      }
+      if let tiff = pasteboard.data(forType: .tiff),
+        let bitmap = NSBitmapImageRep(data: tiff),
+        let png = bitmap.representation(using: .png, properties: [:])
+      {
+        Task { await addAttachment(png, name: "Pasted image.png", mediaType: "image/png") }
+        return
+      }
+      let pastedImage =
+        pasteboard.readObjects(
+          forClasses: [NSImage.self],
+          options: nil
+        )?.first as? NSImage
+      if let image = pastedImage,
+        let tiff = image.tiffRepresentation,
+        let bitmap = NSBitmapImageRep(data: tiff),
+        let png = bitmap.representation(using: .png, properties: [:])
+      {
+        Task { await addAttachment(png, name: "Pasted image.png", mediaType: "image/png") }
+        return
+      }
+      attachmentError = "The clipboard does not contain a supported image."
+    }
+  #endif
+
   private func taskHeader(_ item: WorkItem) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .top) {
@@ -1452,6 +1602,31 @@ struct TaskDetail: View {
       let contents = try? String(contentsOf: url, encoding: .utf8)
     else { return false }
     return !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+}
+
+private struct AttachmentPreview: View {
+  let data: Data?
+  var body: some View {
+    Group {
+      if let data {
+        #if os(macOS)
+          if let image = NSImage(data: data) {
+            Image(nsImage: image).resizable().scaledToFit()
+          } else {
+            ContentUnavailableView("Preview unavailable", systemImage: "exclamationmark.triangle")
+          }
+        #else
+          if let image = UIImage(data: data) {
+            Image(uiImage: image).resizable().scaledToFit()
+          } else {
+            ContentUnavailableView("Preview unavailable", systemImage: "exclamationmark.triangle")
+          }
+        #endif
+      } else {
+        ProgressView("Loading image…")
+      }
+    }
   }
 }
 

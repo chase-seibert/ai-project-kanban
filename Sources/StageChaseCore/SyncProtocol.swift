@@ -3,12 +3,13 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 8 adds task attachment metadata and explicit attachment file requests.
   // Version 7 adds sanitized Codex quota snapshots for phone display and widgets.
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 7
-  public static let maximumMessageBytes = 1_048_576
+  public static let version = 8
+  public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
 
@@ -61,6 +62,7 @@ public enum SyncCommand: Codable, Equatable, Sendable {
   case createProject(id: UUID, name: String)
   case createTask(id: UUID, projectID: UUID, title: String, notes: String, stage: WorkflowStage)
   case editTask(id: UUID, title: String, notes: String)
+  case setTaskAttachments(id: UUID, attachments: [TaskAttachment])
   case moveTask(id: UUID, stage: WorkflowStage)
   case reorderTask(id: UUID, beforeID: UUID, orderDigest: String)
   case completeTask(id: UUID, completed: Bool)
@@ -91,6 +93,9 @@ public enum SyncDirectRequest: Codable, Sendable {
   case commitProject(requestID: UUID, projectID: UUID)
   /// Legacy wire case only. The Mac rejects this retired action without mutation.
   case recordDeployedRevision(requestID: UUID, projectID: UUID)
+  case uploadAttachment(
+    requestID: UUID, taskID: UUID, expectedRevision: Int, attachment: TaskAttachment, bytes: Data)
+  case downloadAttachment(requestID: UUID, taskID: UUID, expectedRevision: Int, attachmentID: UUID)
 }
 
 public struct SyncGitStatus: Codable, Equatable, Sendable {
@@ -122,6 +127,7 @@ public enum SyncDirectResponse: Codable, Sendable {
   case accepted(String)
   case gitStatus(SyncGitStatus)
   case rejected(String)
+  case attachment(Data)
 }
 
 public enum SyncCommandResult: Codable, Equatable, Sendable {
@@ -169,6 +175,11 @@ public enum SyncCommandValidator {
       item.title = title
       item.notes = notes
       return .syncEditTask(item, expectedRevision: revision)
+    case .setTaskAttachments(let id, let attachments):
+      guard let revision = envelope.expectedRevision,
+        library.tasks.contains(where: { $0.id == id })
+      else { throw BoardError.missing }
+      return .setTaskAttachments(id, attachments, expectedRevision: revision)
     case .moveTask(let id, let stage):
       guard let revision = envelope.expectedRevision,
         library.tasks.contains(where: { $0.id == id })
@@ -223,6 +234,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   public var completed: Bool
   public var priority: TaskPriority?
   public var revision: Int
+  public var attachments: [TaskAttachment]
   public var createdAt: Date
   public var updatedAt: Date
 
@@ -238,8 +250,32 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
     completed = item.completed
     priority = item.priority
     revision = item.revision
+    attachments = item.attachments
     createdAt = item.createdAt
     updatedAt = item.updatedAt
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, projectID, title, notes, stage, section, status, rank, completed, priority, revision
+    case attachments, createdAt, updatedAt
+  }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decode(UUID.self, forKey: .id)
+    projectID = try values.decode(UUID.self, forKey: .projectID)
+    title = try values.decode(String.self, forKey: .title)
+    notes = try values.decode(String.self, forKey: .notes)
+    stage = try values.decode(WorkflowStage.self, forKey: .stage)
+    section = try values.decodeIfPresent(WorkflowSection.self, forKey: .section)
+    status = try values.decodeIfPresent(TaskStatus.self, forKey: .status)
+    rank = try values.decode(Int.self, forKey: .rank)
+    completed = try values.decode(Bool.self, forKey: .completed)
+    priority = try values.decodeIfPresent(TaskPriority.self, forKey: .priority)
+    revision = try values.decode(Int.self, forKey: .revision)
+    attachments = try values.decodeIfPresent([TaskAttachment].self, forKey: .attachments) ?? []
+    createdAt = try values.decode(Date.self, forKey: .createdAt)
+    updatedAt = try values.decode(Date.self, forKey: .updatedAt)
   }
 }
 
@@ -386,6 +422,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       item.completed = $0.completed
       item.priority = $0.priority
       item.revision = $0.revision
+      item.attachments = $0.attachments
       item.createdAt = $0.createdAt
       item.updatedAt = $0.updatedAt
       return item

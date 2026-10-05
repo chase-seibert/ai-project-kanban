@@ -351,10 +351,11 @@ generated JSON schema was checked for exact request spellings.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Protocol version 7 adds timestamped Codex usage snapshots;
+sanitized snapshots. Protocol version 8 adds task attachment metadata and direct
+image upload/download requests; version 7 adds timestamped Codex usage snapshots;
 version 6 adds explicit project creation from a paired phone; version 5 adds the linked Codex thread ID to read-only run
 snapshots; version 4 added synchronized task and project read markers and
-acknowledgment commands. Version 6 and older clients are rejected explicitly;
+acknowledgment commands. Version 7 and older clients are rejected explicitly;
 they must update before syncing with this build. Queued phone edits remain a
 small allowlist (project/task creation, task edit/move/reorder/complete/delete,
 and read acknowledgments) with expected task revisions where applicable. Each
@@ -414,6 +415,17 @@ Connection settings report successful port registration only when both values
 match, distinguishing this app instance from another service or StageChase
 instance responding on the port. The check can also be started manually from
 Settings.
+
+Task images use a separate `TaskAttachment` metadata value and
+`TaskAttachmentFiles` store. Files are validated as single-frame JPEG, PNG, or
+HEIC images (4 MB and 8,192 pixels per side maximum), written atomically, and
+checked against SHA-256 before preview. SQLite task payloads and sync snapshots
+contain IDs, names, media types, sizes, checksums, and transfer state only. A
+paired-phone attach uses one authenticated direct upload request; opening an
+uncached preview requests only that image. Snapshot refresh does not download
+image files. `BackupArchive` frames the library JSON and raw image files in a
+versioned container, while old JSON-only backups with no image references remain
+readable.
 
 Both apps have a Connection view with current request state, last result,
 pending count, saved endpoint, and a persistent, bounded exchange journal. The

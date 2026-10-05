@@ -245,6 +245,7 @@ public actor LibraryRepository {
     Self.clearPhoneVersions(forChangedTasksFrom: current, to: library, in: &nextSyncState)
     nextSyncState.sequence &+= 1
     try persist(library, syncState: nextSyncState)
+    Self.removeDeletedAttachmentFiles(from: current, keeping: library)
     cached = library
     syncState = nextSyncState
     return library
@@ -276,6 +277,7 @@ public actor LibraryRepository {
     Self.clearPhoneVersions(forChangedTasksFrom: current, to: updated, in: &nextSyncState)
     nextSyncState.sequence &+= 1
     try persist(updated, syncState: nextSyncState, mcpState: state)
+    Self.removeDeletedAttachmentFiles(from: current, keeping: updated)
     cached = updated
     syncState = nextSyncState
     mcpState = state
@@ -341,6 +343,7 @@ public actor LibraryRepository {
     nextState.taskReadMarkers = taskReadMarkers
     nextState.projectReadMarkers = projectReadMarkers
     try persist(library, syncState: nextState)
+    Self.removeDeletedAttachmentFiles(from: existing, keeping: library)
     cached = library
     syncState = nextState
   }
@@ -431,6 +434,7 @@ public actor LibraryRepository {
           clientSequence: envelope.clientSequence)
         let sequence = state.sequence
         try persist(resolved, syncState: state)
+        Self.removeDeletedAttachmentFiles(from: current, keeping: resolved)
         cached = resolved
         syncState = state
         return .applied(
@@ -456,6 +460,7 @@ public actor LibraryRepository {
         clientSequence: envelope.clientSequence)
       try Self.trimReceipts(in: &state)
       try persist(updated, syncState: state)
+      Self.removeDeletedAttachmentFiles(from: current, keeping: updated)
       cached = updated
       syncState = state
       return .applied(
@@ -580,9 +585,7 @@ public actor LibraryRepository {
   }
 
   public func export() throws -> Data {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    return try encoder.encode(load())
+    try BackupArchive.encode(load())
   }
 
   public func importLibrary(_ data: Data, replaceEmptyOnly: Bool = true) throws -> Library {
@@ -591,7 +594,27 @@ public actor LibraryRepository {
       throw BoardError.invalid(
         "Restore requires an empty library. Your existing projects were not changed.")
     }
-    var imported = try JSONDecoder().decode(Library.self, from: data)
+    let contents = try BackupArchive.decode(data)
+    var imported = contents.library
+    var writtenAssets: [UUID] = []
+    do {
+      for taskIndex in imported.tasks.indices {
+        for attachmentIndex in imported.tasks[taskIndex].attachments.indices {
+          let attachment = imported.tasks[taskIndex].attachments[attachmentIndex]
+          guard let bytes = contents.assets[attachment.id] else {
+            throw BoardError.invalid("The backup is missing an attached image.")
+          }
+          _ = try TaskAttachmentFiles.save(
+            bytes, id: attachment.id, displayName: attachment.displayName,
+            mediaType: attachment.mediaType)
+          writtenAssets.append(attachment.id)
+          imported.tasks[taskIndex].attachments[attachmentIndex].transferState = .available
+        }
+      }
+    } catch {
+      for id in writtenAssets { try? TaskAttachmentFiles.remove(id) }
+      throw error
+    }
     try imported.validate()
     for i in imported.runs.indices where imported.runs[i].status.isActive {
       imported.runs[i].status = .interrupted
@@ -599,7 +622,10 @@ public actor LibraryRepository {
     for i in imported.projects.indices { imported.projects[i].automationEnabled = false }
     var nextSyncState = StoredSyncState()
     nextSyncState.sequence = (syncState?.sequence ?? 0) &+ 1
-    try persist(imported, syncState: nextSyncState)
+    do { try persist(imported, syncState: nextSyncState) } catch {
+      for id in writtenAssets { try? TaskAttachmentFiles.remove(id) }
+      throw error
+    }
     cached = imported
     syncState = nextSyncState
     return imported
@@ -608,6 +634,12 @@ public actor LibraryRepository {
   private static func digest(_ envelope: SyncEnvelope) throws -> String {
     let data = try JSONEncoder.syncEncoder.encode(envelope)
     return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func removeDeletedAttachmentFiles(from old: Library, keeping new: Library) {
+    let retained = Set(new.tasks.flatMap(\.attachments).map(\.id))
+    let removed = Set(old.tasks.flatMap(\.attachments).map(\.id)).subtracting(retained)
+    for id in removed { try? TaskAttachmentFiles.remove(id) }
   }
 
   private func persist(

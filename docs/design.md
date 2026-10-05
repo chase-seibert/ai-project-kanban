@@ -97,6 +97,13 @@ overwrite its Done status; unsaved detail drafts remain available to save.
 On iPhone, completion and reopening use revision-checked queued edits. Task
 deletion requires an explicit confirmation and the Mac rejects deletion while
 a run is active.
+Task detail on both platforms includes an Images section with a native picker,
+preview, and remove action. Paired iPhone images show a pending upload state
+until the Mac stores and verifies the file; Mac images are available immediately.
+On Mac, the section also accepts clipboard images through Paste. Previewing on a
+phone downloads only that selected file. An uncached preview
+that cannot reach the Mac reports a retryable error, while a cached preview
+remains available offline.
 On iPhone, the title stays first. **Reopen**, **Launch in Codex**, **Plan in
 Codex**, and **Copy prompt** appear before secondary details. Launch and Plan
 are explicit, revision-checked requests to start the selected Codex action on

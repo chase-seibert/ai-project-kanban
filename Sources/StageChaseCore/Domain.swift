@@ -406,6 +406,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var createdAt = Date()
   public var updatedAt = Date()
   public var completedAt: Date?
+  public var attachments: [TaskAttachment] = []
   public init(projectID: UUID, title: String, stage: WorkflowStage = .inbox) {
     self.projectID = projectID
     self.title = title
@@ -417,7 +418,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, projectID, title, notes, stage, section, status, rank, completed, priority, revision
     case planPath, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt, updatedAt
-    case completedAt
+    case completedAt, attachments
   }
 
   public init(from decoder: Decoder) throws {
@@ -444,6 +445,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     completedAt = try values.decodeIfPresent(Date.self, forKey: .completedAt)
+    attachments = try values.decodeIfPresent([TaskAttachment].self, forKey: .attachments) ?? []
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -466,6 +468,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     try values.encode(createdAt, forKey: .createdAt)
     try values.encode(updatedAt, forKey: .updatedAt)
     try values.encodeIfPresent(completedAt, forKey: .completedAt)
+    try values.encode(attachments, forKey: .attachments)
   }
 
   static func legacySection(for stage: WorkflowStage) -> WorkflowSection {
@@ -692,8 +695,17 @@ public struct Library: Codable, Equatable, Sendable {
     else { throw BoardError.invalid("Duplicate identities in the library.") }
     let projectIDs = Set(projects.map(\.id))
     let taskIDs = Set(tasks.map(\.id))
+    let attachments = tasks.flatMap(\.attachments)
     guard tasks.allSatisfy({ projectIDs.contains($0.projectID) }),
-      runs.allSatisfy({ projectIDs.contains($0.projectID) && taskIDs.contains($0.taskID) })
+      runs.allSatisfy({ projectIDs.contains($0.projectID) && taskIDs.contains($0.taskID) }),
+      tasks.allSatisfy({ $0.attachments.count <= TaskAttachmentFiles.maximumCount }),
+      Set(attachments.map(\.id)).count == attachments.count,
+      attachments.allSatisfy({
+        !$0.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          && TaskAttachmentFiles.allowedTypes.contains($0.mediaType)
+          && $0.byteCount > 0 && $0.byteCount <= TaskAttachmentFiles.maximumBytes
+          && $0.sha256.count == 64 && $0.sha256.allSatisfy(\.isHexDigit)
+      })
     else {
       throw BoardError.invalid("The library contains orphaned tasks or runs.")
     }
@@ -723,6 +735,7 @@ public enum Mutation: Sendable {
   case createManualRun(AgentRun)
   case beginExternalRun(AgentRun)
   case editTask(WorkItem, expectedRevision: Int)
+  case setTaskAttachments(UUID, [TaskAttachment], expectedRevision: Int)
   case saveNotes(UUID, String, expectedRevision: Int)
   case move(
     UUID, WorkflowStage, expectedRevision: Int, configuration: ResolvedCodexConfiguration? = nil)
@@ -912,6 +925,18 @@ public enum BoardReducer {
       item.revision += 1
       item.updatedAt = .now
       state.tasks[index] = item
+    case .setTaskAttachments(let id, let attachments, let expectedRevision):
+      let index = try taskIndex(id, expectedRevision)
+      guard attachments.count <= TaskAttachmentFiles.maximumCount,
+        Set(attachments.map(\.id)).count == attachments.count,
+        attachments.allSatisfy({
+          TaskAttachmentFiles.allowedTypes.contains($0.mediaType) && $0.byteCount > 0
+            && $0.byteCount <= TaskAttachmentFiles.maximumBytes
+        })
+      else { throw BoardError.invalid("The task attachment list is invalid or too large.") }
+      state.tasks[index].attachments = attachments
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
     case .saveNotes(let id, let notes, let expectedRevision):
       let index = try taskIndex(id, expectedRevision)
       try ensureIdle(id)

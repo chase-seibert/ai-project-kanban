@@ -608,7 +608,7 @@ private struct GeneralSettingsForm: View {
         Text(
           model.isConnectedPhone
             ? "Your original on-device library stays separate from the Mac copy. Restore is unavailable while paired."
-            : "Restore never overwrites existing projects. Original prototype JSON is kept alongside the new library."
+            : "Backups include attached images as separate files. Restore never overwrites existing projects, and older JSON-only backups remain supported."
         ).stageFont(.caption).foregroundStyle(.secondary)
       }
     }.formStyle(.grouped)
@@ -616,12 +616,13 @@ private struct GeneralSettingsForm: View {
         .frame(width: 600, height: 760)
       #endif
       .fileExporter(
-        isPresented: $exporting, document: document, contentType: .json,
+        isPresented: $exporting, document: document, contentType: .stageChaseBackup,
         defaultFilename: "StageChase-backup"
       ) { result in
         if case .failure(let error) = result { model.error = error.localizedDescription }
       }
-      .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+      .fileImporter(isPresented: $importing, allowedContentTypes: [.stageChaseBackup, .json]) {
+        result in
         switch result {
         case .success(let url): Task { await model.restore(url) }
         case .failure(let error): model.error = error.localizedDescription

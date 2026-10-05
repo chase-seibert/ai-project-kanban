@@ -2,6 +2,13 @@
 
 ## 2026-10-05
 
+- Add task image attachments on Mac and iPhone with native pickers, preview,
+  removal, size/type/checksum validation, atomic file storage, and pending upload
+  state. On Mac, also attach clipboard images with Paste. Keep image bytes outside
+  task JSON, SQLite, and regular sync snapshots; transfer only on attach or when
+  opening a preview. Add a versioned backup archive with separate image files
+  and keep legacy JSON-only restore support.
+  Advance the strict sync protocol to version 8.
 - Add `make relaunch` to gracefully quit existing StageChase instances before
   opening the built Mac app; `make run` now uses the same flow. The agent
   workflow checks for active Mac-runner Codex turns first, while Codex Desktop

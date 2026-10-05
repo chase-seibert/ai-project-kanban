@@ -592,6 +592,8 @@ import UniformTypeIdentifiers
           "Mac responded in \(Int(Date().timeIntervalSince(startedAt) * 1_000)) ms. \(acceptedCount) queued change(s) resolved. \(snapshotText)\(pendingText)"
         syncClient.error = nil
         syncClient.recordDiagnostic(syncClient.lastResultMessage)
+        await uploadPendingTaskAttachments(
+          to: replicaRepository, expectedLibraryID: credential.libraryID)
       } catch {
         syncClient.status =
           forceFullSnapshot
@@ -655,6 +657,34 @@ import UniformTypeIdentifiers
       }
     }
 
+    private func uploadPendingTaskAttachments(
+      to repository: LibraryRepository, expectedLibraryID: UUID
+    ) async {
+      for initialItem in library.tasks {
+        for initialAttachment in initialItem.attachments
+        where initialAttachment.transferState == .pendingUpload {
+          do {
+            guard let item = library.tasks.first(where: { $0.id == initialItem.id }),
+              let attachment = item.attachments.first(where: {
+                $0.id == initialAttachment.id && $0.transferState == .pendingUpload
+              })
+            else { continue }
+            let bytes = try TaskAttachmentFiles.read(attachment)
+            _ = try await syncClient.requestDirect(
+              .uploadAttachment(
+                requestID: UUID(), taskID: item.id, expectedRevision: item.revision,
+                attachment: attachment, bytes: bytes))
+            if let snapshot = try await syncClient.snapshot(cursor: 0, force: true) {
+              try await apply(snapshot, to: repository, expectedLibraryID: expectedLibraryID)
+            }
+          } catch {
+            // The image remains in the durable local store and can be retried on the next sync.
+            syncClient.error = "Image upload is pending: \(error.localizedDescription)"
+          }
+        }
+      }
+    }
+
     private func replicaURL(for libraryID: UUID) throws -> URL {
       let support = try FileManager.default.url(
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
@@ -689,6 +719,9 @@ import UniformTypeIdentifiers
             throw BoardError.missing
           }
           wireCommand = .editTask(id: id, title: item.title, notes: notes)
+          revision = expectedRevision
+        case .setTaskAttachments(let id, let attachments, let expectedRevision):
+          wireCommand = .setTaskAttachments(id: id, attachments: attachments)
           revision = expectedRevision
         case .move(let id, let stage, let expectedRevision, let configuration):
           guard configuration == nil else {
@@ -1606,6 +1639,88 @@ import UniformTypeIdentifiers
       return nil
     }
   }
+
+  func addTaskAttachment(
+    taskID: UUID, bytes: Data, displayName: String, mediaType: String
+  ) async -> Bool {
+    guard let item = library.tasks.first(where: { $0.id == taskID }),
+      item.attachments.count < TaskAttachmentFiles.maximumCount
+    else {
+      error = "This task already has the maximum number of images."
+      return false
+    }
+    let id = UUID()
+    do {
+      var attachment = try TaskAttachmentFiles.save(
+        bytes, id: id, displayName: displayName, mediaType: mediaType)
+      #if os(iOS)
+        if syncClient.isPaired { attachment.transferState = .pendingUpload }
+      #endif
+      guard
+        await perform(
+          .setTaskAttachments(
+            taskID, item.attachments + [attachment], expectedRevision: item.revision))
+      else {
+        try? TaskAttachmentFiles.remove(id)
+        return false
+      }
+      guard
+        library.tasks.first(where: { $0.id == taskID })?.attachments.contains(where: { $0.id == id }
+        ) == true
+      else {
+        try? TaskAttachmentFiles.remove(id)
+        error = "The task changed before the image could be attached. Refresh and try again."
+        return false
+      }
+      return true
+    } catch {
+      self.error = error.localizedDescription
+      try? TaskAttachmentFiles.remove(id)
+      return false
+    }
+  }
+
+  func removeTaskAttachment(taskID: UUID, attachmentID: UUID) async -> Bool {
+    guard let item = library.tasks.first(where: { $0.id == taskID }),
+      item.attachments.contains(where: { $0.id == attachmentID })
+    else { return false }
+    let attachments = item.attachments.filter { $0.id != attachmentID }
+    guard
+      await perform(
+        .setTaskAttachments(taskID, attachments, expectedRevision: item.revision))
+    else { return false }
+    #if os(macOS)
+      try? TaskAttachmentFiles.remove(attachmentID)
+    #elseif os(iOS)
+      if !syncClient.isPaired { try? TaskAttachmentFiles.remove(attachmentID) }
+    #endif
+    return true
+  }
+
+  func taskAttachmentData(taskID: UUID, attachmentID: UUID) async throws -> Data {
+    guard let item = library.tasks.first(where: { $0.id == taskID }),
+      let attachment = item.attachments.first(where: { $0.id == attachmentID })
+    else { throw BoardError.missing }
+    if let local = try? TaskAttachmentFiles.read(attachment) { return local }
+    #if os(iOS)
+      guard syncClient.isPaired else {
+        throw BoardError.invalid("This image is not saved on this device.")
+      }
+      let response = try await syncClient.requestDirect(
+        .downloadAttachment(
+          requestID: UUID(), taskID: taskID, expectedRevision: item.revision,
+          attachmentID: attachmentID))
+      guard case .attachment(let bytes) = response else {
+        throw BoardError.invalid("The Mac did not return the selected image.")
+      }
+      _ = try TaskAttachmentFiles.save(
+        bytes, id: attachment.id, displayName: attachment.displayName,
+        mediaType: attachment.mediaType)
+      return bytes
+    #else
+      throw BoardError.invalid("The attached image file is missing from this Mac.")
+    #endif
+  }
   func restore(_ url: URL) async {
     let scoped = url.startAccessingSecurityScopedResource()
     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -1670,7 +1785,7 @@ struct PlanFeedbackMessage {
 }
 
 struct LibraryDocument: FileDocument {
-  static var readableContentTypes: [UTType] { [.json] }
+  static var readableContentTypes: [UTType] { [.stageChaseBackup, .json] }
   var data: Data
   init(data: Data) { self.data = data }
   init(configuration: ReadConfiguration) throws {
@@ -1679,4 +1794,8 @@ struct LibraryDocument: FileDocument {
   func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
     FileWrapper(regularFileWithContents: data)
   }
+}
+
+extension UTType {
+  static let stageChaseBackup = UTType(exportedAs: "com.cseibert.stagechase-backup")
 }
