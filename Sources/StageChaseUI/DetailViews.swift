@@ -1168,6 +1168,8 @@ struct TaskDetail: View {
 
   private func taskHeader(_ item: WorkItem) -> some View {
     VStack(alignment: .leading, spacing: 10) {
+      Text(item.shortID.map { "Task ID \($0)" } ?? "Task ID pending sync")
+        .stageFont(.caption, weight: .medium).foregroundStyle(.secondary)
       HStack(alignment: .top) {
         TextField("Title", text: draftBinding(\.title), axis: .vertical)
           .stageFont(.title2, weight: .bold).textFieldStyle(.plain)
@@ -1461,7 +1463,7 @@ struct TaskDetail: View {
         Project: \(projectName)
         Project ID: \(item.projectID.uuidString.lowercased())
         Task ID: \(item.id.uuidString.lowercased())
-        Task: \(item.title)
+        Task: \(item.shortID.map { "#\($0) · " } ?? "")\(item.title)
         Notes:
         \(notes.isEmpty ? "(No additional notes.)" : notes)
         """

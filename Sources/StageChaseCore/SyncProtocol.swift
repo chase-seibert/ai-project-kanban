@@ -3,12 +3,13 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 9 adds library-wide task short IDs and the allocator high-water mark.
   // Version 8 adds task attachment metadata and explicit attachment file requests.
   // Version 7 adds sanitized Codex quota snapshots for phone display and widgets.
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 8
+  public static let version = 9
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -224,6 +225,7 @@ public enum SyncCommandValidator {
 
 public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   public var id: UUID
+  public var shortID: Int?
   public var projectID: UUID
   public var title: String
   public var notes: String
@@ -240,6 +242,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
 
   public init(_ item: WorkItem) {
     id = item.id
+    shortID = item.shortID
     projectID = item.projectID
     title = item.title
     notes = item.notes
@@ -256,13 +259,14 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, projectID, title, notes, stage, section, status, rank, completed, priority, revision
+    case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority, revision
     case attachments, createdAt, updatedAt
   }
 
   public init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     id = try values.decode(UUID.self, forKey: .id)
+    shortID = try values.decodeIfPresent(Int.self, forKey: .shortID)
     projectID = try values.decode(UUID.self, forKey: .projectID)
     title = try values.decode(String.self, forKey: .title)
     notes = try values.decode(String.self, forKey: .notes)
@@ -333,6 +337,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
   public var version: Int
   public var libraryID: UUID
   public var sequence: UInt64
+  public var taskShortIDHighWaterMark: Int
   public var projects: [SyncProject]
   public var tasks: [SyncTask]
   public var runs: [SyncRun]
@@ -350,6 +355,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     version = SyncProtocol.version
     self.libraryID = libraryID
     self.sequence = sequence
+    taskShortIDHighWaterMark = library.taskShortIDHighWaterMark
     projects = library.projects.map(SyncProject.init)
     tasks = library.tasks.map(SyncTask.init)
     runs = library.runs.map(SyncRun.init)
@@ -369,7 +375,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, libraryID, sequence, projects, tasks, runs, activity, taskReadMarkers,
+    case version, libraryID, sequence, taskShortIDHighWaterMark, projects, tasks, runs, activity, taskReadMarkers,
       projectReadMarkers, codexUsage
   }
 
@@ -378,6 +384,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     version = try values.decode(Int.self, forKey: .version)
     libraryID = try values.decode(UUID.self, forKey: .libraryID)
     sequence = try values.decode(UInt64.self, forKey: .sequence)
+    taskShortIDHighWaterMark = try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
     projects = try values.decode([SyncProject].self, forKey: .projects)
     tasks = try values.decode([SyncTask].self, forKey: .tasks)
     runs = try values.decode([SyncRun].self, forKey: .runs)
@@ -398,6 +405,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       projectReadMarkers.keys.allSatisfy({ id in projects.contains(where: { $0.id == id }) })
     else { throw BoardError.invalid("The Mac returned read markers for missing records.") }
     var library = Library()
+    library.taskShortIDHighWaterMark = taskShortIDHighWaterMark
     library.projects = projects.map {
       var project = Project(name: $0.name)
       project.id = $0.id
@@ -417,6 +425,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
         $0.section ?? ($0.completed ? .implementing : WorkItem.legacySection(for: $0.stage))
       item.status = $0.status ?? ($0.completed ? .done : TaskStatus.legacyStatus(for: $0.stage))
       item.id = $0.id
+      item.shortID = $0.shortID
       item.notes = $0.notes
       item.rank = $0.rank
       item.completed = $0.completed

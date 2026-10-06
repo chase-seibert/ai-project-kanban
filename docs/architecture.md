@@ -114,6 +114,16 @@ linked sessions can still be refreshed explicitly to update their run record.
 
 ## Consolidated sections and task status
 
+Each `WorkItem` keeps its UUID for persistence, task/run relationships, MCP,
+and sync operations, plus an optional positive numeric `shortID` for people.
+The Mac `LibraryRepository` assigns IDs serially when it accepts task creation,
+ignores incoming candidates, and stores a library-wide high-water mark so
+deletion and restore do not reuse a number. Legacy libraries and imports repair
+missing, invalid, or duplicate values in creation-time/UUID order while
+preserving valid unique values. Paired-phone snapshots carry both the canonical
+IDs and high-water mark; an offline phone task has no number until Mac
+acceptance, then converges by UUID. Sync protocol v9 carries this contract.
+
 `WorkItem.section` stores Inbox, Planning, or Implementing independently from
 `WorkItem.status`. The status flow is Inbox/Triage → Planning → Ready → Building
 → Review → Done. Waiting and Error represent blocked or failed runs; Quota is

@@ -495,6 +495,8 @@ struct TaskCard: View {
 
   private var cardContents: some View {
     VStack(alignment: .leading, spacing: 10) {
+      Text(item.shortID.map { String($0) } ?? "ID pending")
+        .stageFont(.caption, weight: .medium).foregroundStyle(.secondary)
       if isEditingTitle {
         HStack(spacing: 6) {
           TextField("Task title", text: $titleDraft, axis: .vertical)

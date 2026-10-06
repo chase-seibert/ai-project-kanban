@@ -25,7 +25,7 @@ enum PlanHandoffPrompt {
     let format = formatPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
 
     return """
-      Task: \(task.title)
+      Task: \(task.shortID.map { "#\($0) · " } ?? "")\(task.title)
 
       Create or revise only the plan for this existing task in the repository opened in this Codex Desktop session. Follow this repository's AGENTS.md instructions. Use the StageChase MCP server (`stagechase`) for task reads and plan attachment; do not make application changes or start or manage another Codex session. Completion and reopening are actions the user controls in StageChase; MCP has no completion action.
 

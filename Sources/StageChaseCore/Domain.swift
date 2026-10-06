@@ -389,6 +389,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
 
 public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var id = UUID()
+  /// Library-wide human-facing ID. Nil only for phone tasks awaiting Mac acceptance.
+  public var shortID: Int?
   public var projectID: UUID
   public var title: String
   public var notes = ""
@@ -416,7 +418,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, projectID, title, notes, stage, section, status, rank, completed, priority, revision
+    case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority, revision
     case planPath, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt, updatedAt
     case completedAt, attachments
   }
@@ -424,6 +426,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+    shortID = try values.decodeIfPresent(Int.self, forKey: .shortID)
     projectID = try values.decode(UUID.self, forKey: .projectID)
     title = try values.decode(String.self, forKey: .title)
     notes = try values.decodeIfPresent(String.self, forKey: .notes) ?? ""
@@ -451,6 +454,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
     try values.encode(id, forKey: .id)
+    try values.encodeIfPresent(shortID, forKey: .shortID)
     try values.encode(projectID, forKey: .projectID)
     try values.encode(title, forKey: .title)
     try values.encode(notes, forKey: .notes)
@@ -638,9 +642,63 @@ public struct Library: Codable, Equatable, Sendable {
   public var formatVersion = 1
   public var projects: [Project] = []
   public var tasks: [WorkItem] = []
+  /// Highest number ever issued, retained after deletion so IDs are never reused.
+  public var taskShortIDHighWaterMark = 0
   public var runs: [AgentRun] = []
   public var activity: [Activity] = []
   public init() {}
+  private enum CodingKeys: String, CodingKey {
+    case formatVersion, projects, tasks, taskShortIDHighWaterMark, runs, activity
+  }
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    formatVersion = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+    projects = try values.decodeIfPresent([Project].self, forKey: .projects) ?? []
+    tasks = try values.decodeIfPresent([WorkItem].self, forKey: .tasks) ?? []
+    taskShortIDHighWaterMark = try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
+    runs = try values.decodeIfPresent([AgentRun].self, forKey: .runs) ?? []
+    activity = try values.decodeIfPresent([Activity].self, forKey: .activity) ?? []
+    reconcileTaskShortIDs()
+  }
+  public func encode(to encoder: Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encode(formatVersion, forKey: .formatVersion)
+    try values.encode(projects, forKey: .projects)
+    try values.encode(tasks, forKey: .tasks)
+    try values.encode(taskShortIDHighWaterMark, forKey: .taskShortIDHighWaterMark)
+    try values.encode(runs, forKey: .runs)
+    try values.encode(activity, forKey: .activity)
+  }
+  /// Deterministically repairs missing, invalid, or duplicate numbers after import or legacy load.
+  public mutating func reconcileTaskShortIDs() {
+    let order = tasks.indices.sorted {
+      tasks[$0].createdAt == tasks[$1].createdAt
+        ? tasks[$0].id.uuidString < tasks[$1].id.uuidString
+        : tasks[$0].createdAt < tasks[$1].createdAt
+    }
+    var seen = Set<Int>()
+    for index in order {
+      guard let value = tasks[index].shortID, value > 0, seen.insert(value).inserted else {
+        tasks[index].shortID = nil
+        continue
+      }
+    }
+    taskShortIDHighWaterMark = max(taskShortIDHighWaterMark, seen.max() ?? 0)
+    for index in order where tasks[index].shortID == nil {
+      guard taskShortIDHighWaterMark < Int.max else { break }
+      taskShortIDHighWaterMark += 1
+      tasks[index].shortID = taskShortIDHighWaterMark
+    }
+  }
+  /// Assigns the next Mac-authoritative number to a newly accepted task.
+  public mutating func assignNextTaskShortID(to taskID: UUID) throws {
+    guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { throw BoardError.missing }
+    guard taskShortIDHighWaterMark < Int.max else {
+      throw BoardError.invalid("No more task IDs can be assigned in this library.")
+    }
+    taskShortIDHighWaterMark += 1
+    tasks[index].shortID = taskShortIDHighWaterMark
+  }
   public func items(in project: UUID, stage: WorkflowStage? = nil, completed: Bool = false)
     -> [WorkItem]
   {
@@ -693,6 +751,12 @@ public struct Library: Codable, Equatable, Sendable {
       Set(tasks.map(\.id)).count == tasks.count,
       Set(runs.map(\.id)).count == runs.count
     else { throw BoardError.invalid("Duplicate identities in the library.") }
+    let shortIDs = tasks.compactMap(\.shortID)
+    guard taskShortIDHighWaterMark >= 0,
+      tasks.allSatisfy({ $0.shortID.map { $0 > 0 } ?? true }),
+      Set(shortIDs).count == shortIDs.count,
+      (shortIDs.max() ?? 0) <= taskShortIDHighWaterMark
+    else { throw BoardError.invalid("Task IDs must be positive, unique, and within the library sequence.") }
     let projectIDs = Set(projects.map(\.id))
     let taskIDs = Set(tasks.map(\.id))
     let attachments = tasks.flatMap(\.attachments)

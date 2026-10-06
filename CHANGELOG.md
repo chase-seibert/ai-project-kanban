@@ -2,6 +2,11 @@
 
 ## 2026-10-06
 
+- Give every task a positive library-wide numeric ID allocated by the Mac.
+  Keep UUIDs as machine identity, preserve the sequence after deletion, repair
+  legacy/imported IDs deterministically, and sync the canonical number and
+  allocator state to iPhone. Offline phone-created tasks show “ID pending”.
+  Advance the strict sync protocol to version 9.
 - Show a light-blue paperclip on task cards when a plan path is attached, on Mac
   and iPhone.
 

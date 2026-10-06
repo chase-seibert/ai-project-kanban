@@ -6,6 +6,114 @@ import Testing
 private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   selection: .latestLuna, modelID: "gpt-6.10-luna", effort: "high", scope: .global)
 
+@Test func shortTaskIDsAllocateAcrossProjectsAndAreNeverReused() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let firstProject = Project(name: "First")
+  let secondProject = Project(name: "Second")
+  _ = try await repository.apply(.createProject(firstProject))
+  _ = try await repository.apply(.createProject(secondProject))
+
+  var first = WorkItem(projectID: firstProject.id, title: "First task")
+  first.shortID = 900 // A client candidate is never authoritative.
+  let firstLibrary = try await repository.apply(.createTask(first))
+  #expect(firstLibrary.tasks.first?.shortID == 1)
+  var second = WorkItem(projectID: secondProject.id, title: "Second task")
+  let secondLibrary = try await repository.apply(.createTask(second))
+  second = try #require(secondLibrary.tasks.first(where: { $0.id == second.id }))
+  #expect(second.shortID == 2)
+  #expect(Set(secondLibrary.tasks.compactMap(\.shortID)).count == 2)
+
+  _ = try await repository.apply(.deleteTask(first.id, expectedRevision: first.revision))
+  let third = WorkItem(projectID: firstProject.id, title: "Third task")
+  let finalLibrary = try await repository.apply(.createTask(third))
+  #expect(finalLibrary.tasks.first(where: { $0.id == third.id })?.shortID == 3)
+  #expect(finalLibrary.taskShortIDHighWaterMark == 3)
+}
+
+@Test func shortTaskIDHighWaterMarkSurvivesRepositoryRestart() async throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChaseShortIDs-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let storeURL = root.appendingPathComponent("Library.sqlite")
+  var repository: LibraryRepository? = try LibraryRepository(url: storeURL)
+  let project = Project(name: "Persistent IDs")
+  _ = try await repository!.apply(.createProject(project))
+  let first = WorkItem(projectID: project.id, title: "First")
+  let firstState = try await repository!.apply(.createTask(first))
+  #expect(firstState.tasks.first?.shortID == 1)
+  _ = try await repository!.apply(.deleteTask(first.id, expectedRevision: first.revision))
+  repository = nil
+
+  repository = try LibraryRepository(url: storeURL)
+  let afterRestart = try await repository!.load()
+  #expect(afterRestart.taskShortIDHighWaterMark == 1)
+  let second = WorkItem(projectID: project.id, title: "Second")
+  let nextState = try await repository!.apply(.createTask(second))
+  #expect(nextState.tasks.first?.shortID == 2)
+  repository = nil
+}
+
+@Test func legacyAndMalformedShortTaskIDsRepairDeterministically() throws {
+  let project = Project(name: "Migration")
+  var earlier = WorkItem(projectID: project.id, title: "Earlier")
+  earlier.id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+  earlier.createdAt = Date(timeIntervalSince1970: 1)
+  earlier.shortID = 4
+  var duplicate = WorkItem(projectID: project.id, title: "Duplicate")
+  duplicate.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+  duplicate.createdAt = Date(timeIntervalSince1970: 1)
+  duplicate.shortID = 4
+  var missing = WorkItem(projectID: project.id, title: "Missing")
+  missing.id = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+  missing.createdAt = Date(timeIntervalSince1970: 2)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [missing, duplicate, earlier]
+  library.taskShortIDHighWaterMark = 2
+
+  let encoded = try JSONEncoder().encode(library)
+  let repaired = try JSONDecoder().decode(Library.self, from: encoded)
+  #expect(repaired.tasks.first(where: { $0.id == earlier.id })?.shortID == 4)
+  #expect(repaired.tasks.first(where: { $0.id == duplicate.id })?.shortID == 5)
+  #expect(repaired.tasks.first(where: { $0.id == missing.id })?.shortID == 6)
+  #expect(repaired.taskShortIDHighWaterMark == 6)
+  let repairedIDs = repaired.tasks.map(\.id).sorted { $0.uuidString < $1.uuidString }
+  let originalIDs = library.tasks.map(\.id).sorted { $0.uuidString < $1.uuidString }
+  #expect(repairedIDs == originalIDs)
+  try repaired.validate()
+
+  var legacyObject = try #require(
+    JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+  legacyObject.removeValue(forKey: "taskShortIDHighWaterMark")
+  var legacyTasks = try #require(legacyObject["tasks"] as? [[String: Any]])
+  for index in legacyTasks.indices { legacyTasks[index].removeValue(forKey: "shortID") }
+  legacyObject["tasks"] = legacyTasks
+  let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+  let legacyLibrary = try JSONDecoder().decode(Library.self, from: legacyData)
+  #expect(legacyLibrary.tasks.first(where: { $0.id == earlier.id })?.shortID == 1)
+  #expect(legacyLibrary.tasks.first(where: { $0.id == duplicate.id })?.shortID == 2)
+  #expect(legacyLibrary.tasks.first(where: { $0.id == missing.id })?.shortID == 3)
+}
+
+@Test func syncSnapshotCarriesCanonicalTaskIDAndAllocatorState() throws {
+  let project = Project(name: "Sync IDs")
+  var task = WorkItem(projectID: project.id, title: "Canonical task")
+  task.shortID = 23
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  library.taskShortIDHighWaterMark = 30
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 3, library: library)
+  let decoded = try JSONDecoder.syncDecoder.decode(
+    SyncSnapshot.self, from: JSONEncoder.syncEncoder.encode(snapshot))
+  let replica = try decoded.replica()
+  #expect(replica.tasks.first?.id == task.id)
+  #expect(replica.tasks.first?.shortID == 23)
+  #expect(replica.taskShortIDHighWaterMark == 30)
+  #expect(SyncProtocol.version == 9)
+}
+
 @Test func explicitTaskRunPreservesPlacementAndSnapshotsProjectSettings() throws {
   var project = Project(name: "Manual runner", directory: "/tmp/manual-runner")
   project.automationEnabled = false
@@ -369,7 +477,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 8)
+  #expect(decoded.version == 9)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -396,6 +504,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   }
   #expect(firstSequence == initial.sequence + 1)
   #expect(firstSnapshot.tasks.map(\.id) == [taskID])
+  #expect(firstSnapshot.tasks.first?.shortID == 1)
+  #expect(firstSnapshot.taskShortIDHighWaterMark == 1)
 
   guard case .applied(let replaySequence, _) = try await repository.applyRemote(create)
   else {
@@ -506,7 +616,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 8)
+  #expect(snapshot.version == 9)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }
@@ -791,6 +901,9 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     .createTask(task), operationID: operationID, fingerprint: "same-request")
   #expect(replay.replayed)
   #expect(replay.library.tasks.count == 1)
+  #expect(first.library.tasks.first?.shortID == 1)
+  #expect(replay.library.tasks.first?.shortID == 1)
+  #expect(replay.library.taskShortIDHighWaterMark == 1)
   await #expect(throws: (any Error).self) {
     try await repository!.applyMCP(
       .createTask(task), operationID: operationID, fingerprint: "changed-request")

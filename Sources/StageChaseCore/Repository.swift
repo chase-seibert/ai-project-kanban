@@ -65,6 +65,7 @@ private struct StoredTaskEditVersion: Codable, Sendable {
 private struct StoredSyncState: Codable, Sendable {
   var libraryID = UUID()
   var sequence: UInt64 = 0
+  var taskShortIDHighWaterMark = 0
   var deviceHighWater: [UUID: UInt64] = [:]
   var receipts: [UUID: StoredSyncReceipt] = [:]
   var phoneTaskVersions: [UUID: StoredTaskEditVersion] = [:]
@@ -72,7 +73,7 @@ private struct StoredSyncState: Codable, Sendable {
   var projectReadMarkers: [UUID: TaskChangeReadMarker] = [:]
 
   private enum CodingKeys: String, CodingKey {
-    case libraryID, sequence, deviceHighWater, receipts, phoneTaskVersions, taskReadMarkers,
+    case libraryID, sequence, taskShortIDHighWaterMark, deviceHighWater, receipts, phoneTaskVersions, taskReadMarkers,
       projectReadMarkers
   }
 
@@ -82,6 +83,7 @@ private struct StoredSyncState: Codable, Sendable {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     libraryID = try values.decodeIfPresent(UUID.self, forKey: .libraryID) ?? UUID()
     sequence = try values.decodeIfPresent(UInt64.self, forKey: .sequence) ?? 0
+    taskShortIDHighWaterMark = try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
     deviceHighWater =
       try values.decodeIfPresent([UUID: UInt64].self, forKey: .deviceHighWater) ?? [:]
     receipts = try values.decodeIfPresent([UUID: StoredSyncReceipt].self, forKey: .receipts) ?? [:]
@@ -175,6 +177,9 @@ public actor LibraryRepository {
     }
     library.projects.sort { $0.createdAt < $1.createdAt }
     library.activity.sort { $0.date < $1.date }
+    library.taskShortIDHighWaterMark = max(
+      library.taskShortIDHighWaterMark, syncState?.taskShortIDHighWaterMark ?? 0)
+    library.reconcileTaskShortIDs()
     // Never silently restart a paid/side-effectful operation after a crash.
     var recovered = false
     if recoverActiveRuns {
@@ -194,6 +199,7 @@ public actor LibraryRepository {
     }
     try library.validate()
     if syncState == nil { syncState = StoredSyncState() }
+    syncState?.taskShortIDHighWaterMark = library.taskShortIDHighWaterMark
     if recovered { syncState?.sequence &+= 1 }
     if recovered || entries.isEmpty || syncState != nil {
       try persist(library, syncState: syncState)
@@ -231,6 +237,9 @@ public actor LibraryRepository {
     }
     library.projects.sort { $0.createdAt < $1.createdAt }
     library.activity.sort { $0.date < $1.date }
+    library.taskShortIDHighWaterMark = max(
+      library.taskShortIDHighWaterMark, refreshedSyncState?.taskShortIDHighWaterMark ?? 0)
+    library.reconcileTaskShortIDs()
     try library.validate()
     cached = library
     syncState = refreshedSyncState
@@ -240,7 +249,7 @@ public actor LibraryRepository {
 
   public func apply(_ command: Mutation) throws -> Library {
     let current = try load()
-    let library = try BoardReducer.apply(command, to: current)
+    let library = try Self.applyAuthoritative(command, to: current)
     var nextSyncState = syncState ?? StoredSyncState()
     Self.clearPhoneVersions(forChangedTasksFrom: current, to: library, in: &nextSyncState)
     nextSyncState.sequence &+= 1
@@ -263,7 +272,7 @@ public actor LibraryRepository {
       }
       return MCPApplyResult(library: current, replayed: true)
     }
-    let updated = try BoardReducer.apply(command, to: current)
+    let updated = try Self.applyAuthoritative(command, to: current)
     state.receipts[operationID] = fingerprint
     if state.receipts.count > 2_000 {
       // Stable deterministic eviction bounds metadata growth without exposing the map order.
@@ -340,6 +349,7 @@ public actor LibraryRepository {
     var nextState = syncState ?? StoredSyncState()
     nextState.libraryID = libraryID
     nextState.sequence = sequence
+    nextState.taskShortIDHighWaterMark = library.taskShortIDHighWaterMark
     nextState.taskReadMarkers = taskReadMarkers
     nextState.projectReadMarkers = projectReadMarkers
     try persist(library, syncState: nextState)
@@ -392,7 +402,7 @@ public actor LibraryRepository {
       let mutation = try SyncCommandValidator.mutation(for: commandEnvelope, in: current)
       var updated: Library
       do {
-        updated = try BoardReducer.apply(mutation, to: current)
+        updated = try Self.applyAuthoritative(mutation, to: current)
       } catch BoardError.conflict {
         guard let taskID = Self.lastWriteWinsTaskID(in: envelope.command),
           let task = current.tasks.first(where: { $0.id == taskID })
@@ -422,7 +432,7 @@ public actor LibraryRepository {
         var resolved: Library
         do {
           let rebased = try SyncCommandValidator.mutation(for: commandEnvelope, in: current)
-          resolved = try BoardReducer.apply(rebased, to: current)
+          resolved = try Self.applyAuthoritative(rebased, to: current)
         } catch {
           return try persistSuperseded(envelope, digest: digest, current: current, state: &state)
         }
@@ -596,6 +606,7 @@ public actor LibraryRepository {
     }
     let contents = try BackupArchive.decode(data)
     var imported = contents.library
+    imported.reconcileTaskShortIDs()
     var writtenAssets: [UUID] = []
     do {
       for taskIndex in imported.tasks.indices {
@@ -622,6 +633,7 @@ public actor LibraryRepository {
     for i in imported.projects.indices { imported.projects[i].automationEnabled = false }
     var nextSyncState = StoredSyncState()
     nextSyncState.sequence = (syncState?.sequence ?? 0) &+ 1
+    nextSyncState.taskShortIDHighWaterMark = imported.taskShortIDHighWaterMark
     do { try persist(imported, syncState: nextSyncState) } catch {
       for id in writtenAssets { try? TaskAttachmentFiles.remove(id) }
       throw error
@@ -634,6 +646,26 @@ public actor LibraryRepository {
   private static func digest(_ envelope: SyncEnvelope) throws -> String {
     let data = try JSONEncoder.syncEncoder.encode(envelope)
     return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  /// The Mac repository is the sole allocator. Client-supplied IDs are discarded on create;
+  /// repository actor serialization makes allocation atomic with the persisted mutation.
+  private static func applyAuthoritative(_ command: Mutation, to current: Library) throws -> Library {
+    var acceptedCommand = command
+    if case .createTask(var item, let configuration) = command {
+      item.shortID = nil
+      acceptedCommand = .createTask(item, configuration: configuration)
+    }
+    var updated = try BoardReducer.apply(acceptedCommand, to: current)
+    guard case .createTask(let item, _) = acceptedCommand else { return updated }
+    guard let index = updated.tasks.firstIndex(where: { $0.id == item.id }) else {
+      throw BoardError.missing
+    }
+    updated.tasks[index].shortID = nil
+    updated.taskShortIDHighWaterMark = max(
+      current.taskShortIDHighWaterMark, current.tasks.compactMap(\.shortID).max() ?? 0)
+    try updated.assignNextTaskShortID(to: item.id)
+    return updated
   }
 
   private static func removeDeletedAttachmentFiles(from old: Library, keeping new: Library) {
@@ -678,8 +710,10 @@ public actor LibraryRepository {
       }
     }
     if cached == nil { try upsert(1, key: "schema", kind: "metadata", project: nil) }
-    if let state = syncState ?? self.syncState {
+    if var state = syncState ?? self.syncState {
+      state.taskShortIDHighWaterMark = max(state.taskShortIDHighWaterMark, library.taskShortIDHighWaterMark)
       try upsert(state, key: "sync-state", kind: "metadata", project: nil)
+      self.syncState = state
     }
     if let state = mcpState ?? self.mcpState {
       try upsert(state, key: "mcp-state", kind: "metadata", project: nil)

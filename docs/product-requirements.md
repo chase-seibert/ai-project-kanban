@@ -4,6 +4,10 @@
 
 - As a user, I want to create a board, so that different projects can have
   separate workflows.
+- As a user, I want each task to have a short positive numeric ID unique across
+  all projects, so that I can refer to it quickly without replacing its UUID.
+  The Mac allocates IDs from a persistent increasing sequence; offline iPhone
+  tasks show “ID pending” until accepted and reconciled by task UUID.
 - As a user, I want three board sections, Inbox, Planning, and Implementing, so
   that the Mac board is simpler and the iPhone can show the same workflow.
 - As a user, I want task status to be separate from section, so that each task
