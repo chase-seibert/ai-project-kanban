@@ -526,34 +526,40 @@ struct TaskCard: View {
         }
       } else {
         #if os(iOS)
-          Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
-            .strikethrough(item.completed)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .gesture(
-              TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
-                switch result {
-                case .first: beginTitleEditing()
-                case .second: openDetails()
+          HStack(alignment: .top, spacing: 8) {
+            Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
+              .strikethrough(item.completed)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .contentShape(Rectangle())
+              .gesture(
+                TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
+                  switch result {
+                  case .first: beginTitleEditing()
+                  case .second: openDetails()
+                  }
                 }
-              }
-            )
-            .accessibilityLabel("Open task details for \(item.title); double tap to edit title")
+              )
+              .accessibilityLabel("Open task details for \(item.title); double tap to edit title")
+            planIndicator
+          }
         #else
-          Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
-            .strikethrough(item.completed)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .gesture(
-              TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
-                switch result {
-                case .first: beginTitleEditing()
-                case .second: openDetails()
+          HStack(alignment: .top, spacing: 8) {
+            Text(item.title).stageFont(.body, weight: .semibold).foregroundStyle(.primary)
+              .strikethrough(item.completed)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .contentShape(Rectangle())
+              .gesture(
+                TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
+                  switch result {
+                  case .first: beginTitleEditing()
+                  case .second: openDetails()
+                  }
                 }
-              }
-            )
-            .help("Click to open task details; double-click to edit title")
-            .accessibilityLabel("Open task details for \(item.title); double-click to edit title")
+              )
+              .help("Click to open task details; double-click to edit title")
+              .accessibilityLabel("Open task details for \(item.title); double-click to edit title")
+            planIndicator
+          }
         #endif
 
         Button {
@@ -599,6 +605,15 @@ struct TaskCard: View {
       #if os(macOS)
         .onExitCommand { cancelTitleEditing() }
       #endif
+  }
+
+  @ViewBuilder private var planIndicator: some View {
+    if item.planPath != nil {
+      Image(systemName: "paperclip")
+        .stageFont(.caption, weight: .medium)
+        .foregroundStyle(Color.blue.opacity(0.72))
+        .accessibilityLabel("Plan attached")
+    }
   }
 
   private func priorityLabel(_ priority: TaskPriority) -> some View {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-06
+
+- Show a light-blue paperclip on task cards when a plan path is attached, on Mac
+  and iPhone.
+
 ## 2026-10-05
 
 - Add task image attachments on Mac and iPhone with native pickers, preview,
