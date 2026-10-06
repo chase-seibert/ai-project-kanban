@@ -4,6 +4,18 @@ Mac sidebar and iPhone Projects tab are the main entry points. New Project opens
 a blank form with a fresh identity; Project Settings edits the chosen project.
 Switching projects clears task selection and search.
 
+The Mac sidebar's Workspace section includes a **Recent Tasks** navigation
+item. It opens a unified center-pane view across all projects, including
+completed tasks. Task cards are grouped by local calendar day, newest day first;
+the current and previous day use **Today** and **Yesterday**, and older groups
+show the full localized date. Each day uses up to three vertical card stacks.
+Cards fill from the least recent at the upper left, continuing in chronological
+order down each column; a lightweight height estimate greedily balances the
+column lengths. Cards show the task ID, title, status, project, and any attached
+plan indicator. Selecting a card opens its task in the inspector while keeping
+Recent Tasks open and the current project unchanged. The view is derived from
+the live library and has no fixed item limit.
+
 The Mac project header has two compact rows: project name, open-task count,
 and a dedicated blue **Add task** button; then Make, a repository summary,
 automation/model information, and Project settings. Add task uses the focused

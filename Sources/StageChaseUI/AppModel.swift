@@ -48,6 +48,7 @@ import UniformTypeIdentifiers
   var search = ""
   var showCompleted = false
   var showActivity = false
+  var showsRecentTasks = false
   var pendingMove: PendingMove?
   private var moveAfterSheet: PendingMove?
   var runnerMessage = "Task runs open in Codex Desktop when automatic invocation is off."
@@ -833,6 +834,7 @@ import UniformTypeIdentifiers
   func select(_ project: UUID?) {
     selectedProjectID = project
     selectedTaskID = nil
+    showsRecentTasks = false
     search = ""
     preferences.set(project?.uuidString, forKey: "selectedProject")
     if let project { markProjectChangesRead(project) }

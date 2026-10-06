@@ -31,7 +31,13 @@ struct RootView: View {
               .navigationSplitViewColumnWidth(min: 200, ideal: 225, max: 310)
           } detail: {
             HStack(spacing: 0) {
-              if model.selectedProject != nil { BoardView() } else { WelcomeView() }
+              if model.showsRecentTasks {
+                RecentTasksView()
+              } else if model.selectedProject != nil {
+                BoardView()
+              } else {
+                WelcomeView()
+              }
               if let id = model.selectedTaskID {
                 Divider()
                 TaskDetail(taskID: id).id(id).frame(width: 340)
@@ -436,6 +442,18 @@ struct ProjectSidebar: View {
       #if os(macOS)
         Section("Workspace") {
           Button {
+            model.showsRecentTasks = true
+            model.selectedTaskID = nil
+            model.showActivity = false
+          } label: {
+            Label("Recent Tasks", systemImage: "clock.arrow.circlepath")
+              .foregroundStyle(model.showsRecentTasks ? Color.accentColor : .primary)
+          }
+          .buttonStyle(.plain)
+          .listRowBackground(model.showsRecentTasks ? Color.accentColor.opacity(0.1) : .clear)
+          .accessibilityIdentifier("recent-tasks-navigation")
+          Button {
+            model.showsRecentTasks = false
             model.selectedTaskID = nil
             model.showActivity.toggle()
           } label: {
@@ -470,6 +488,174 @@ struct ProjectSidebar: View {
     #else
       .listStyle(.insetGrouped)
     #endif
+  }
+}
+
+struct RecentTasksView: View {
+  @Environment(AppModel.self) private var model
+  @State private var editingTaskID: UUID?
+  private let columnLimit = 3
+
+  private struct DayGroup: Identifiable {
+    let day: Date
+    let entries: [(item: WorkItem, project: Project)]
+
+    var id: Date { day }
+  }
+
+  private var recentItems: [(item: WorkItem, project: Project)] {
+    model.library.recentTasks.compactMap { item in
+      guard let project = model.library.projects.first(where: { $0.id == item.projectID }) else {
+        return nil
+      }
+      return (item, project)
+    }
+    .filter { entry in
+      model.search.isEmpty
+        || entry.item.title.localizedCaseInsensitiveContains(model.search)
+        || entry.item.notes.localizedCaseInsensitiveContains(model.search)
+        || entry.project.name.localizedCaseInsensitiveContains(model.search)
+    }
+  }
+
+  private var dayGroups: [DayGroup] {
+    let calendar = Calendar.autoupdatingCurrent
+    let entriesByDay = Dictionary(grouping: recentItems) {
+      calendar.startOfDay(for: $0.item.updatedAt)
+    }
+    return entriesByDay.keys.sorted(by: >).compactMap { day in
+      guard let entries = entriesByDay[day] else { return nil }
+      return DayGroup(day: day, entries: entries)
+    }
+  }
+
+  private func dayTitle(for day: Date) -> String {
+    let calendar = Calendar.autoupdatingCurrent
+    if calendar.isDateInToday(day) { return "Today" }
+    if calendar.isDateInYesterday(day) { return "Yesterday" }
+    return day.formatted(date: .complete, time: .omitted)
+  }
+
+  private func columns(for entries: [(item: WorkItem, project: Project)])
+    -> [[(item: WorkItem, project: Project)]]
+  {
+    let ordered = entries.sorted {
+      if $0.item.updatedAt != $1.item.updatedAt {
+        return $0.item.updatedAt < $1.item.updatedAt
+      }
+      return $0.item.id.uuidString < $1.item.id.uuidString
+    }
+    guard !ordered.isEmpty else { return [] }
+
+    let heights = ordered.map(estimatedCardHeight)
+    let numberOfColumns = min(columnLimit, ordered.count)
+    var result: [[(item: WorkItem, project: Project)]] = []
+    var start = 0
+
+    for columnIndex in 0..<numberOfColumns {
+      let remainingColumns = numberOfColumns - columnIndex
+      if remainingColumns == 1 {
+        result.append(Array(ordered[start...]))
+        break
+      }
+
+      let remainingHeight = heights[start...].reduce(0, +)
+      let targetHeight = remainingHeight / Double(remainingColumns)
+      let lastEnd = ordered.count - (remainingColumns - 1)
+      var end = start
+      var columnHeight = 0.0
+
+      while end < lastEnd {
+        let nextHeight = heights[end]
+        if end > start,
+          abs(targetHeight - columnHeight) <= abs(targetHeight - (columnHeight + nextHeight))
+        {
+          break
+        }
+        columnHeight += nextHeight
+        end += 1
+      }
+
+      result.append(Array(ordered[start..<end]))
+      start = end
+    }
+    return result
+  }
+
+  private func estimatedCardHeight(_ entry: (item: WorkItem, project: Project)) -> Double {
+    let titleLines = max(1, (entry.item.title.count + 34) / 35)
+    let noteLines =
+      entry.item.notes.isEmpty
+      ? 0
+      : min(3, max(1, (entry.item.notes.count + 45) / 46))
+    let hasLiveActivity =
+      model.library.latestRun(for: entry.item.id).map {
+        $0.status == .running && $0.liveState == .busy
+      } ?? false
+
+    // Approximate card content height so sequential cards split into balanced columns.
+    return 132 + Double(titleLines - 1) * 19 + Double(noteLines) * 16
+      + (entry.item.completed ? 17 : 0) + (hasLiveActivity ? 17 : 0)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .firstTextBaseline) {
+        Text("Recent Tasks").stageFont(.largeTitle, weight: .bold)
+        Spacer()
+        Text("\(recentItems.count)").stageFont(.caption).monospacedDigit()
+          .foregroundStyle(.secondary)
+      }
+      .padding(.horizontal, 24)
+      .padding(.vertical, 18)
+
+      if recentItems.isEmpty {
+        ContentUnavailableView(
+          model.search.isEmpty ? "No recent tasks" : "No matching tasks",
+          systemImage: "clock.arrow.circlepath",
+          description: Text(
+            model.search.isEmpty
+              ? "Tasks from all projects will appear here as they are updated."
+              : "Try another search."))
+      } else {
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 24) {
+            ForEach(dayGroups) { group in
+              VStack(alignment: .leading, spacing: 12) {
+                let dayColumns = columns(for: group.entries)
+                Text(dayTitle(for: group.day))
+                  .stageFont(.title2, weight: .semibold)
+                  .padding(.leading, 2)
+
+                HStack(alignment: .top, spacing: 14) {
+                  ForEach(Array(dayColumns.enumerated()), id: \.offset) { column in
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                      ForEach(column.element, id: \.item.id) { entry in
+                        TaskCard(
+                          item: entry.item,
+                          editingTaskID: $editingTaskID,
+                          onOpenTask: { taskID in
+                            model.selectedTaskID = taskID
+                            model.showActivity = false
+                          },
+                          scope: .recentTasks,
+                          projectName: entry.project.name)
+                      }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .top)
+                  }
+                }
+              }
+            }
+          }
+          .padding(.horizontal, 20)
+          .padding(.top, 4)
+          .padding(.bottom, 20)
+        }
+        .scrollIndicators(.automatic)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 }
 

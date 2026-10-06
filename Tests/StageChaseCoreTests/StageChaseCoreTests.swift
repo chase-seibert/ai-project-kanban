@@ -6,6 +6,31 @@ import Testing
 private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   selection: .latestLuna, modelID: "gpt-6.10-luna", effort: "high", scope: .global)
 
+@Test func recentTasksAreCombinedNewestFirstAndStableForTies() {
+  let firstProject = Project(name: "First")
+  let secondProject = Project(name: "Second")
+  var older = WorkItem(projectID: firstProject.id, title: "Older")
+  older.updatedAt = Date(timeIntervalSince1970: 10)
+  var tiedLaterID = WorkItem(projectID: secondProject.id, title: "Tied later ID")
+  tiedLaterID.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+  tiedLaterID.updatedAt = Date(timeIntervalSince1970: 20)
+  var tiedEarlierID = WorkItem(projectID: firstProject.id, title: "Tied earlier ID")
+  tiedEarlierID.id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+  tiedEarlierID.updatedAt = tiedLaterID.updatedAt
+  var orphaned = WorkItem(projectID: UUID(), title: "Missing project")
+  orphaned.updatedAt = Date(timeIntervalSince1970: 30)
+  var completed = WorkItem(projectID: secondProject.id, title: "Completed")
+  completed.completed = true
+  completed.updatedAt = Date(timeIntervalSince1970: 15)
+
+  var library = Library()
+  library.projects = [firstProject, secondProject]
+  library.tasks = [older, tiedLaterID, tiedEarlierID, orphaned, completed]
+
+  #expect(
+    library.recentTasks.map(\.id) == [tiedEarlierID.id, tiedLaterID.id, completed.id, older.id])
+}
+
 @Test func shortTaskIDsAllocateAcrossProjectsAndAreNeverReused() async throws {
   let repository = try LibraryRepository(inMemory: true)
   let firstProject = Project(name: "First")

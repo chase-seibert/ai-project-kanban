@@ -397,11 +397,18 @@ struct BoardLane: View {
   }
 }
 
+enum TaskCardScope: Equatable {
+  case board
+  case recentTasks
+}
+
 struct TaskCard: View {
   @Environment(AppModel.self) private var model
   let item: WorkItem
   @Binding var editingTaskID: UUID?
   var onOpenTask: ((UUID) -> Void)?
+  var scope = TaskCardScope.board
+  var projectName: String?
   @State private var titleDraft = ""
   @State private var savingTitle = false
   @FocusState private var titleFieldFocused: Bool
@@ -418,70 +425,7 @@ struct TaskCard: View {
       if isEditingTitle {
         cardContents
       } else {
-        cardContents
-          .draggable("stagechase-task:\(item.id.uuidString)")
-          .dropDestination(for: String.self) { values, _ in
-            guard let value = values.first, value.hasPrefix("stagechase-task:"),
-              let id = UUID(uuidString: String(value.dropFirst("stagechase-task:".count))),
-              let source = model.library.tasks.first(where: {
-                $0.id == id && $0.projectID == item.projectID
-              })
-            else { return false }
-            if source.section == item.section {
-              Task {
-                await model.perform(
-                  .reorder(id, before: item.id, expectedRevision: source.revision))
-              }
-            } else {
-              model.requestMove(source, to: item.section)
-            }
-            return true
-          }
-          .contextMenu {
-            Button("Edit title", systemImage: "pencil") { beginTitleEditing() }
-            Divider()
-            let ordered = model.library.items(
-              in: item.projectID, section: item.section, completed: true
-            )
-            .filter { $0.priority == item.priority }
-            if let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0 {
-              Button("Move up in \(item.section.title)", systemImage: "arrow.up") {
-                let previous = ordered[index - 1]
-                Task {
-                  await model.perform(
-                    .reorder(item.id, before: previous.id, expectedRevision: item.revision))
-                }
-              }
-            }
-            if let index = ordered.firstIndex(where: { $0.id == item.id }),
-              index + 1 < ordered.count
-            {
-              Button("Move down in \(item.section.title)", systemImage: "arrow.down") {
-                let next = ordered[index + 1]
-                Task {
-                  await model.perform(
-                    .reorder(next.id, before: item.id, expectedRevision: next.revision))
-                }
-              }
-            }
-            if !ordered.isEmpty { Divider() }
-            ForEach(WorkflowSection.allCases.filter { $0 != item.section }) { stage in
-              Button {
-                model.requestMove(item, to: stage)
-              } label: {
-                Label("Move to \(stage.title)", systemImage: stage.symbol)
-              }
-            }
-            Divider()
-            Button(
-              item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle"
-            ) {
-              Task {
-                await model.perform(
-                  .complete(item.id, !item.completed, expectedRevision: item.revision))
-              }
-            }
-          }
+        interactiveContents.contextMenu { taskContextMenu }
       }
     }
     .onChange(of: editingTaskID) { oldValue, newValue in
@@ -493,10 +437,83 @@ struct TaskCard: View {
     }
   }
 
+  @ViewBuilder private var interactiveContents: some View {
+    if scope == .board {
+      cardContents
+        .draggable("stagechase-task:\(item.id.uuidString)")
+        .dropDestination(for: String.self) { values, _ in
+          guard let value = values.first, value.hasPrefix("stagechase-task:"),
+            let id = UUID(uuidString: String(value.dropFirst("stagechase-task:".count))),
+            let source = model.library.tasks.first(where: {
+              $0.id == id && $0.projectID == item.projectID
+            })
+          else { return false }
+          if source.section == item.section {
+            Task {
+              await model.perform(
+                .reorder(id, before: item.id, expectedRevision: source.revision))
+            }
+          } else {
+            model.requestMove(source, to: item.section)
+          }
+          return true
+        }
+    } else {
+      cardContents
+    }
+  }
+
+  @ViewBuilder private var taskContextMenu: some View {
+    Button("Edit title", systemImage: "pencil") { beginTitleEditing() }
+    Divider()
+    let ordered = model.library.items(in: item.projectID, section: item.section, completed: true)
+      .filter { $0.priority == item.priority }
+    if scope == .board,
+      let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0
+    {
+      Button("Move up in \(item.section.title)", systemImage: "arrow.up") {
+        let previous = ordered[index - 1]
+        Task {
+          await model.perform(
+            .reorder(item.id, before: previous.id, expectedRevision: item.revision))
+        }
+      }
+    }
+    if scope == .board,
+      let index = ordered.firstIndex(where: { $0.id == item.id }),
+      index + 1 < ordered.count
+    {
+      Button("Move down in \(item.section.title)", systemImage: "arrow.down") {
+        let next = ordered[index + 1]
+        Task {
+          await model.perform(
+            .reorder(next.id, before: item.id, expectedRevision: next.revision))
+        }
+      }
+    }
+    if scope == .board, !ordered.isEmpty { Divider() }
+    ForEach(WorkflowSection.allCases.filter { $0 != item.section }) { stage in
+      Button {
+        model.requestMove(item, to: stage)
+      } label: {
+        Label("Move to \(stage.title)", systemImage: stage.symbol)
+      }
+    }
+    Divider()
+    Button(item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle") {
+      Task {
+        await model.perform(.complete(item.id, !item.completed, expectedRevision: item.revision))
+      }
+    }
+  }
+
   private var cardContents: some View {
     VStack(alignment: .leading, spacing: 10) {
       Text(item.shortID.map { String($0) } ?? "ID pending")
         .stageFont(.caption, weight: .medium).foregroundStyle(.secondary)
+      if let projectName {
+        Text(projectName).stageFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
+      }
       if isEditingTitle {
         HStack(spacing: 6) {
           TextField("Task title", text: $titleDraft, axis: .vertical)
@@ -541,7 +558,9 @@ struct TaskCard: View {
                   }
                 }
               )
-              .accessibilityLabel("Open task details for \(item.title); double tap to edit title")
+              .accessibilityLabel(
+                "Open task details for \(item.title)\(projectName.map { ", \($0)" } ?? ""); double tap to edit title"
+              )
             planIndicator
           }
         #else
@@ -559,7 +578,9 @@ struct TaskCard: View {
                 }
               )
               .help("Click to open task details; double-click to edit title")
-              .accessibilityLabel("Open task details for \(item.title); double-click to edit title")
+              .accessibilityLabel(
+                "Open task details for \(item.title)\(projectName.map { ", \($0)" } ?? ""); double-click to edit title"
+              )
             planIndicator
           }
         #endif
@@ -591,7 +612,8 @@ struct TaskCard: View {
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Open task details for \(item.title)")
+        .accessibilityLabel(
+          "Open task details for \(item.title)\(projectName.map { ", \($0)" } ?? "")")
       }
     }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
       .background(
@@ -628,8 +650,11 @@ struct TaskCard: View {
     model.markTaskChangesRead(item.id)
     #if os(macOS)
       model.selectedTaskID = item.id
-      model.boardSelectedTaskID = item.id
-      model.boardFocusedStage = item.section
+      if scope == .board {
+        model.boardSelectedTaskID = item.id
+        model.boardFocusedStage = item.section
+      }
+      onOpenTask?(item.id)
     #else
       onOpenTask?(item.id)
     #endif

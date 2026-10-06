@@ -732,6 +732,15 @@ public struct Library: Codable, Equatable, Sendable {
       return $0.rank == $1.rank ? $0.createdAt < $1.createdAt : $0.rank < $1.rank
     }
   }
+  /// All tasks with a resolvable project, ordered by most recent update first.
+  /// Equal timestamps use the task ID so the sidebar order stays stable.
+  public var recentTasks: [WorkItem] {
+    let projectIDs = Set(projects.map(\.id))
+    return tasks.filter { projectIDs.contains($0.projectID) }.sorted {
+      if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+      return $0.id.uuidString < $1.id.uuidString
+    }
+  }
   public func latestRun(for task: UUID) -> AgentRun? {
     runs.filter { $0.taskID == task }.max { $0.createdAt < $1.createdAt }
   }

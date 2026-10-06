@@ -2,6 +2,8 @@
 
 ## 2026-10-06
 
+- Add a Workspace **Recent Tasks** view with task cards grouped by update day
+  in a newest-first, balanced three-column vertical stack across projects.
 - Give every task a positive library-wide numeric ID allocated by the Mac.
   Keep UUIDs as machine identity, preserve the sequence after deletion, repair
   legacy/imported IDs deterministically, and sync the canonical number and
