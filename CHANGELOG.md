@@ -2,6 +2,11 @@
 
 ## 2026-10-07
 
+- Defer the iPhone navigation reset after the selected project changes so
+  deleting its active row does not update the project list and navigation path
+  in the same UI transaction.
+- Recreate the iPhone project list when active project membership changes to
+  avoid applying a stale UIKit collection-view diff during deletion or restore.
 - Add reversible project deletion on Mac and iPhone, with a Deleted Projects
   link and Restore controls. Keep projects, tasks, runs, attachments, settings,
   and repository files; hide deleted projects from active lists and Recent Tasks.

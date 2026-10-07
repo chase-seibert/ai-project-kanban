@@ -224,12 +224,19 @@ struct RootView: View {
         "This project and its tasks will be hidden. All data and repository files are kept. Restore it anytime from Deleted Projects."
       )
     }
-    .onChange(of: model.selectedProjectID) {
+    .onChange(of: model.selectedProjectID) { _, newProjectID in
       #if os(iOS)
-        if model.selectedProject == nil {
-          phonePath = []
-        } else if !phonePath.isEmpty {
-          phonePath = [.board]
+        // Let the project row and confirmation dialog finish updating before
+        // changing the NavigationStack path. Deleting the selected project can
+        // change both in the same transaction.
+        Task { @MainActor in
+          await Task.yield()
+          guard model.selectedProjectID == newProjectID else { return }
+          if model.selectedProject == nil {
+            phonePath = []
+          } else if !phonePath.isEmpty {
+            phonePath = [.board]
+          }
         }
       #endif
     }
@@ -528,6 +535,10 @@ struct ProjectSidebar: View {
       }
     }
     #if os(iOS)
+      // SwiftUI's UICollectionView-backed List can apply a stale row diff when a
+      // project is removed after a swipe action. Recreate the list on membership
+      // changes so UIKit starts from the current active-project snapshot.
+      .id(model.library.activeProjects.map { $0.id.uuidString }.joined(separator: ","))
       .refreshable {
         await model.refreshFromMac(manual: true, forceFullSnapshot: true)
       }
