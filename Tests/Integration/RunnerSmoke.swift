@@ -12,6 +12,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     throw BoardError.invalid("Fixture timed out")
   }
   @MainActor static func main() async throws {
+    try await testProjectDeletionSelection()
     try await testMCPCompletionCannotBeChangedByLegacyTool()
     try await testMovePersistsWhenRunnerSetupFails()
     try await testGitService()
@@ -851,6 +852,46 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     }
     print(
       "PASS: project commit uses the latest completed task title, refreshes status, and targets the configured folder instead of a task worktree"
+    )
+  }
+
+  @MainActor static func testProjectDeletionSelection() async throws {
+    let repository = try LibraryRepository(inMemory: true)
+    let first = Project(name: "First")
+    let second = Project(name: "Second")
+    _ = try await repository.apply(.createProject(first))
+    _ = try await repository.apply(.createProject(second))
+    let suite = "StageChase.ProjectDeletion.\(UUID().uuidString)"
+    let preferences = UserDefaults(suiteName: suite)!
+    defer { preferences.removePersistentDomain(forName: suite) }
+    preferences.set(second.id.uuidString, forKey: "selectedProject")
+    preferences.set(false, forKey: "mcpServerEnabled")
+    preferences.set(false, forKey: "localSyncEnabled")
+    let model = AppModel(repository: repository, preferences: preferences, preview: false)
+    await model.load()
+    guard model.selectedProjectID == second.id else {
+      throw BoardError.invalid("Loading the library overwrote the saved project selection")
+    }
+    model.selectedTaskID = UUID()
+    model.boardSelectedTaskID = UUID()
+    guard await model.setProjectDeleted(second, deleted: true),
+      model.selectedProjectID == first.id, model.selectedTaskID == nil,
+      model.boardSelectedTaskID == nil,
+      await model.setProjectDeleted(first, deleted: true), model.selectedProject == nil,
+      preferences.string(forKey: "selectedProject") == nil
+    else { throw BoardError.invalid("Deleting selected or last projects did not clear selection") }
+    guard let deletedSecond = model.library.deletedProjects.first(where: { $0.id == second.id }),
+      await model.setProjectDeleted(deletedSecond, deleted: false),
+      model.selectedProjectID == second.id
+    else { throw BoardError.invalid("Restoring the only project did not make it selectable") }
+    var snapshot = model.library
+    snapshot.projects[snapshot.projects.firstIndex(where: { $0.id == second.id })!].deletedAt = .now
+    model.library = snapshot
+    guard model.selectedProjectID == nil, model.selectedProject == nil else {
+      throw BoardError.invalid("An incoming deleted project remained selected")
+    }
+    print(
+      "PASS: project deletion/restoration reconciles saved, selected, last, and incoming project state"
     )
   }
 

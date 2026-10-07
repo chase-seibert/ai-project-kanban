@@ -161,7 +161,7 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
   func prepareDesktopHandoff(runID: UUID) async throws {
     guard let model, var run = model.library.runs.first(where: { $0.id == runID }),
       run.kind == .task, let task = model.library.tasks.first(where: { $0.id == run.taskID }),
-      let project = model.library.projects.first(where: { $0.id == run.projectID })
+      let project = model.library.activeProjects.first(where: { $0.id == run.projectID })
     else { throw BoardError.missing }
     guard activeID == nil else {
       throw BoardError.invalid(
@@ -249,7 +249,7 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
   func desktopThreads(for runID: UUID) async throws -> [DesktopThreadCandidate] {
     guard let model, let run = model.library.runs.first(where: { $0.id == runID }),
       run.source == .codexDesktop,
-      let project = model.library.projects.first(where: { $0.id == run.projectID })
+      let project = model.library.activeProjects.first(where: { $0.id == run.projectID })
     else { throw BoardError.invalid("This run cannot be linked to a Codex Desktop session.") }
     try await connect(executable: executable())
     let expectedDirectory = URL(fileURLWithPath: project.directory).standardizedFileURL
@@ -363,7 +363,7 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
       run = next
     }
     let projectProfile =
-      model.library.projects.first(where: { $0.id == run.projectID })?.executionProfile
+      model.library.activeProjects.first(where: { $0.id == run.projectID })?.executionProfile
       ?? .workspaceAccessNoPrompts
     let profile = run.executionProfile ?? projectProfile
     var runWithProfile = run
@@ -466,7 +466,7 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
   ) async {
     guard let model,
       let item = model.library.tasks.first(where: { $0.id == initial.taskID }),
-      let project = model.library.projects.first(where: { $0.id == initial.projectID }),
+      let project = model.library.activeProjects.first(where: { $0.id == initial.projectID }),
       explicitlyRequested || project.automationEnabled
     else {
       await fail("Project automation is disabled or the task is missing.")

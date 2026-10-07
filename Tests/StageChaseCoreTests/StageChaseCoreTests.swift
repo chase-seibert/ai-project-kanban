@@ -39,7 +39,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   _ = try await repository.apply(.createProject(secondProject))
 
   var first = WorkItem(projectID: firstProject.id, title: "First task")
-  first.shortID = 900 // A client candidate is never authoritative.
+  first.shortID = 900  // A client candidate is never authoritative.
   let firstLibrary = try await repository.apply(.createTask(first))
   #expect(firstLibrary.tasks.first?.shortID == 1)
   var second = WorkItem(projectID: secondProject.id, title: "Second task")
@@ -136,7 +136,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.tasks.first?.id == task.id)
   #expect(replica.tasks.first?.shortID == 23)
   #expect(replica.taskShortIDHighWaterMark == 30)
-  #expect(SyncProtocol.version == 9)
+  #expect(SyncProtocol.version == 10)
 }
 
 @Test func explicitTaskRunPreservesPlacementAndSnapshotsProjectSettings() throws {
@@ -502,7 +502,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 9)
+  #expect(decoded.version == 10)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -641,7 +641,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 9)
+  #expect(snapshot.version == 10)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }
@@ -1783,4 +1783,177 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   a.createdAt = Date(timeIntervalSince1970: 10)
   b.createdAt = a.createdAt
   #expect(TaskRunDisclosureState.ordered([b, a]).map(\.id) == [a.id, b.id])
+}
+
+@Test func projectSoftDeletionPersistsAndRestoresAllRelatedDataAndFiles() async throws {
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let sentinel = root.appendingPathComponent("repository-file.txt")
+  try Data("keep this file".utf8).write(to: sentinel)
+  let png = try #require(
+    Data(
+      base64Encoded:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j78kAAAAASUVORK5CYII="
+    ))
+  let attachment = try TaskAttachmentFiles.save(
+    png, id: UUID(), displayName: "screen.png", mediaType: "image/png", baseURL: root)
+  let store = root.appendingPathComponent("Library.sqlite")
+  var repository: LibraryRepository? = try LibraryRepository(url: store)
+  var project = Project(name: "Retained", directory: root.path)
+  project.automationEnabled = true
+  project.favoriteMakeTargets = ["build"]
+  _ = try await repository!.apply(.createProject(project))
+  var task = WorkItem(projectID: project.id, title: "Retained task")
+  task.notes = "Keep notes"
+  task.planPath = "to-do/keep.md"
+  task.attachments = [attachment]
+  _ = try await repository!.apply(.createTask(task))
+  var run = AgentRun(task: task, kind: .task)
+  run.status = .readyForHandoff
+  _ = try await repository!.apply(.createManualRun(run))
+  run.status = .succeeded
+  let before = try await repository!.apply(.updateRun(run))
+  let deleted = try await repository!.apply(
+    .setProjectDeleted(project.id, true, expectedRevision: 0))
+  #expect(deleted.activeProjects.isEmpty)
+  #expect(deleted.deletedProjects.count == 1)
+  #expect(deleted.tasks == before.tasks)
+  #expect(deleted.runs == before.runs)
+  #expect(deleted.activity.dropLast() == before.activity[...])
+  #expect(deleted.taskShortIDHighWaterMark == before.taskShortIDHighWaterMark)
+  #expect(deleted.recentTasks.isEmpty)
+  #expect(try Data(contentsOf: sentinel) == Data("keep this file".utf8))
+  #expect(try TaskAttachmentFiles.read(attachment, baseURL: root) == png)
+  let backup = try BackupArchive.decode(BackupArchive.encode(deleted, baseURL: root))
+  #expect(backup.library.projects == deleted.projects)
+  #expect(backup.library.tasks == deleted.tasks)
+  #expect(backup.assets[attachment.id] == png)
+  repository = nil
+  repository = try LibraryRepository(url: store)
+  let reloaded = try await repository!.load()
+  #expect(reloaded.projects == deleted.projects)
+  #expect(reloaded.tasks == deleted.tasks)
+  let restored = try await repository!.apply(
+    .setProjectDeleted(project.id, false, expectedRevision: 1))
+  project.deletionRevision = 2
+  #expect(restored.projects == [project])
+  #expect(restored.tasks == before.tasks)
+  #expect(restored.runs == before.runs)
+  #expect(restored.recentTasks.count == 1)
+  #expect(try TaskAttachmentFiles.read(attachment, baseURL: root) == png)
+  #expect(try Data(contentsOf: sentinel) == Data("keep this file".utf8))
+}
+
+@Test func deletedProjectsRejectNewWorkAndStaleSettingsWhileActiveRunsBlockDeletion() throws {
+  let project = Project(name: "Protected", directory: "/tmp/protected")
+  let task = WorkItem(projectID: project.id, title: "Protected task")
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  for status in [RunStatus.queued, .running, .needsInput] {
+    var run = AgentRun(task: task, kind: .implementation)
+    run.status = status
+    library.runs = [run]
+    #expect(throws: BoardError.self) {
+      try BoardReducer.apply(.setProjectDeleted(project.id, true, expectedRevision: 0), to: library)
+    }
+  }
+  library.runs = []
+  let deleted = try BoardReducer.apply(
+    .setProjectDeleted(project.id, true, expectedRevision: 0), to: library)
+  let newTask = WorkItem(projectID: project.id, title: "Must not be created")
+  for mutation in [
+    Mutation.createTask(newTask), .editProject(project),
+    .runTaskNow(
+      task.id, expectedRevision: task.revision, kind: .planning,
+      configuration: fixtureModelConfiguration),
+    .saveNotes(task.id, "Must not change", expectedRevision: task.revision),
+    .deleteTask(task.id, expectedRevision: task.revision),
+    .restoreTask(task.id, nil, expectedRevision: task.revision),
+  ] {
+    #expect(throws: BoardError.self) { try BoardReducer.apply(mutation, to: deleted) }
+  }
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.setProjectDeleted(project.id, false, expectedRevision: 0), to: deleted)
+  }
+  let restored = try BoardReducer.apply(
+    .setProjectDeleted(project.id, false, expectedRevision: 1), to: deleted)
+  let edited = try BoardReducer.apply(.editProject(project), to: restored)
+  #expect(edited.projects[0].deletionRevision == 2)
+  #expect(!edited.projects[0].isDeleted)
+}
+
+@Test func remoteProjectDeletionRestorationIsIdempotentRevisionCheckedAndSynced() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Shared", directory: "/private/mac-only-folder")
+  _ = try await repository.apply(.createProject(project))
+  let state = try await repository.syncStateSnapshot()
+  let device = UUID()
+  let deletion = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: device, clientSequence: 1,
+    expectedRevision: 0, command: .setProjectDeleted(id: project.id, deleted: true))
+  guard case .applied(let sequence, let snapshot) = try await repository.applyRemote(deletion)
+  else {
+    Issue.record("Phone deletion was not applied")
+    return
+  }
+  let replica = try JSONDecoder.syncDecoder.decode(
+    SyncSnapshot.self, from: JSONEncoder.syncEncoder.encode(snapshot)
+  ).replica()
+  #expect(replica.deletedProjects.first?.id == project.id)
+  #expect(replica.projects[0].deletionRevision == 1)
+  #expect(replica.projects[0].directory.isEmpty)
+  guard case .applied(let replaySequence, let replay) = try await repository.applyRemote(deletion)
+  else {
+    Issue.record("Deletion receipt was not replayed")
+    return
+  }
+  #expect(sequence == replaySequence)
+  #expect(replay.activity == snapshot.activity)
+  let restoration = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: device, clientSequence: 2,
+    expectedRevision: 1, command: .setProjectDeleted(id: project.id, deleted: false))
+  guard case .applied(_, let restored) = try await repository.applyRemote(restoration) else {
+    Issue.record("Phone restoration was not applied")
+    return
+  }
+  #expect(try restored.replica().activeProjects.first?.id == project.id)
+  let stale = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
+    expectedRevision: 0, command: .setProjectDeleted(id: project.id, deleted: true))
+  guard case .conflict = try await repository.applyRemote(stale) else {
+    Issue.record("Stale deletion must not overwrite a restoration")
+    return
+  }
+  var unsupported = stale
+  unsupported.version = 9
+  guard case .rejected = try await repository.applyRemote(unsupported) else {
+    Issue.record("Older client must be rejected")
+    return
+  }
+  let final = try await repository.load()
+  #expect(final.projects[0].directory == project.directory)
+  #expect(!final.projects[0].isDeleted)
+  #expect(final.projects[0].deletionRevision == 2)
+}
+
+@Test func legacyProjectsDecodeAsActiveAndDeletedStateSurvivesCodable() throws {
+  let legacy = Data("{\"name\":\"Legacy\"}".utf8)
+  let project = try JSONDecoder().decode(Project.self, from: legacy)
+  #expect(!project.isDeleted)
+  #expect(project.deletionRevision == 0)
+  var deleted = project
+  deleted.deletedAt = Date(timeIntervalSince1970: 123)
+  deleted.deletionRevision = 1
+  #expect(try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(deleted)) == deleted)
+  var object = try #require(
+    JSONSerialization.jsonObject(with: JSONEncoder().encode(SyncProject(project))) as? [String: Any]
+  )
+  object.removeValue(forKey: "deletedAt")
+  object.removeValue(forKey: "deletionRevision")
+  let oldProject = try JSONDecoder().decode(
+    SyncProject.self, from: JSONSerialization.data(withJSONObject: object))
+  #expect(oldProject.deletedAt == nil)
+  #expect(oldProject.deletionRevision == nil)
 }

@@ -1,5 +1,30 @@
 # Architecture
 
+## Project deletion and restoration
+
+Projects have an optional `deletedAt` timestamp and a `deletionRevision` counter.
+Old JSON payloads decode as active with revision zero; the existing SwiftData
+V1 per-record payload storage needs no schema migration. Deletion and restoration
+change only the project marker/revision and append an activity record. Projects,
+tasks, runs, attachments, read markers, settings, and repository files are retained
+and remain included in backups. A stale project-settings draft cannot overwrite
+the deletion state. Deletion is rejected while any project run is active.
+
+Active project lists, board selection, and Recent Tasks exclude deleted projects.
+The shared sidebar/projects list opens Deleted Projects, whose Restore controls
+return the original project. Local changes and incoming snapshots reconcile a
+deleted selection to another active project, or to the no-project state. Deleted
+projects reject task edits, new tasks, run scheduling, and project Git/Make actions.
+
+Sync protocol v10 carries deletion timestamps and lifecycle revisions in
+`SyncProject` and permits explicit `setProjectDeleted` commands. The envelope's
+expected revision is the project's deletion revision for these commands; stale
+commands conflict instead of being rebased with task edit timestamps. Commands use
+the existing durable phone outbox and transactional Mac operation receipts. Both
+deleted and active project records remain in snapshots; Mac paths stay private.
+Versions 9 and earlier require both apps to be updated before syncing. Real paired
+device behavior remains a separate acceptance check from builds and fixtures.
+
 ## Implemented September 29, 2026
 
 - `Sources/StageChaseCore/Domain.swift`: Sendable models and a pure command
@@ -361,14 +386,16 @@ generated JSON schema was checked for exact request spellings.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Protocol version 8 adds task attachment metadata and direct
+sanitized snapshots. Protocol version 10 adds reversible project deletion and
+lifecycle revisions; version 9 adds task short IDs and their allocator state;
+version 8 adds task attachment metadata and direct
 image upload/download requests; version 7 adds timestamped Codex usage snapshots;
 version 6 adds explicit project creation from a paired phone; version 5 adds the linked Codex thread ID to read-only run
 snapshots; version 4 added synchronized task and project read markers and
-acknowledgment commands. Version 7 and older clients are rejected explicitly;
+acknowledgment commands. Version 9 and older clients are rejected explicitly;
 they must update before syncing with this build. Queued phone edits remain a
-small allowlist (project/task creation, task edit/move/reorder/complete/delete,
-and read acknowledgments) with expected task revisions where applicable. Each
+small allowlist (project creation/delete/restore, task creation/edit/move/reorder/complete/delete,
+and read acknowledgments) with expected task or project deletion revisions where applicable. Each
 command carries the phone edit timestamp captured when queued and the device's
 monotonic client sequence. A stale task edit is rebased only when its source timestamp is newer
 than the Mac task timestamp. Exact timestamp ties favor the Mac; ties between

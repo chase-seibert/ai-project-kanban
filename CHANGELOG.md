@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-07
+
+- Add reversible project deletion on Mac and iPhone, with a Deleted Projects
+  link and Restore controls. Keep projects, tasks, runs, attachments, settings,
+  and repository files; hide deleted projects from active lists and Recent Tasks.
+  Reject deletion during active runs and new work in deleted projects. Synchronize
+  delete/restore commands with lifecycle revisions and advance the strict paired
+  sync protocol to version 10.
+
 ## 2026-10-06
 
 - Add a Workspace **Recent Tasks** view with task cards grouped by update day

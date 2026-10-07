@@ -176,7 +176,9 @@ import Network
     switch name {
     case "list_projects":
       return [
-        "projects": library.projects.map { ["id": $0.id.uuidString.lowercased(), "name": $0.name] }
+        "projects": library.activeProjects.map {
+          ["id": $0.id.uuidString.lowercased(), "name": $0.name]
+        }
       ]
     case "list_tasks":
       let projectID = try uuid("project_id", arguments)

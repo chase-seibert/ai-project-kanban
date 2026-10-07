@@ -470,7 +470,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
     case .readPlan(let taskID, let expectedRevision):
       guard let item = library.tasks.first(where: { $0.id == taskID }),
         item.revision == expectedRevision,
-        let project = library.projects.first(where: { $0.id == item.projectID }),
+        let project = library.activeProjects.first(where: { $0.id == item.projectID }),
         let path = item.planPath
       else {
         return .rejected("The task changed or no saved plan is attached. Refresh and try again.")
@@ -519,7 +519,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
         guard
           let item = library.tasks.first(where: {
             $0.id == taskID && $0.projectID == projectID && $0.revision == expectedRevision
-          }), let project = library.projects.first(where: { $0.id == projectID })
+          }), let project = library.activeProjects.first(where: { $0.id == projectID })
         else { return .rejected("The task changed on the Mac. Refresh and try again.") }
         guard !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
           return .rejected("Choose a project folder on the Mac before requesting Git actions.")
@@ -531,7 +531,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
       }
     case .commitProject(let requestID, let projectID):
       return try await idempotentGitRequest(request, requestID: requestID) {
-        guard let project = library.projects.first(where: { $0.id == projectID }),
+        guard let project = library.activeProjects.first(where: { $0.id == projectID }),
           let latestTask = library.latestCompletedTask(in: projectID)
         else {
           return .rejected("Complete a task in this project before committing project changes.")
@@ -613,7 +613,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
   private func gitStatus(
     projectID: UUID, taskID: UUID?, expectedRevision: Int?, library: Library
   ) async throws -> SyncDirectResponse {
-    guard let project = library.projects.first(where: { $0.id == projectID }),
+    guard let project = library.activeProjects.first(where: { $0.id == projectID }),
       !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else {
       return .rejected("Choose a project folder on the Mac before requesting Git status.")

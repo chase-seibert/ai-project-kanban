@@ -1,5 +1,19 @@
 # Product requirements
 
+## Reversible project deletion
+
+- As a user, I want to delete a project from Mac or iPhone and hide it from my
+  active project list and Recent Tasks, so I can remove it from daily work.
+- As a user, I want a Deleted Projects link and a Restore action on both devices,
+  so I can bring back the same project with all tasks, history, attachments,
+  settings, and repository files. There is no permanent deletion action.
+- As a user, I want confirmation before deleting, a clear message when active
+  runs prevent deletion, and a usable empty state when my last project is deleted.
+- As a user, I want delete and restore commands to synchronize through the paired
+  Mac, remain queued during outages, and reject stale lifecycle changes, so an
+  old phone request cannot undo a newer restoration. Restore is required before
+  changing tasks or starting new work in a deleted project.
+
 ## Foundation
 
 - As a user, I want to create a board, so that different projects can have

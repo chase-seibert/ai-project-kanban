@@ -25,7 +25,9 @@ import UniformTypeIdentifiers
     static let planFormatPromptPreferenceKey = "codexPlanFormatPrompt"
     static let maximumPlanFormatPromptCharacters = 12_000
   #endif
-  var library = Library()
+  var library = Library() {
+    didSet { if ready { reconcileProjectSelection() } }
+  }
   var selectedProjectID: UUID?
   var selectedTaskID: UUID?
   var boardSelectedTaskID: UUID?
@@ -34,6 +36,7 @@ import UniformTypeIdentifiers
   private(set) var projectReadMarkers: [UUID: TaskChangeReadMarker] = [:]
   var boardFocusedStage: WorkflowSection = .inbox
   var taskPendingDeletionID: UUID?
+  var projectPendingDeletion: Project?
   var launchTaskOnSelectionID: UUID?
   var saveTaskEditRequestedID: UUID?
   var error: String?
@@ -155,7 +158,7 @@ import UniformTypeIdentifiers
     var isConnectedPhone: Bool { false }
   #endif
 
-  var selectedProject: Project? { library.projects.first { $0.id == selectedProjectID } }
+  var selectedProject: Project? { library.activeProjects.first { $0.id == selectedProjectID } }
   var activeRuns: [AgentRun] { library.runs.filter { $0.status.isActive } }
   #if os(macOS)
     private let planFileStore = PlanFileStore()
@@ -189,7 +192,8 @@ import UniformTypeIdentifiers
       let saved = preferences.string(forKey: "selectedProject").flatMap(
         UUID.init(uuidString:))
       selectedProjectID =
-        library.projects.contains { $0.id == saved } ? saved : library.projects.first?.id
+        library.activeProjects.contains { $0.id == saved }
+        ? saved : library.activeProjects.first?.id
       ready = true
       #if os(macOS)
         runner = CodexRunner(model: self)
@@ -235,7 +239,7 @@ import UniformTypeIdentifiers
         }
       #endif
       if selectedProjectID == nil {
-        selectedProjectID = library.projects.first?.id
+        selectedProjectID = library.activeProjects.first?.id
       }
       initializeTaskChangeReadMarkersIfNeeded()
     } catch { loadError = error.localizedDescription }
@@ -304,7 +308,7 @@ import UniformTypeIdentifiers
     ) async throws -> String {
       guard let item = library.tasks.first(where: { $0.id == taskID }),
         item.revision == expectedRevision,
-        let project = library.projects.first(where: { $0.id == item.projectID }),
+        let project = library.activeProjects.first(where: { $0.id == item.projectID }),
         !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else {
         throw BoardError.invalid("The task or its project folder changed. Refresh and try again.")
@@ -339,7 +343,7 @@ import UniformTypeIdentifiers
       try await refreshModelCatalog()
       guard let current = library.tasks.first(where: { $0.id == taskID }),
         current.revision == expectedRevision,
-        let currentProject = library.projects.first(where: { $0.id == current.projectID }),
+        let currentProject = library.activeProjects.first(where: { $0.id == current.projectID }),
         !current.completed,
         !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive }),
         !currentProject.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -460,7 +464,7 @@ import UniformTypeIdentifiers
         try syncClient.unpair()
         if let repository {
           library = try await repository.load()
-          select(library.projects.first?.id)
+          select(library.activeProjects.first?.id)
         }
         replicaRepository = nil
       } catch { syncClient.error = error.localizedDescription }
@@ -539,6 +543,10 @@ import UniformTypeIdentifiers
                 snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
               try syncClient.acknowledge(envelope.operationID)
               acceptedCount += 1
+              if case .setProjectDeleted = envelope.command {
+                self.error =
+                  "This project changed on the Mac. Review Deleted Projects and try again."
+              }
               syncClient.recordDiagnostic(
                 "Resolved a conflicting phone edit with the latest Mac record.")
             case .rejected(let message):
@@ -550,6 +558,7 @@ import UniformTypeIdentifiers
                 snapshot, to: replicaRepository, expectedLibraryID: credential.libraryID)
               try syncClient.acknowledge(envelope.operationID)
               acceptedCount += 1
+              if case .setProjectDeleted = envelope.command { self.error = message }
               syncClient.recordDiagnostic(
                 "Resolved a rejected phone edit using the latest Mac record: \(message)")
             }
@@ -628,8 +637,10 @@ import UniformTypeIdentifiers
       taskReadMarkers = snapshot.taskReadMarkers
       projectReadMarkers = snapshot.projectReadMarkers
       taskChangeReadStateRevision &+= 1
-      if let selectedProjectID, !replica.projects.contains(where: { $0.id == selectedProjectID }) {
-        select(replica.projects.first?.id)
+      if let selectedProjectID,
+        !replica.activeProjects.contains(where: { $0.id == selectedProjectID })
+      {
+        select(replica.activeProjects.first?.id)
       }
     }
 
@@ -703,6 +714,11 @@ import UniformTypeIdentifiers
         case .createProject(let project):
           wireCommand = .createProject(id: project.id, name: project.name)
           revision = nil
+        case .setProjectDeleted(let id, let deleted, let expectedRevision):
+          // Validate before saving a durable queued command, including the active-run guard.
+          _ = try BoardReducer.apply(command, to: library)
+          wireCommand = .setProjectDeleted(id: id, deleted: deleted)
+          revision = expectedRevision
         case .createTask(let item, let configuration):
           guard configuration == nil else {
             throw BoardError.invalid("Confirm automated work on the Mac.")
@@ -746,7 +762,7 @@ import UniformTypeIdentifiers
           wireCommand = .deleteTask(id: id)
           revision = expectedRevision
         case .editProject(let project):
-          guard let existing = library.projects.first(where: { $0.id == project.id }),
+          guard let existing = library.activeProjects.first(where: { $0.id == project.id }),
             project.name == existing.name, project.directory == existing.directory,
             project.automationEnabled == existing.automationEnabled,
             project.usesWorktrees == existing.usesWorktrees,
@@ -832,12 +848,31 @@ import UniformTypeIdentifiers
   }
 
   func select(_ project: UUID?) {
+    let project = library.activeProjects.first(where: { $0.id == project })?.id
     selectedProjectID = project
     selectedTaskID = nil
+    boardSelectedTaskID = nil
     showsRecentTasks = false
     search = ""
     preferences.set(project?.uuidString, forKey: "selectedProject")
     if let project { markProjectChangesRead(project) }
+  }
+
+  private func reconcileProjectSelection() {
+    if let selectedProjectID,
+      library.activeProjects.contains(where: { $0.id == selectedProjectID })
+    {
+      return
+    }
+    if selectedProjectID != library.activeProjects.first?.id {
+      select(library.activeProjects.first?.id)
+    }
+  }
+
+  @discardableResult
+  func setProjectDeleted(_ project: Project, deleted: Bool) async -> Bool {
+    await perform(
+      .setProjectDeleted(project.id, deleted, expectedRevision: project.deletionRevision))
   }
 
   func unreadTaskChangeKind(for taskID: UUID) -> TaskChangeKind? {
@@ -997,7 +1032,7 @@ import UniformTypeIdentifiers
         let planPath = item.planPath,
         item.revision == expectedRevision,
         library.latestRun(for: taskID)?.status.isActive != true,
-        let project = library.projects.first(where: { $0.id == item.projectID })
+        let project = library.activeProjects.first(where: { $0.id == item.projectID })
       else {
         planFeedbackMessages[taskID] = PlanFeedbackMessage(
           text: "This task or plan changed. Review the task details, then try again.", isError: true
@@ -1045,7 +1080,7 @@ import UniformTypeIdentifiers
 
   #if os(macOS)
     func refreshGitStatus(projectID: UUID) async {
-      guard let project = library.projects.first(where: { $0.id == projectID }),
+      guard let project = library.activeProjects.first(where: { $0.id == projectID }),
         !project.directory.isEmpty
       else {
         gitStatuses[projectID] = nil
@@ -1079,7 +1114,7 @@ import UniformTypeIdentifiers
 
     func commitTaskChanges(taskID: UUID) async {
       guard let item = library.tasks.first(where: { $0.id == taskID }),
-        let project = library.projects.first(where: { $0.id == item.projectID })
+        let project = library.activeProjects.first(where: { $0.id == item.projectID })
       else { return }
       guard !gitBusyProjectIDs.contains(project.id) else { return }
       gitBusyProjectIDs.insert(project.id)
@@ -1102,7 +1137,7 @@ import UniformTypeIdentifiers
     }
 
     func runFavoriteMakeTarget(_ target: String, projectID: UUID) throws {
-      guard let project = library.projects.first(where: { $0.id == projectID }) else {
+      guard let project = library.activeProjects.first(where: { $0.id == projectID }) else {
         throw BoardError.missing
       }
       guard project.favoriteMakeTargets.contains(target) else {
@@ -1112,7 +1147,9 @@ import UniformTypeIdentifiers
     }
 
     func commitProjectChanges(projectID: UUID) async {
-      guard let project = library.projects.first(where: { $0.id == projectID }) else { return }
+      guard let project = library.activeProjects.first(where: { $0.id == projectID }) else {
+        return
+      }
       guard !gitBusyProjectIDs.contains(projectID) else { return }
       gitBusyProjectIDs.insert(projectID)
       gitActionMessages[projectID] = nil
@@ -1136,7 +1173,7 @@ import UniformTypeIdentifiers
 
     func taskUsesSeparateGitWorktree(taskID: UUID) -> Bool {
       guard let item = library.tasks.first(where: { $0.id == taskID }),
-        let project = library.projects.first(where: { $0.id == item.projectID }),
+        let project = library.activeProjects.first(where: { $0.id == item.projectID }),
         let path = library.latestRun(for: taskID)?.workDirectory
       else { return false }
       return URL(fileURLWithPath: path).standardizedFileURL.path
@@ -1145,7 +1182,7 @@ import UniformTypeIdentifiers
 
     private func taskGitFolder(taskID: UUID) -> URL? {
       guard let item = library.tasks.first(where: { $0.id == taskID }),
-        let project = library.projects.first(where: { $0.id == item.projectID })
+        let project = library.activeProjects.first(where: { $0.id == item.projectID })
       else { return nil }
       if let workDirectory = library.latestRun(for: taskID)?.workDirectory {
         return URL(fileURLWithPath: workDirectory)
@@ -1213,7 +1250,8 @@ import UniformTypeIdentifiers
 
   func requestMove(_ item: WorkItem, to stage: WorkflowStage) {
     guard item.stage != stage else { return }
-    let automation = library.projects.first { $0.id == item.projectID }?.automationEnabled == true
+    let automation =
+      library.activeProjects.first { $0.id == item.projectID }?.automationEnabled == true
     let shouldPrepareRun =
       !isConnectedPhone && autoInvokeCodex && automation
       && [.next, .implementation].contains(stage)
@@ -1233,7 +1271,8 @@ import UniformTypeIdentifiers
   func requestMove(_ item: WorkItem, to section: WorkflowSection) {
     guard item.section != section else { return }
     let stage = section.compatibilityStage
-    let automation = library.projects.first { $0.id == item.projectID }?.automationEnabled == true
+    let automation =
+      library.activeProjects.first { $0.id == item.projectID }?.automationEnabled == true
     let shouldPrepareRun =
       !isConnectedPhone && autoInvokeCodex && automation
       && [.planning, .implementing].contains(section)
@@ -1267,7 +1306,7 @@ import UniformTypeIdentifiers
         !item.completed,
         !library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive }),
         let current = library.tasks.first(where: { $0.id == item.id }),
-        let project = library.projects.first(where: { $0.id == item.projectID }),
+        let project = library.activeProjects.first(where: { $0.id == item.projectID }),
         !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else { return }
       let pending = PendingMove(
@@ -1409,7 +1448,7 @@ import UniformTypeIdentifiers
     guard modelConfigurationError == nil else {
       throw BoardError.invalid(modelConfigurationError!)
     }
-    guard let project = library.projects.first(where: { $0.id == item.projectID }) else {
+    guard let project = library.activeProjects.first(where: { $0.id == item.projectID }) else {
       throw BoardError.missing
     }
     let effective = CodexModelResolver.effective(
@@ -1419,7 +1458,7 @@ import UniformTypeIdentifiers
   }
 
   func inheritedConfiguration(for item: WorkItem) -> CodexModelConfiguration {
-    guard let project = library.projects.first(where: { $0.id == item.projectID }) else {
+    guard let project = library.activeProjects.first(where: { $0.id == item.projectID }) else {
       return globalModelConfiguration
     }
     return CodexModelResolver.effective(
@@ -1437,7 +1476,7 @@ import UniformTypeIdentifiers
       error = "Automatic invocation is off. Use Copy prompt or Launch Codex from task details."
       return
     }
-    guard library.projects.first(where: { $0.id == run.projectID })?.automationEnabled == true
+    guard library.activeProjects.first(where: { $0.id == run.projectID })?.automationEnabled == true
     else {
       error =
         "Automatic runs are disabled for this project. Use Copy prompt or Launch Codex from task details."
@@ -1729,7 +1768,7 @@ import UniformTypeIdentifiers
     do {
       guard let repository else { return }
       library = try await repository.importLibrary(Data(contentsOf: url))
-      select(library.projects.first?.id)
+      select(library.activeProjects.first?.id)
     } catch { self.error = error.localizedDescription }
   }
 }
@@ -1737,6 +1776,7 @@ import UniformTypeIdentifiers
 enum AppSheet: Identifiable {
   case newProject
   case editProject(Project)
+  case deletedProjects
   case newTask(WorkflowSection)
   case settings
   #if os(macOS)
@@ -1745,6 +1785,7 @@ enum AppSheet: Identifiable {
   var id: String {
     switch self {
     case .newProject: "new-project"
+    case .deletedProjects: "deleted-projects"
     case .editProject(let project): "edit-\(project.id)"
     case .newTask(let stage): "new-task-\(stage.id)"
     case .settings: "settings"

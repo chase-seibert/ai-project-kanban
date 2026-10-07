@@ -342,10 +342,14 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var deployedAt: Date?
   public var favoriteMakeTargets: [String] = []
   public var createdAt = Date()
+  /// Soft deletion retains this project and all of its related records and files.
+  public var deletedAt: Date?
+  public var deletionRevision = 0
+  public var isDeleted: Bool { deletedAt != nil }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, directory, automationEnabled, usesWorktrees, modelOverride, executionProfile
-    case deployedCommitHash, deployedAt, favoriteMakeTargets, createdAt
+    case deployedCommitHash, deployedAt, favoriteMakeTargets, createdAt, deletedAt, deletionRevision
   }
 
   public init(name: String, directory: String = "") {
@@ -369,6 +373,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     favoriteMakeTargets =
       try values.decodeIfPresent([String].self, forKey: .favoriteMakeTargets) ?? []
     createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    deletedAt = try values.decodeIfPresent(Date.self, forKey: .deletedAt)
+    deletionRevision = try values.decodeIfPresent(Int.self, forKey: .deletionRevision) ?? 0
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -384,6 +390,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     try values.encodeIfPresent(deployedAt, forKey: .deployedAt)
     try values.encode(favoriteMakeTargets, forKey: .favoriteMakeTargets)
     try values.encode(createdAt, forKey: .createdAt)
+    try values.encodeIfPresent(deletedAt, forKey: .deletedAt)
+    try values.encode(deletionRevision, forKey: .deletionRevision)
   }
 }
 
@@ -418,7 +426,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority, revision
+    case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority,
+      revision
     case planPath, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt, updatedAt
     case completedAt, attachments
   }
@@ -655,7 +664,8 @@ public struct Library: Codable, Equatable, Sendable {
     formatVersion = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
     projects = try values.decodeIfPresent([Project].self, forKey: .projects) ?? []
     tasks = try values.decodeIfPresent([WorkItem].self, forKey: .tasks) ?? []
-    taskShortIDHighWaterMark = try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
+    taskShortIDHighWaterMark =
+      try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
     runs = try values.decodeIfPresent([AgentRun].self, forKey: .runs) ?? []
     activity = try values.decodeIfPresent([Activity].self, forKey: .activity) ?? []
     reconcileTaskShortIDs()
@@ -732,10 +742,13 @@ public struct Library: Codable, Equatable, Sendable {
       return $0.rank == $1.rank ? $0.createdAt < $1.createdAt : $0.rank < $1.rank
     }
   }
-  /// All tasks with a resolvable project, ordered by most recent update first.
+  public var activeProjects: [Project] { projects.filter { !$0.isDeleted } }
+  public var deletedProjects: [Project] { projects.filter(\.isDeleted) }
+
+  /// All tasks in active projects, ordered by most recent update first.
   /// Equal timestamps use the task ID so the sidebar order stays stable.
   public var recentTasks: [WorkItem] {
-    let projectIDs = Set(projects.map(\.id))
+    let projectIDs = Set(activeProjects.map(\.id))
     return tasks.filter { projectIDs.contains($0.projectID) }.sorted {
       if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
       return $0.id.uuidString < $1.id.uuidString
@@ -753,6 +766,9 @@ public struct Library: Codable, Equatable, Sendable {
     }
   }
   public func validate() throws {
+    guard projects.allSatisfy({ $0.deletionRevision >= 0 }) else {
+      throw BoardError.invalid("Project deletion revisions must be nonnegative.")
+    }
     guard formatVersion == 1 else {
       throw BoardError.invalid("This library needs a newer StageChase version.")
     }
@@ -765,7 +781,10 @@ public struct Library: Codable, Equatable, Sendable {
       tasks.allSatisfy({ $0.shortID.map { $0 > 0 } ?? true }),
       Set(shortIDs).count == shortIDs.count,
       (shortIDs.max() ?? 0) <= taskShortIDHighWaterMark
-    else { throw BoardError.invalid("Task IDs must be positive, unique, and within the library sequence.") }
+    else {
+      throw BoardError.invalid(
+        "Task IDs must be positive, unique, and within the library sequence.")
+    }
     let projectIDs = Set(projects.map(\.id))
     let taskIDs = Set(tasks.map(\.id))
     let attachments = tasks.flatMap(\.attachments)
@@ -802,6 +821,7 @@ public enum BoardError: LocalizedError, Sendable {
 public enum Mutation: Sendable {
   case createProject(Project)
   case editProject(Project)
+  case setProjectDeleted(UUID, Bool, expectedRevision: Int)
   case createTask(WorkItem, configuration: ResolvedCodexConfiguration? = nil)
   case runTaskNow(
     UUID, expectedRevision: Int, kind: RunKind, configuration: ResolvedCodexConfiguration)
@@ -831,10 +851,19 @@ public enum BoardReducer {
   /// A confirmed user command is the only way to enqueue work. Reading state never triggers Codex.
   public static func apply(_ command: Mutation, to original: Library) throws -> Library {
     var state = original
+    func ensureActiveProject(_ id: UUID) throws {
+      guard let project = state.projects.first(where: { $0.id == id }) else {
+        throw BoardError.missing
+      }
+      guard !project.isDeleted else {
+        throw BoardError.invalid("Restore this project from Deleted Projects before changing it.")
+      }
+    }
     func taskIndex(_ id: UUID, _ revision: Int? = nil) throws -> Int {
       guard let index = state.tasks.firstIndex(where: { $0.id == id }) else {
         throw BoardError.missing
       }
+      try ensureActiveProject(state.tasks[index].projectID)
       if let revision, state.tasks[index].revision != revision { throw BoardError.conflict }
       return index
     }
@@ -878,7 +907,26 @@ public enum BoardReducer {
       }
       state.projects.append(project)
       state.activity.append(Activity("Created project “\(project.name)”.", projectID: project.id))
-    case .editProject(let project):
+    case .setProjectDeleted(let id, let deleted, let revision):
+      guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
+        throw BoardError.missing
+      }
+      guard state.projects[index].deletionRevision == revision else { throw BoardError.conflict }
+      guard state.projects[index].isDeleted != deleted else { break }
+      guard revision < Int.max else { throw BoardError.invalid("Project revision limit reached.") }
+      guard !deleted || !state.runs.contains(where: { $0.projectID == id && $0.status.isActive })
+      else {
+        throw BoardError.invalid(
+          "Wait for this project's active runs to finish before deleting it.")
+      }
+      state.projects[index].deletedAt = deleted ? .now : nil
+      state.projects[index].deletionRevision += 1
+      state.activity.append(
+        Activity(
+          "\(deleted ? "Deleted" : "Restored") project “\(state.projects[index].name)”.",
+          projectID: id))
+    case .editProject(var project):
+      try ensureActiveProject(project.id)
       guard !project.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw BoardError.invalid("Give this project a name.")
       }
@@ -891,8 +939,12 @@ public enum BoardReducer {
       {
         throw BoardError.busy
       }
+      // A stale settings draft cannot restore a deleted project or rewind its lifecycle.
+      project.deletedAt = state.projects[index].deletedAt
+      project.deletionRevision = state.projects[index].deletionRevision
       state.projects[index] = project
     case .createTask(var item, let configuration):
+      try ensureActiveProject(item.projectID)
       item.title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !item.title.isEmpty else { throw BoardError.invalid("Give this task a title.") }
       guard state.projects.contains(where: { $0.id == item.projectID }),
@@ -945,6 +997,7 @@ public enum BoardReducer {
           "Codex run queued from task details · \(configuration.summary)",
           projectID: item.projectID, taskID: item.id, runID: run.id))
     case .createManualRun(let run):
+      try ensureActiveProject(run.projectID)
       guard run.kind == .task, run.status == .readyForHandoff,
         state.tasks.contains(where: { $0.id == run.taskID && $0.projectID == run.projectID }),
         !state.runs.contains(where: { $0.id == run.id })
@@ -955,6 +1008,7 @@ public enum BoardReducer {
           "Prepared a Codex Desktop handoff.", projectID: run.projectID, taskID: run.taskID,
           runID: run.id))
     case .beginExternalRun(let run):
+      try ensureActiveProject(run.projectID)
       guard run.source == .codexDesktop, run.status == .running,
         state.tasks.contains(where: { $0.id == run.taskID && $0.projectID == run.projectID }),
         !state.runs.contains(where: { $0.id == run.id })
@@ -1120,10 +1174,12 @@ public enum BoardReducer {
       try ensureIdle(id)
       let existing = state.tasks.first(where: { $0.id == id })
       guard existing?.revision == expectedRevision else { throw BoardError.conflict }
+      if let existing { try ensureActiveProject(existing.projectID) }
       if desired == nil && state.runs.contains(where: { $0.taskID == id }) {
         throw BoardError.invalid("A task with agent history cannot be removed by undo.")
       }
       if var desiredValue = desired {
+        try ensureActiveProject(desiredValue.projectID)
         guard desiredValue.id == id,
           state.projects.contains(where: { $0.id == desiredValue.projectID })
         else { throw BoardError.missing }
@@ -1225,6 +1281,7 @@ public enum BoardReducer {
           Activity(message, projectID: run.projectID, taskID: run.taskID, runID: runID))
       }
     case .updateRun(let run):
+      if run.status.isActive { try ensureActiveProject(run.projectID) }
       guard let index = state.runs.firstIndex(where: { $0.id == run.id }) else {
         throw BoardError.missing
       }

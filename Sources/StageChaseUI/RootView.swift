@@ -58,6 +58,9 @@ struct RootView: View {
                   Toggle("Show completed", isOn: $model.showCompleted)
                   if let project = model.selectedProject {
                     Button("Project settings…") { model.sheet = .editProject(project) }
+                    Button("Delete project…", role: .destructive) {
+                      model.projectPendingDeletion = project
+                    }
                   }
                 } label: {
                   Image(systemName: "ellipsis.circle")
@@ -124,6 +127,11 @@ struct RootView: View {
                             Button("Project settings", systemImage: "slider.horizontal.3") {
                               model.sheet = .editProject(project)
                             }
+                            Button(role: .destructive) {
+                              model.projectPendingDeletion = project
+                            } label: {
+                              Label("Delete project", systemImage: "trash")
+                            }
                           }
                         } label: {
                           Image(systemName: "ellipsis.circle")
@@ -142,7 +150,7 @@ struct RootView: View {
                     .navigationTitle("")
                     .navigationBarTitleDisplayMode(.inline)
                 case .projectGit(let id):
-                  if let project = model.library.projects.first(where: { $0.id == id }) {
+                  if let project = model.library.activeProjects.first(where: { $0.id == id }) {
                     ScrollView {
                       PhoneGitControls(project: project, taskID: nil).padding(16)
                     }
@@ -165,6 +173,7 @@ struct RootView: View {
         switch sheet {
         case .newProject: ProjectEditor(project: Project(name: ""), isNew: true)
         case .editProject(let project): ProjectEditor(project: project, isNew: false)
+        case .deletedProjects: DeletedProjectsView()
         case .newTask(let stage): NewTaskEditor(stage: stage)
         #if os(macOS)
           case .makeOutput: MakeOutputSheet()
@@ -195,6 +204,34 @@ struct RootView: View {
       Button("OK") { model.error = nil }
     } message: {
       Text(model.error ?? "")
+    }
+    .confirmationDialog(
+      "Delete project?",
+      isPresented: Binding(
+        get: { model.projectPendingDeletion != nil },
+        set: { if !$0 { model.projectPendingDeletion = nil } }),
+      titleVisibility: .visible
+    ) {
+      if let project = model.projectPendingDeletion {
+        Button("Delete \(project.name)", role: .destructive) {
+          model.projectPendingDeletion = nil
+          Task { await model.setProjectDeleted(project, deleted: true) }
+        }
+      }
+      Button("Cancel", role: .cancel) { model.projectPendingDeletion = nil }
+    } message: {
+      Text(
+        "This project and its tasks will be hidden. All data and repository files are kept. Restore it anytime from Deleted Projects."
+      )
+    }
+    .onChange(of: model.selectedProjectID) {
+      #if os(iOS)
+        if model.selectedProject == nil {
+          phonePath = []
+        } else if !phonePath.isEmpty {
+          phonePath = [.board]
+        }
+      #endif
     }
     .confirmationDialog(
       model.pendingMove?.runOnly == true
@@ -303,10 +340,10 @@ struct RootView: View {
 
   private var phoneProjectPicker: some View {
     Menu {
-      if model.library.projects.isEmpty {
+      if model.library.activeProjects.isEmpty {
         Button("No projects available") {}.disabled(true)
       } else {
-        ForEach(model.library.projects) { project in
+        ForEach(model.library.activeProjects) { project in
           Button {
             model.select(project.id)
           } label: {
@@ -362,7 +399,7 @@ struct ProjectSidebar: View {
         Text("CODEX USAGE")
       }
       Section {
-        ForEach(model.library.projects) { project in
+        ForEach(model.library.activeProjects) { project in
           let unreadCount = model.unreadProjectChangeCount(project.id)
           HStack(spacing: 8) {
             Button {
@@ -423,7 +460,19 @@ struct ProjectSidebar: View {
                 Button("Project settings…") { model.sheet = .editProject(project) }
               }
             #endif
+            Button("Delete project…", role: .destructive) {
+              model.projectPendingDeletion = project
+            }
           }
+          #if os(iOS)
+            .swipeActions {
+              Button(role: .destructive) {
+                model.projectPendingDeletion = project
+              } label: {
+                Label("Delete", systemImage: "trash")
+              }
+            }
+          #endif
         }
         #if os(macOS)
           if !model.isConnectedPhone {
@@ -438,6 +487,14 @@ struct ProjectSidebar: View {
         #endif
       } header: {
         Text("YOUR PROJECTS")
+      }
+      Section {
+        Button {
+          model.sheet = .deletedProjects
+        } label: {
+          Label("Deleted Projects", systemImage: "trash")
+        }
+        .accessibilityIdentifier("deleted-projects-navigation")
       }
       #if os(macOS)
         Section("Workspace") {
@@ -481,12 +538,62 @@ struct ProjectSidebar: View {
         VStack(alignment: .leading, spacing: 5) {
           Label("Your work, in motion", systemImage: "square.stack.3d.up").stageFont(
             .caption, weight: .medium)
-          Text("\(model.library.projects.count) projects · stored on this Mac").stageFont(.caption2)
+          Text("\(model.library.activeProjects.count) projects · stored on this Mac").stageFont(
+            .caption2
+          )
           .foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
       }
     #else
       .listStyle(.insetGrouped)
+    #endif
+  }
+}
+
+struct DeletedProjectsView: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @State private var restoringID: UUID?
+
+  var body: some View {
+    NavigationStack {
+      Group {
+        if model.library.deletedProjects.isEmpty {
+          ContentUnavailableView(
+            "No deleted projects", systemImage: "trash",
+            description: Text("Projects you delete will appear here so you can restore them."))
+        } else {
+          List(model.library.deletedProjects) { project in
+            let taskCount = model.library.items(in: project.id, completed: true).count
+            HStack {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(project.name).stageFont(.body, weight: .medium)
+                Text("\(taskCount) \(taskCount == 1 ? "task" : "tasks") retained")
+                  .stageFont(.caption).foregroundStyle(.secondary)
+              }
+              Spacer()
+              Button("Restore") {
+                restoringID = project.id
+                Task {
+                  await model.setProjectDeleted(project, deleted: false)
+                  restoringID = nil
+                }
+              }
+              .disabled(restoringID != nil)
+              .accessibilityLabel("Restore \(project.name)")
+              .accessibilityIdentifier("restore-project-\(project.id.uuidString)")
+            }
+            .padding(.vertical, 4)
+          }
+        }
+      }
+      .navigationTitle("Deleted Projects")
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+      }
+    }
+    #if os(macOS)
+      .frame(width: 500, height: 400)
     #endif
   }
 }

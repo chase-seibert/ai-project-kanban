@@ -3,13 +3,14 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 10 adds reversible project deletion with lifecycle revisions.
   // Version 9 adds library-wide task short IDs and the allocator high-water mark.
   // Version 8 adds task attachment metadata and explicit attachment file requests.
   // Version 7 adds sanitized Codex quota snapshots for phone display and widgets.
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 9
+  public static let version = 10
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -61,6 +62,7 @@ public struct SyncEnvelope: Codable, Equatable, Sendable {
 /// The wire command allowlist does not expose `Mutation` or server-owned fields.
 public enum SyncCommand: Codable, Equatable, Sendable {
   case createProject(id: UUID, name: String)
+  case setProjectDeleted(id: UUID, deleted: Bool)
   case createTask(id: UUID, projectID: UUID, title: String, notes: String, stage: WorkflowStage)
   case editTask(id: UUID, title: String, notes: String)
   case setTaskAttachments(id: UUID, attachments: [TaskAttachment])
@@ -160,6 +162,11 @@ public enum SyncCommandValidator {
       var project = Project(name: name)
       project.id = id
       return .createProject(project)
+    case .setProjectDeleted(let id, let deleted):
+      guard let revision = envelope.expectedRevision else {
+        throw BoardError.invalid("A project deletion revision is required.")
+      }
+      return .setProjectDeleted(id, deleted, expectedRevision: revision)
     case .createTask(let id, let projectID, let title, let notes, let stage):
       guard envelope.expectedRevision == nil,
         library.projects.contains(where: { $0.id == projectID })
@@ -259,7 +266,8 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority, revision
+    case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority,
+      revision
     case attachments, createdAt, updatedAt
   }
 
@@ -295,6 +303,8 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
   public var deployedAt: Date?
   public var favoriteMakeTargets: [String]?
   public var createdAt: Date
+  public var deletedAt: Date?
+  public var deletionRevision: Int?
 
   public init(_ project: Project) {
     id = project.id
@@ -307,6 +317,8 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
     deployedAt = project.deployedAt
     favoriteMakeTargets = project.favoriteMakeTargets
     createdAt = project.createdAt
+    deletedAt = project.deletedAt
+    deletionRevision = project.deletionRevision
   }
 }
 
@@ -375,7 +387,8 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, libraryID, sequence, taskShortIDHighWaterMark, projects, tasks, runs, activity, taskReadMarkers,
+    case version, libraryID, sequence, taskShortIDHighWaterMark, projects, tasks, runs, activity,
+      taskReadMarkers,
       projectReadMarkers, codexUsage
   }
 
@@ -384,7 +397,8 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     version = try values.decode(Int.self, forKey: .version)
     libraryID = try values.decode(UUID.self, forKey: .libraryID)
     sequence = try values.decode(UInt64.self, forKey: .sequence)
-    taskShortIDHighWaterMark = try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
+    taskShortIDHighWaterMark =
+      try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
     projects = try values.decode([SyncProject].self, forKey: .projects)
     tasks = try values.decode([SyncTask].self, forKey: .tasks)
     runs = try values.decode([SyncRun].self, forKey: .runs)
@@ -417,6 +431,8 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       project.deployedAt = $0.deployedAt
       project.favoriteMakeTargets = $0.favoriteMakeTargets ?? []
       project.createdAt = $0.createdAt
+      project.deletedAt = $0.deletedAt
+      project.deletionRevision = $0.deletionRevision ?? 0
       return project
     }
     library.tasks = tasks.map {
