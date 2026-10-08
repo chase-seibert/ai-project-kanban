@@ -41,7 +41,7 @@ public enum WorkflowSection: String, Codable, CaseIterable, Identifiable, Sendab
     switch self {
     case .inbox: "Ideas start here"
     case .planning: "Shape the work"
-    case .implementing: "Move work to done"
+    case .implementing: "Build and review work"
     }
   }
   public var compatibilityStage: WorkflowStage {
@@ -54,41 +54,59 @@ public enum WorkflowSection: String, Codable, CaseIterable, Identifiable, Sendab
 }
 
 public enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
-  case triage, planning, ready, building, waiting, error, quota, review, done
+  case triage, planning
+  case planApproved = "ready"
+  case building, waiting, error, quota
+  case reviewing = "review"
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    let value = try container.decode(String.self)
+    if value == "done" {
+      self = .reviewing
+    } else if let status = Self(rawValue: value) {
+      self = status
+    } else {
+      throw DecodingError.dataCorruptedError(
+        in: container, debugDescription: "Unknown task status: \(value)")
+    }
+  }
+
   public var id: String { rawValue }
+  public var isManuallySelectable: Bool {
+    ![.waiting, .error, .quota].contains(self)
+  }
   public var badgeStyle: TaskStatusBadgeStyle {
     switch self {
     case .triage: TaskStatusBadgeStyle(symbol: "tray", color: .secondary)
     case .planning: TaskStatusBadgeStyle(symbol: "sparkles", color: .purple)
-    case .ready: TaskStatusBadgeStyle(symbol: "checkmark.circle.fill", color: .green)
-    case .building: TaskStatusBadgeStyle(symbol: "hammer.fill", color: .indigo)
-    case .waiting: TaskStatusBadgeStyle(symbol: "pause.circle.fill", color: .orange)
+    case .planApproved: TaskStatusBadgeStyle(symbol: "checkmark.circle.fill", color: .blue)
+    case .building: TaskStatusBadgeStyle(symbol: "hammer.fill", color: .purple)
+    case .waiting: TaskStatusBadgeStyle(symbol: "pause.circle.fill", color: .yellow)
     case .error: TaskStatusBadgeStyle(symbol: "exclamationmark.circle.fill", color: .red)
     case .quota: TaskStatusBadgeStyle(symbol: "gauge.with.dots.needle.67percent", color: .orange)
-    case .review: TaskStatusBadgeStyle(symbol: "eye.circle.fill", color: .green)
-    case .done: TaskStatusBadgeStyle(symbol: "checkmark.seal.fill", color: .blue)
+    case .reviewing: TaskStatusBadgeStyle(symbol: "eye.circle.fill", color: .green)
     }
   }
   public var title: String {
     switch self {
     case .triage: "Triage"
     case .planning: "Planning"
-    case .ready: "Ready"
+    case .planApproved: "Plan Approved"
     case .building: "Building"
     case .waiting: "Waiting"
     case .error: "Error"
     case .quota: "Quota"
-    case .review: "Review"
-    case .done: "Done"
+    case .reviewing: "Reviewing"
     }
   }
-  public var isAttentionState: Bool { [.waiting, .error, .quota, .review].contains(self) }
+  public var isAttentionState: Bool { [.waiting, .error, .quota, .reviewing].contains(self) }
   public var attentionOrder: Int {
     switch self {
     case .waiting: 0
     case .error: 1
     case .quota: 2
-    case .review: 3
+    case .reviewing: 3
     default: 4
     }
   }
@@ -96,22 +114,14 @@ public enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
     switch stage {
     case .inbox: .triage
     case .next: .planning
-    case .planned: .ready
-    case .implementation: .ready
-    case .review: .review
-    }
-  }
-  public var section: WorkflowSection {
-    switch self {
-    case .triage: .inbox
-    case .planning: .planning
-    case .ready, .building, .waiting, .error, .quota, .review, .done: .implementing
+    case .planned, .implementation: .planApproved
+    case .review: .reviewing
     }
   }
 }
 
 public enum TaskStatusBadgeColor: String, Codable, CaseIterable, Sendable {
-  case secondary, purple, blue, indigo, orange, red, green
+  case secondary, purple, blue, indigo, orange, yellow, red, green
 }
 
 public struct TaskStatusBadgeStyle: Hashable, Sendable {
@@ -410,6 +420,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var priority: TaskPriority?
   public var revision = 0
   public var planPath: String?
+  public var planAvailable = false
+  public var hasSavedPlan: Bool { planPath != nil || planAvailable }
   public var latestCodexUpdate: String?
   public var latestCodexUpdateAt: Date?
   public var modelOverride: CodexModelConfiguration?
@@ -428,7 +440,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority,
       revision
-    case planPath, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt, updatedAt
+    case planPath, planAvailable, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt,
+      updatedAt
     case completedAt, attachments
   }
 
@@ -446,11 +459,12 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
       ?? (completed ? .implementing : Self.legacySection(for: stage))
     status =
       try values.decodeIfPresent(TaskStatus.self, forKey: .status)
-      ?? (completed ? .done : TaskStatus.legacyStatus(for: stage))
+      ?? (completed ? .reviewing : TaskStatus.legacyStatus(for: stage))
     rank = try values.decodeIfPresent(Int.self, forKey: .rank) ?? 0
     priority = try values.decodeIfPresent(TaskPriority.self, forKey: .priority)
     revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
     planPath = try values.decodeIfPresent(String.self, forKey: .planPath)
+    planAvailable = try values.decodeIfPresent(Bool.self, forKey: .planAvailable) ?? false
     latestCodexUpdate = try values.decodeIfPresent(String.self, forKey: .latestCodexUpdate)
     latestCodexUpdateAt = try values.decodeIfPresent(Date.self, forKey: .latestCodexUpdateAt)
     modelOverride = try values.decodeIfPresent(CodexModelConfiguration.self, forKey: .modelOverride)
@@ -475,6 +489,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     try values.encodeIfPresent(priority, forKey: .priority)
     try values.encode(revision, forKey: .revision)
     try values.encodeIfPresent(planPath, forKey: .planPath)
+    try values.encode(planAvailable, forKey: .planAvailable)
     try values.encodeIfPresent(latestCodexUpdate, forKey: .latestCodexUpdate)
     try values.encodeIfPresent(latestCodexUpdateAt, forKey: .latestCodexUpdateAt)
     try values.encodeIfPresent(modelOverride, forKey: .modelOverride)
@@ -754,6 +769,15 @@ public struct Library: Codable, Equatable, Sendable {
       return $0.id.uuidString < $1.id.uuidString
     }
   }
+  public var recentlyCompletedTasks: [WorkItem] {
+    let projectIDs = Set(activeProjects.map(\.id))
+    return tasks.filter { projectIDs.contains($0.projectID) && $0.completed }.sorted {
+      let leftDate = $0.completedAt ?? $0.updatedAt
+      let rightDate = $1.completedAt ?? $1.updatedAt
+      if leftDate != rightDate { return leftDate > rightDate }
+      return $0.id.uuidString < $1.id.uuidString
+    }
+  }
   public func latestRun(for task: UUID) -> AgentRun? {
     runs.filter { $0.taskID == task }.max { $0.createdAt < $1.createdAt }
   }
@@ -828,6 +852,8 @@ public enum Mutation: Sendable {
   case createManualRun(AgentRun)
   case beginExternalRun(AgentRun)
   case editTask(WorkItem, expectedRevision: Int)
+  case approvePlan(UUID, expectedRevision: Int)
+  case setStatus(UUID, TaskStatus, expectedRevision: Int)
   case setTaskAttachments(UUID, [TaskAttachment], expectedRevision: Int)
   case saveNotes(UUID, String, expectedRevision: Int)
   case move(
@@ -1052,6 +1078,30 @@ public enum BoardReducer {
       item.revision += 1
       item.updatedAt = .now
       state.tasks[index] = item
+    case .approvePlan(let id, let expectedRevision):
+      let index = try taskIndex(id, expectedRevision)
+      guard state.tasks[index].status == .planning, state.tasks[index].hasSavedPlan else {
+        throw BoardError.invalid("Only a Planning task with a saved plan can be approved.")
+      }
+      state.tasks[index].status = .planApproved
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
+      state.activity.append(
+        Activity(
+          "Plan approved by you.", projectID: state.tasks[index].projectID, taskID: id))
+    case .setStatus(let id, let status, let expectedRevision):
+      let index = try taskIndex(id, expectedRevision)
+      guard status.isManuallySelectable else {
+        throw BoardError.invalid("Waiting, Error, and Quota are set by the system.")
+      }
+      guard state.tasks[index].status != status else { return state }
+      state.tasks[index].status = status
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
+      state.activity.append(
+        Activity(
+          "Status changed to \(status.title).", projectID: state.tasks[index].projectID,
+          taskID: id))
     case .setTaskAttachments(let id, let attachments, let expectedRevision):
       let index = try taskIndex(id, expectedRevision)
       guard attachments.count <= TaskAttachmentFiles.maximumCount,
@@ -1085,7 +1135,13 @@ public enum BoardReducer {
       }
       item.stage = stage
       item.section = WorkItem.legacySection(for: stage)
-      if !item.completed { item.status = TaskStatus.legacyStatus(for: stage) }
+      if !item.completed && item.status == .triage {
+        switch item.section {
+        case .inbox: item.status = .triage
+        case .planning: item.status = .planning
+        case .implementing: item.status = .planApproved
+        }
+      }
       item.rank =
         (state.tasks.filter { $0.projectID == item.projectID && $0.section == item.section }
           .map(\.rank).max() ?? -1) + 1
@@ -1103,12 +1159,8 @@ public enum BoardReducer {
       state.tasks[index].completed = complete
       if complete {
         if !wasCompleted { state.tasks[index].completedAt = .now }
-        state.tasks[index].status = .done
-        state.tasks[index].section = .implementing
-        state.tasks[index].stage = .review
       } else {
         state.tasks[index].completedAt = nil
-        if state.tasks[index].status == .done { state.tasks[index].status = .review }
       }
       state.tasks[index].revision += 1
       state.tasks[index].updatedAt = .now
@@ -1291,7 +1343,8 @@ public enum BoardReducer {
         let task = state.tasks[taskIndex]
         let status =
           run.status == .succeeded && run.kind == .planning
-          ? TaskStatus.ready : Self.taskStatus(for: run.status, message: run.error ?? run.summary)
+          ? TaskStatus.planning
+          : Self.taskStatus(for: run.status, message: run.error ?? run.summary)
         if !task.completed && task.status != status {
           state.tasks[taskIndex].status = status
           state.tasks[taskIndex].updatedAt = .now
@@ -1324,14 +1377,14 @@ public enum BoardReducer {
       }
       state.runs[index].status = .succeeded
       if !state.tasks[taskIndex].completed {
-        state.tasks[taskIndex].status = run.kind == .planning ? .ready : .review
+        state.tasks[taskIndex].status = run.kind == .planning ? .planning : .reviewing
         state.tasks[taskIndex].revision += 1
         state.tasks[taskIndex].updatedAt = .now
       }
       state.runs[index].updatedAt = .now
       state.runs[index].summary =
         run.kind == .planning
-        ? "Plan saved. Ready for your go-ahead."
+        ? "Plan saved. Approve it when you are ready."
         : run.kind == .implementation
           ? "Implementation finished. Review the changes."
           : "Codex Desktop task finished. Review the changes."
@@ -1350,9 +1403,9 @@ public enum BoardReducer {
     case .needsInput, .interrupted: .waiting
     case .failed:
       message.localizedCaseInsensitiveContains("quota") ? .quota : .error
-    case .succeeded: .review
-    case .readyForHandoff: .ready
-    case .cancelled, .stale, .superseded: .ready
+    case .succeeded: .reviewing
+    case .readyForHandoff: .planApproved
+    case .cancelled, .stale, .superseded: .planApproved
     }
   }
 }
@@ -1396,7 +1449,7 @@ public enum LegacyImport {
       item.completed = value.completed
       if value.completed {
         item.section = .implementing
-        item.status = .done
+        item.status = .reviewing
       }
       item.revision = value.revision
       item.planPath = value.plan?.relativePath

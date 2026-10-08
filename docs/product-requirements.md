@@ -24,14 +24,33 @@
   tasks show “ID pending” until accepted and reconciled by task UUID.
 - As a user, I want three board sections, Inbox, Planning, and Implementing, so
   that the Mac board is simpler and the iPhone can show the same workflow.
-- As a user, I want task status to be separate from section, so that each task
-  shows whether it is in triage, planning, ready, building, waiting, error,
-  quota, review, or done.
+- As a user, I want task status to be separate from section and completion, so
+  that each task shows Triage, Planning, Plan Approved, Building, Waiting,
+  Error, Quota, or Reviewing while completion remains an independent choice.
+- As a user, I want to manually mark a Planning task with a saved plan as Plan
+  Approved from Mac or iPhone, so that I can approve the plan on either device.
+  Approval changes status only and does not move the task or start Codex.
 - As a user, I want each board card to show one colored, icon-led task-status
   badge, while saved-plan details stay in task detail and Codex run history
   stays in task detail and Activity.
-- As a user, I want Waiting, Error, Quota, and Review tasks sorted first in that
-  order within their section, so that attention-needed work is easy to find.
+- As a user, I want to change task status from the card's status menu, its
+  right-click or long-press menu, so that I can correct status without moving
+  the task between board sections. Waiting, Error, and Quota remain system-set.
+- As a user, I want fixed workspace views for Reviewing, In Progress, and
+  Recently Completed, so that common task filters are always one click away.
+  Reviewing includes plans awaiting approval and implementation changes ready
+  for review. In Progress includes tasks with active planning or implementation
+  runs. Recently Completed is ordered and grouped by completion time.
+- As a user, I want Triage gray, Planning and Building bright purple, Plan
+  Approved blue, Reviewing green, and Waiting/Quota/Error yellow/orange/red, so
+  that workflow progress and exceptions are visually distinct.
+- As a user, I want successful implementation to move directly from Building
+  to Reviewing and completion to stay an independent boolean, so that I do not
+  need redundant ready-for-review or Done statuses.
+- As a user, I want MCP moves from Implementing back to Planning rejected, so
+  that automation cannot reverse board progress.
+- As a user, I want Waiting, Error, Quota, and Reviewing tasks sorted first in
+  that order within their section, so that attention-needed work is easy to find.
 - As a user, I want the Mac sections shown as three side-by-side columns with
   vertical task lists and iPhone sections kept as horizontal pages, so each
   device retains a useful board layout.

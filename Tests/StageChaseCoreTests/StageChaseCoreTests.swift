@@ -136,7 +136,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.tasks.first?.id == task.id)
   #expect(replica.tasks.first?.shortID == 23)
   #expect(replica.taskShortIDHighWaterMark == 30)
-  #expect(SyncProtocol.version == 10)
+  #expect(SyncProtocol.version == 12)
 }
 
 @Test func explicitTaskRunPreservesPlacementAndSnapshotsProjectSettings() throws {
@@ -465,6 +465,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let json = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
   #expect(!json.contains("private-repo"))
   #expect(!json.contains("planPath"))
+  #expect(json.contains("hasSavedPlan"))
   let replica = try snapshot.replica()
   #expect(replica.projects[0].id == project.id)
   #expect(replica.projects[0].automationEnabled)
@@ -474,6 +475,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.projects[0].favoriteMakeTargets == project.favoriteMakeTargets)
   #expect(replica.tasks[0].notes == task.notes)
   #expect(replica.tasks[0].planPath == nil)
+  #expect(replica.tasks[0].hasSavedPlan)
   #expect(replica.runs[0].status == run.status)
 
   var legacyObject = try #require(
@@ -502,7 +504,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 10)
+  #expect(decoded.version == 12)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -622,6 +624,67 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(deleted.tasks.isEmpty)
 }
 
+@Test func phonePlanApprovalUsesRevisionCheckedSyncCommand() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Phone approval")
+  _ = try await repository.apply(.createProject(project))
+  var task = WorkItem(projectID: project.id, title: "Approve this plan", stage: .next)
+  task.planPath = "to-do/plan.md"
+  _ = try await repository.apply(.createTask(task))
+  let state = try await repository.syncStateSnapshot()
+  let command = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
+    expectedRevision: task.revision, command: .approvePlan(id: task.id))
+
+  guard case .applied(_, let approved) = try await repository.applyRemote(command) else {
+    Issue.record("Expected revision-matched plan approval to apply")
+    return
+  }
+  let saved = try #require(approved.tasks.first)
+  #expect(saved.status == .planApproved)
+  #expect(saved.section == .planning)
+  #expect(saved.completed == false)
+
+  var stale = command
+  stale.clientSequence = 2
+  guard case .rejected = try await repository.applyRemote(stale) else {
+    Issue.record("A repeated approval must be rejected after status changes")
+    return
+  }
+}
+
+@Test func phoneStatusChangeIsRevisionCheckedAndDoesNotMoveOrCompleteTask() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Phone status")
+  _ = try await repository.apply(.createProject(project))
+  let task = WorkItem(projectID: project.id, title: "Change status", stage: .next)
+  _ = try await repository.apply(.createTask(task))
+  let state = try await repository.syncStateSnapshot()
+  let change = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
+    expectedRevision: task.revision,
+    command: .setTaskStatus(id: task.id, status: .waiting))
+
+  guard case .applied(_, let changed) = try await repository.applyRemote(change) else {
+    Issue.record("Expected revision-matched phone status change to apply")
+    return
+  }
+  let saved = try #require(changed.tasks.first)
+  #expect(saved.status == .waiting)
+  #expect(saved.section == .planning)
+  #expect(saved.completed == false)
+  #expect(saved.revision == 1)
+
+  var stale = change
+  stale.clientSequence = 2
+  let staleResult = try await repository.applyRemote(stale)
+  if case .applied = staleResult {
+    Issue.record("A stale status change must not be applied")
+  }
+  let afterStale = try await repository.load()
+  #expect(afterStale.tasks.first?.status == .waiting)
+}
+
 @Test func phoneDeleteRejectsAnActiveRunAndPreviousProtocolCommandsFailClearly() throws {
   let project = Project(name: "Compatibility")
   let task = WorkItem(projectID: project.id, title: "Busy task")
@@ -641,7 +704,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 10)
+  #expect(snapshot.version == 12)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }
@@ -1151,7 +1214,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.runs.count == 1)
   library = try BoardReducer.apply(.complete(task.id, true, expectedRevision: 2), to: library)
   #expect(library.tasks[0].completed)
-  #expect(library.tasks[0].status == .done)
+  #expect(library.tasks[0].status == .planApproved)
   var activeRun = library.runs[0]
   activeRun.status = .running
   library = try BoardReducer.apply(.updateRun(activeRun), to: library)
@@ -1159,7 +1222,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.tasks[0].stage == .review)
   #expect(library.tasks[0].section == .implementing)
   #expect(library.tasks[0].completed)
-  #expect(library.tasks[0].status == .done)
+  #expect(library.tasks[0].status == .planApproved)
 }
 
 @Test func sameStageConfirmationCanQueueOnlyAfterUserConfirms() throws {
@@ -1212,24 +1275,25 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   library.runs = [run]
   library = try BoardReducer.apply(.finishRun(run.id, planPath: "to-do/plan.md"), to: library)
   #expect(library.tasks[0].stage == .next)
-  #expect(library.tasks[0].status == .ready)
+  #expect(library.tasks[0].status == .planning)
   #expect(!library.tasks[0].completed)
   #expect(library.runs[0].status == .succeeded)
 }
 
 @Test func everyTaskStatusHasAnIconAndSemanticBadgeColor() {
   let styles = TaskStatus.allCases.map(\.badgeStyle)
-  #expect(styles.count == 9)
+  #expect(styles.count == 8)
   #expect(styles.allSatisfy { !$0.symbol.isEmpty })
   #expect(Set(styles.map(\.symbol)).count == TaskStatus.allCases.count)
-  #expect(TaskStatus.ready.badgeStyle.color == .green)
-  #expect(TaskStatus.review.badgeStyle.color == .green)
-  #expect(TaskStatus.done.badgeStyle.symbol == "checkmark.seal.fill")
-  #expect(TaskStatus.done.badgeStyle.color == .blue)
+  #expect(TaskStatus.planning.badgeStyle.color == .purple)
+  #expect(TaskStatus.building.badgeStyle.color == .purple)
+  #expect(TaskStatus.planApproved.badgeStyle.color == .blue)
+  #expect(TaskStatus.reviewing.badgeStyle.color == .green)
+  #expect(TaskStatus.triage.badgeStyle.color == .secondary)
   #expect(TaskStatus.quota.badgeStyle.color == .orange)
 }
 
-@Test func successfulImplementationNeedsExplicitSignoffForDone() throws {
+@Test func successfulImplementationMovesDirectlyToReviewingAndCompletionIsIndependent() throws {
   let project = Project(name: "A")
   let task = WorkItem(projectID: project.id, title: "Implement", stage: .implementation)
   var run = AgentRun(
@@ -1241,13 +1305,56 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   library.runs = [run]
 
   library = try BoardReducer.apply(.finishRun(run.id, planPath: nil), to: library)
-  #expect(library.tasks[0].status == .review)
+  #expect(library.tasks[0].status == .reviewing)
   #expect(!library.tasks[0].completed)
   #expect(library.runs[0].status == .succeeded)
 
   library = try BoardReducer.apply(.complete(task.id, true, expectedRevision: 1), to: library)
-  #expect(library.tasks[0].status == .done)
+  #expect(library.tasks[0].status == .reviewing)
   #expect(library.tasks[0].completed)
+}
+
+@Test func planApprovalRequiresSavedPlanAndChangesOnlyStatus() throws {
+  let project = Project(name: "Approval")
+  var task = WorkItem(projectID: project.id, title: "Plan it", stage: .next)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.approvePlan(task.id, expectedRevision: 0), to: library)
+  }
+
+  task.planPath = "to-do/plan.md"
+  library.tasks[0] = task
+  let approved = try BoardReducer.apply(.approvePlan(task.id, expectedRevision: 0), to: library)
+  #expect(approved.tasks[0].status == .planApproved)
+  #expect(approved.tasks[0].section == .planning)
+  #expect(approved.tasks[0].stage == .next)
+  #expect(!approved.tasks[0].completed)
+  #expect(approved.tasks[0].revision == 1)
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.approvePlan(task.id, expectedRevision: 0), to: approved)
+  }
+}
+
+@Test func manualStatusChangeLeavesSectionAndCompletionAlone() throws {
+  let project = Project(name: "Manual status")
+  var task = WorkItem(projectID: project.id, title: "Change status", stage: .next)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+
+  library = try BoardReducer.apply(
+    .setStatus(task.id, .reviewing, expectedRevision: task.revision), to: library)
+  task = try #require(library.tasks.first)
+  #expect(task.status == .reviewing)
+  #expect(task.section == .planning)
+  #expect(!task.completed)
+  #expect(task.revision == 1)
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.setStatus(task.id, .error, expectedRevision: 0), to: library)
+  }
 }
 
 @Test func retryPreservesSessionAndDoesNotDuplicateRun() throws {
@@ -1428,6 +1535,27 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
         .utf8))
   #expect(task.modelOverride == nil)
   #expect(task.completedAt == nil)
+}
+
+@Test func legacyDoneStatusDecodesWithoutChangingCompletionFlag() throws {
+  let payload: [String: Any] = [
+    "id": "00000000-0000-0000-0000-000000000010",
+    "projectID": "00000000-0000-0000-0000-000000000001",
+    "title": "Legacy", "notes": "", "stage": "review", "rank": 0,
+    "revision": 3, "createdAt": 0, "updatedAt": 0, "status": "done", "completed": true,
+  ]
+  let done = try JSONDecoder().decode(
+    WorkItem.self, from: JSONSerialization.data(withJSONObject: payload))
+  #expect(done.status == .reviewing)
+  #expect(done.completed)
+  #expect(done.revision == 3)
+
+  let ready = try JSONDecoder().decode(
+    TaskStatus.self, from: JSONEncoder().encode("ready"))
+  let review = try JSONDecoder().decode(
+    TaskStatus.self, from: JSONEncoder().encode("review"))
+  #expect(ready == .planApproved)
+  #expect(review == .reviewing)
 }
 
 @Test func completedTaskTimestampTracksTransitionsAndProjectCommitRecency() throws {
@@ -1675,7 +1803,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   }
 }
 
-@Test func specialStatusesSortFirstAndUserSignoffMarksDone() throws {
+@Test func specialStatusesSortFirstAndCompletionDoesNotReplaceStatus() throws {
   let project = Project(name: "Statuses")
   var normal = WorkItem(projectID: project.id, title: "Normal", stage: .implementation)
   normal.updatedAt = Date(timeIntervalSince1970: 10)
@@ -1701,7 +1829,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   library = try BoardReducer.apply(.complete(review.id, true, expectedRevision: 0), to: library)
   let done = try #require(library.tasks.first(where: { $0.id == review.id }))
   #expect(done.completed)
-  #expect(done.status == .done)
+  #expect(done.status == .reviewing)
   #expect(done.section == .implementing)
 }
 

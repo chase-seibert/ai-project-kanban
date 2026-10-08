@@ -1,7 +1,27 @@
 # Changelog
 
+## 2026-10-08
+
+- Add manual status changes to task-card context menus, clickable status badges,
+  and task detail on Mac and iPhone. Add a persistent status filter to Recent
+  Tasks. Sync phone status changes with revision checks, and share only plan
+  availability metadata so a saved Mac path is not exposed to the phone.
+- Advance the strict paired sync protocol to version 12.
+- Keep Waiting, Error, and Quota out of manual status choices, and remove the
+  duplicate section and status row from task detail while retaining completion.
+- Replace the Recent Tasks status selector with fixed Reviewing, In Progress,
+  and Recently Completed workspace views. Reviewing combines pending plan
+  approval with code review; In Progress requires a queued or running plan/build
+  run; Recently Completed sorts by completion time.
+
 ## 2026-10-07
 
+- Simplify task statuses: planning remains Planning until manually approved,
+  Plan Approved also means ready, and successful implementation moves directly
+  to Reviewing. Keep completion as an independent boolean. Add the manual plan
+  approval action to Mac and iPhone task detail, synchronize phone approvals
+  with revision checks, distinguish status colors, and reject MCP moves from
+  Implementing back to Planning. Advance the strict sync protocol to version 11.
 - Defer the iPhone navigation reset after the selected project changes so
   deleting its active row does not update the project list and navigation path
   in the same UI transaction.

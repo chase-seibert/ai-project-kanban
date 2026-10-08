@@ -150,26 +150,52 @@ IDs and high-water mark; an offline phone task has no number until Mac
 acceptance, then converges by UUID. Sync protocol v9 carries this contract.
 
 `WorkItem.section` stores Inbox, Planning, or Implementing independently from
-`WorkItem.status`. The status flow is Inbox/Triage → Planning → Ready → Building
-→ Review → Done. Waiting and Error represent blocked or failed runs; Quota is
-selected for quota-specific failure messages. Runner updates derive Building,
-Waiting, Error, and Quota from `AgentRun`; a successful plan sets Ready, and a
-successful implementation sets Review. Only an explicit user completion action
-sets Done and the legacy `completed` flag. Waiting, Error, Quota, and Review sort
-first within a section in that order, followed by priority and stable rank.
-The shared board card renders one status capsule from an exhaustive
-`TaskStatusBadgeStyle` mapping. Saved-plan details and Codex run outcomes remain
-in task detail, with run history also in Activity, rather than appearing on cards.
+`WorkItem.status`. Active statuses are Triage, Planning, Plan Approved, Building,
+Waiting, Error, Quota, and Reviewing. A successful planning run saves the plan
+but leaves the task in Planning. The user can explicitly mark a Planning task
+with a saved plan as Plan Approved from Mac or iPhone; this status also means
+ready for implementation and does not move its section or start Codex. A
+revision-checked phone command carries this status change to the Mac. Starting
+Codex derives Building from the run; a successful implementation sets Reviewing
+immediately. Waiting and Error represent blocked or failed runs; Quota is
+selected for quota-specific failure messages. The `completed` boolean is
+independent from status and section; completion and reopening do not replace the
+status. Legacy `done` status values decode as Reviewing while preserving the
+completion flag. The shared board card renders one status capsule from an
+exhaustive `TaskStatusBadgeStyle` mapping: Triage is gray, Planning and Building
+share bright purple, Plan Approved is blue, and Reviewing is green. Waiting,
+Quota, and Error use yellow, orange, and red. Waiting, Error, Quota, and
+Reviewing sort first within a section in that order, followed by priority and
+stable rank. Saved-plan details and Codex run outcomes remain in task detail,
+with run history also in Activity, rather than appearing on cards.
+
+The direct MCP `move_task` operation rejects a move when a task is in
+Implementing and the destination stage is `.next` or `.planned` (Planning). It
+returns a validation error before applying the move, recording activity, or
+considering any Codex invocation. User-controlled board moves remain separate.
 
 Legacy `stage` values remain encoded for the local MCP and older phone clients:
 Inbox maps to Inbox/Triage; Next maps to Planning/Planning; Planned maps to
-Planning/Ready; Implementation maps to Implementing/Ready; Review maps to
-Implementing/Review. Decoding old JSON payloads fills the new fields from this
-mapping without changing task identity, revision, rank, completion, plan, or run
-history. Sync snapshots carry optional section/status values so older snapshot
-readers can ignore them and newer readers can map old snapshots. The Mac board
+Planning/Plan Approved; Implementation maps to Implementing/Plan Approved;
+Review maps to Implementing/Reviewing. Decoding old JSON payloads maps legacy
+`ready`, `review`, and `done` status values to Plan Approved or Reviewing without
+changing the separate completion flag. Sync protocol v11 adds revision-checked
+phone plan approval plus saved-plan availability metadata without exposing the
+Mac filesystem path. Sync protocol v12 adds revision-checked task status changes
+from iPhone. Older sync protocol versions are rejected. The Mac board
 presents the sections as three side-by-side columns with independently
 vertical-scrolling task lists; iPhone keeps the three sections horizontally paged.
+
+Task status can be changed independently of section and completion from the
+task-card context menu or status badge menu. Waiting, Error, and Quota remain
+system-set and cannot be selected manually. Task detail omits section and status
+because the selected board column and card already show them. The Workspace
+sidebar provides fixed Reviewing, In Progress, and Recently Completed views.
+Reviewing combines saved, unapproved plans (Planning with no active run) with
+implementation changes ready for review (Reviewing). In Progress includes
+Planning and Building tasks only while their latest run is queued or running.
+Recently Completed filters by the independent completion flag and groups by
+`completedAt`, newest first.
 
 Mac task detail also has a task-scoped Refresh action. It rereads the authoritative
 SwiftData library without crash recovery or writes, then rechecks the attached

@@ -500,6 +500,19 @@ struct TaskCard: View {
       }
     }
     Divider()
+    Section("Change status") {
+      ForEach(TaskStatus.allCases.filter(\.isManuallySelectable)) { status in
+        Button {
+          setStatus(status)
+        } label: {
+          Label(
+            status.title,
+            systemImage: status == item.status ? "checkmark.circle.fill" : status.badgeStyle.symbol)
+        }
+        .disabled(status == item.status)
+      }
+    }
+    Divider()
     Button(item.completed ? "Reopen task" : "Mark complete", systemImage: "checkmark.circle") {
       Task {
         await model.perform(.complete(item.id, !item.completed, expectedRevision: item.revision))
@@ -585,35 +598,32 @@ struct TaskCard: View {
           }
         #endif
 
-        Button {
-          openDetails()
-        } label: {
-          VStack(alignment: .leading, spacing: 10) {
-            TaskStatusBadge(status: item.status)
-            if !item.notes.isEmpty {
+        VStack(alignment: .leading, spacing: 10) {
+          TaskStatusMenu(item: item)
+          if !item.notes.isEmpty {
+            Button {
+              openDetails()
+            } label: {
               Text(item.notes).stageFont(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if item.completed {
-              Label("Completed by you", systemImage: "checkmark.circle.fill").stageFont(.caption)
-                .foregroundStyle(.green)
-            }
-            if showsLiveActivity, let run = latestRun {
-              HStack(spacing: 6) {
-                ProgressView().controlSize(.small).scaleEffect(0.72)
-                Text(run.latestMessage ?? run.summary)
-                  .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
-              }
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .accessibilityElement(children: .combine)
-              .accessibilityLabel("Codex is running. \(run.latestMessage ?? run.summary)")
-            }
+            .buttonStyle(.plain)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .contentShape(Rectangle())
+          if item.completed {
+            Label("Completed by you", systemImage: "checkmark.circle.fill").stageFont(.caption)
+              .foregroundStyle(.secondary)
+          }
+          if showsLiveActivity, let run = latestRun {
+            HStack(spacing: 6) {
+              ProgressView().controlSize(.small).scaleEffect(0.72)
+              Text(run.latestMessage ?? run.summary)
+                .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Codex is running. \(run.latestMessage ?? run.summary)")
+          }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(
-          "Open task details for \(item.title)\(projectName.map { ", \($0)" } ?? "")")
       }
     }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
       .background(
@@ -632,7 +642,7 @@ struct TaskCard: View {
   }
 
   @ViewBuilder private var planIndicator: some View {
-    if item.planPath != nil {
+    if item.hasSavedPlan {
       Image(systemName: "paperclip")
         .stageFont(.caption, weight: .medium)
         .foregroundStyle(Color.blue.opacity(0.72))
@@ -658,6 +668,12 @@ struct TaskCard: View {
     #else
       onOpenTask?(item.id)
     #endif
+  }
+
+  private func setStatus(_ status: TaskStatus) {
+    Task {
+      await model.perform(.setStatus(item.id, status, expectedRevision: item.revision))
+    }
   }
 
   private func beginTitleEditing() {
@@ -725,13 +741,43 @@ struct TaskStatusBadge: View {
   private func color(for color: TaskStatusBadgeColor) -> Color {
     switch color {
     case .secondary: .secondary
-    case .purple: .purple
-    case .blue: .blue
+    case .purple: Color(red: 168.0 / 255, green: 85.0 / 255, blue: 247.0 / 255)
+    case .blue: Color(red: 59.0 / 255, green: 130.0 / 255, blue: 246.0 / 255)
     case .indigo: .indigo
-    case .orange: .orange
-    case .red: .red
-    case .green: .green
+    case .orange: Color(red: 249.0 / 255, green: 115.0 / 255, blue: 22.0 / 255)
+    case .yellow: Color(red: 234.0 / 255, green: 179.0 / 255, blue: 8.0 / 255)
+    case .red: Color(red: 239.0 / 255, green: 68.0 / 255, blue: 68.0 / 255)
+    case .green: Color(red: 34.0 / 255, green: 197.0 / 255, blue: 94.0 / 255)
     }
+  }
+}
+
+struct TaskStatusMenu: View {
+  @Environment(AppModel.self) private var model
+  let item: WorkItem
+
+  var body: some View {
+    Menu {
+      ForEach(TaskStatus.allCases.filter(\.isManuallySelectable)) { status in
+        Button {
+          Task {
+            await model.perform(.setStatus(item.id, status, expectedRevision: item.revision))
+          }
+        } label: {
+          Label(
+            status.title,
+            systemImage: status == item.status
+              ? "checkmark.circle.fill" : status.badgeStyle.symbol)
+        }
+        .disabled(status == item.status)
+      }
+    } label: {
+      TaskStatusBadge(status: item.status)
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Change status, currently \(item.status.title)")
+    .accessibilityHint("Choose a task status")
   }
 }
 

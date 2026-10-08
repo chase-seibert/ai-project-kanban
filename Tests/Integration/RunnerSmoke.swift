@@ -14,6 +14,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   @MainActor static func main() async throws {
     try await testProjectDeletionSelection()
     try await testMCPCompletionCannotBeChangedByLegacyTool()
+    try await testMCPRejectsImplementingMovesBackToPlanning()
     try await testMovePersistsWhenRunnerSetupFails()
     try await testGitService()
     try await testMakeTargetService()
@@ -549,6 +550,40 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
       savedTask.revision == task.revision
     else { throw BoardError.invalid("A legacy MCP completion call changed the task") }
     print("PASS: MCP no longer advertises or accepts the legacy completion write")
+  }
+
+  @MainActor static func testMCPRejectsImplementingMovesBackToPlanning() async throws {
+    let repository = try LibraryRepository(inMemory: true)
+    let project = Project(name: "MCP stage guard")
+    _ = try await repository.apply(.createProject(project))
+    let task = WorkItem(
+      projectID: project.id, title: "Keep implementation forward", stage: .implementation)
+    _ = try await repository.apply(.createTask(task))
+    let server = MCPServer(repository: repository)
+    let initial = try await repository.load()
+
+    for stage in [WorkflowStage.next, .planned] {
+      do {
+        _ = try await server.callTool(
+          "move_task",
+          arguments: [
+            "project_id": project.id.uuidString, "task_id": task.id.uuidString,
+            "operation_id": UUID().uuidString, "expected_revision": task.revision,
+            "stage": stage.rawValue,
+          ])
+        throw BoardError.invalid("MCP moved an Implementing task back to Planning")
+      } catch let error as BoardError {
+        guard case .invalid(let message) = error,
+          message.contains("cannot move a task from Implementing back to Planning")
+        else { throw error }
+      }
+      let saved = try await repository.load()
+      guard let savedTask = saved.tasks.first(where: { $0.id == task.id }),
+        savedTask.section == .implementing, savedTask.revision == task.revision,
+        saved.activity.count == initial.activity.count, saved.runs == initial.runs
+      else { throw BoardError.invalid("Rejected MCP move changed task state or activity") }
+    }
+    print("PASS: MCP rejects both legacy Planning aliases without changing task state")
   }
 
   @MainActor static func testMovePersistsWhenRunnerSetupFails() async throws {

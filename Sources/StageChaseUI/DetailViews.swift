@@ -708,6 +708,7 @@ struct TaskDetail: View {
   @State private var notesSaveTask: Task<Void, Never>?
   @State private var notesSaveMessage: String?
   @State private var deleting = false
+  @State private var approvingPlan = false
   @State private var contextExpanded = false
   @State private var moreDetailsExpanded = false
   @State private var titleExpanded = false
@@ -758,6 +759,14 @@ struct TaskDetail: View {
   #else
     private var usesPlanFeedbackField: Bool { false }
   #endif
+  private var canApprovePlan: Bool {
+    guard let item, item.status == .planning else { return false }
+    #if os(macOS)
+      return hasReadableAttachedPlan
+    #else
+      return item.hasSavedPlan
+    #endif
+  }
   private var taskRuns: [AgentRun] {
     TaskRunDisclosureState.ordered(model.library.runs.filter { $0.taskID == taskID })
   }
@@ -876,7 +885,10 @@ struct TaskDetail: View {
                       VStack(alignment: .leading, spacing: 8) {
                         Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(
                           .secondary)
-                        Text(item.planPath ?? "No saved plan").stageFont(.callout).foregroundStyle(
+                        Text(
+                          item.planPath
+                            ?? (item.hasSavedPlan ? "Saved plan available on Mac" : "No saved plan")
+                        ).stageFont(.callout).foregroundStyle(
                           .secondary
                         )
                         .disabled(model.planFeedbackInFlight.contains(taskID))
@@ -1191,8 +1203,6 @@ struct TaskDetail: View {
           .buttonStyle(.borderless).stageFont(.caption)
       }
       HStack(spacing: 6) {
-        Text(item.section.title).foregroundStyle(item.section.color)
-        Text("· \(item.status.title)").foregroundStyle(.secondary)
         Spacer(minLength: 0)
         if item.completed {
           Button("Reopen", systemImage: "arrow.uturn.backward") { setTaskCompleted(false) }
@@ -1202,6 +1212,17 @@ struct TaskDetail: View {
             .buttonStyle(.bordered)
         }
       }.stageFont(.caption)
+      if canApprovePlan {
+        Button {
+          approvePlan(item)
+        } label: {
+          Label("Mark plan approved", systemImage: "checkmark.circle.fill")
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Color(red: 59.0 / 255, green: 130.0 / 255, blue: 246.0 / 255))
+        .disabled(approvingPlan)
+        .accessibilityHint("Approves the saved plan without moving the task or starting Codex.")
+      }
       #if os(iOS)
         VStack(alignment: .leading, spacing: 8) {
           Button {
@@ -1501,6 +1522,15 @@ struct TaskDetail: View {
         self.draft = self.item
         edited = false
       }
+    }
+  }
+
+  private func approvePlan(_ item: WorkItem) {
+    guard !approvingPlan else { return }
+    approvingPlan = true
+    Task {
+      _ = await model.perform(.approvePlan(item.id, expectedRevision: item.revision))
+      approvingPlan = false
     }
   }
 

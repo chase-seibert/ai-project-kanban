@@ -258,11 +258,19 @@ import Network
     case "move_task":
       let projectID = try uuid("project_id", arguments)
       let taskID = try uuid("task_id", arguments)
-      guard library.tasks.contains(where: { $0.id == taskID && $0.projectID == projectID }) else {
+      guard
+        let task = library.tasks.first(where: {
+          $0.id == taskID && $0.projectID == projectID
+        })
+      else {
         throw BoardError.missing
       }
       let revision = try integer("expected_revision", arguments)
       let stage = try stageFilter(arguments["stage"]).unwrapStage()
+      let destinationIsPlanning = stage == .next || stage == .planned
+      guard !(task.section == .implementing && destinationIsPlanning) else {
+        throw BoardError.invalid("MCP cannot move a task from Implementing back to Planning.")
+      }
       let operationID = try uuid("operation_id", arguments)
       let result = try await commit(
         .move(taskID, stage, expectedRevision: revision), operationID: operationID,
@@ -484,7 +492,7 @@ extension MCPServer {
       ]),
     tool(
       "move_task",
-      "Move a task between the five existing stages. Requires its current revision; this does not start Codex.",
+      "Move a task between the five existing stages. Requires its current revision; this does not start Codex. MCP cannot move tasks from Implementing back to Planning.",
       [
         "type": "object",
         "properties": [

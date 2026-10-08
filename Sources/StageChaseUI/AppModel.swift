@@ -5,6 +5,28 @@ import UniformTypeIdentifiers
   import AppKit
 #endif
 
+enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
+  case reviewing
+  case inProgress
+  case recentlyCompleted
+
+  var id: String { rawValue }
+  var title: String {
+    switch self {
+    case .reviewing: "Reviewing"
+    case .inProgress: "In Progress"
+    case .recentlyCompleted: "Recently Completed"
+    }
+  }
+  var symbol: String {
+    switch self {
+    case .reviewing: "eye"
+    case .inProgress: "hammer"
+    case .recentlyCompleted: "checkmark.circle"
+    }
+  }
+}
+
 @MainActor @Observable final class AppModel {
   #if os(macOS)
     static let defaultPlanFormatPrompt = """
@@ -51,7 +73,7 @@ import UniformTypeIdentifiers
   var search = ""
   var showCompleted = false
   var showActivity = false
-  var showsRecentTasks = false
+  var workspaceTaskView: WorkspaceTaskPreset?
   var pendingMove: PendingMove?
   private var moveAfterSheet: PendingMove?
   var runnerMessage = "Task runs open in Codex Desktop when automatic invocation is off."
@@ -731,6 +753,12 @@ import UniformTypeIdentifiers
           .syncEditTask(let item, let expectedRevision):
           wireCommand = .editTask(id: item.id, title: item.title, notes: item.notes)
           revision = expectedRevision
+        case .approvePlan(let id, let expectedRevision):
+          wireCommand = .approvePlan(id: id)
+          revision = expectedRevision
+        case .setStatus(let id, let status, let expectedRevision):
+          wireCommand = .setTaskStatus(id: id, status: status)
+          revision = expectedRevision
         case .saveNotes(let id, let notes, let expectedRevision):
           guard let item = library.tasks.first(where: { $0.id == id }) else {
             throw BoardError.missing
@@ -852,10 +880,16 @@ import UniformTypeIdentifiers
     selectedProjectID = project
     selectedTaskID = nil
     boardSelectedTaskID = nil
-    showsRecentTasks = false
+    workspaceTaskView = nil
     search = ""
     preferences.set(project?.uuidString, forKey: "selectedProject")
     if let project { markProjectChangesRead(project) }
+  }
+
+  func showWorkspaceTasks(_ preset: WorkspaceTaskPreset) {
+    workspaceTaskView = preset
+    selectedTaskID = nil
+    showActivity = false
   }
 
   private func reconcileProjectSelection() {
@@ -1217,7 +1251,7 @@ import UniformTypeIdentifiers
     let stage = section.compatibilityStage
     var item = WorkItem(projectID: selectedProjectID, title: title, stage: stage)
     item.section = section
-    item.status = section == .inbox ? .triage : (section == .planning ? .planning : .ready)
+    item.status = section == .inbox ? .triage : (section == .planning ? .planning : .planApproved)
     item.modelOverride = modelOverride
     if !isConnectedPhone, autoInvokeCodex, selectedProject?.automationEnabled == true,
       [.planning, .implementing].contains(section)

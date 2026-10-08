@@ -31,8 +31,8 @@ struct RootView: View {
               .navigationSplitViewColumnWidth(min: 200, ideal: 225, max: 310)
           } detail: {
             HStack(spacing: 0) {
-              if model.showsRecentTasks {
-                RecentTasksView()
+              if let workspaceTaskView = model.workspaceTaskView {
+                WorkspaceTasksView(preset: workspaceTaskView)
               } else if model.selectedProject != nil {
                 BoardView()
               } else {
@@ -316,7 +316,7 @@ struct RootView: View {
         if arguments.contains("--preview-task"), var task = model.library.tasks.first {
           let completedPreview = !arguments.contains("--preview-active-task")
           task.section = .implementing
-          task.status = completedPreview ? .done : .ready
+          task.status = completedPreview ? .reviewing : .planApproved
           task.completed = completedPreview
           task.completedAt = completedPreview ? .now : nil
           model.library.tasks[0] = task
@@ -505,19 +505,20 @@ struct ProjectSidebar: View {
       }
       #if os(macOS)
         Section("Workspace") {
-          Button {
-            model.showsRecentTasks = true
-            model.selectedTaskID = nil
-            model.showActivity = false
-          } label: {
-            Label("Recent Tasks", systemImage: "clock.arrow.circlepath")
-              .foregroundStyle(model.showsRecentTasks ? Color.accentColor : .primary)
+          ForEach(WorkspaceTaskPreset.allCases) { preset in
+            Button {
+              model.showWorkspaceTasks(preset)
+            } label: {
+              Label(preset.title, systemImage: preset.symbol)
+                .foregroundStyle(model.workspaceTaskView == preset ? Color.accentColor : .primary)
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(
+              model.workspaceTaskView == preset ? Color.accentColor.opacity(0.1) : .clear)
+            .accessibilityIdentifier("workspace-\(preset.rawValue)-navigation")
           }
-          .buttonStyle(.plain)
-          .listRowBackground(model.showsRecentTasks ? Color.accentColor.opacity(0.1) : .clear)
-          .accessibilityIdentifier("recent-tasks-navigation")
           Button {
-            model.showsRecentTasks = false
+            model.workspaceTaskView = nil
             model.selectedTaskID = nil
             model.showActivity.toggle()
           } label: {
@@ -609,10 +610,34 @@ struct DeletedProjectsView: View {
   }
 }
 
-struct RecentTasksView: View {
+struct WorkspaceTasksView: View {
   @Environment(AppModel.self) private var model
   @State private var editingTaskID: UUID?
+  let preset: WorkspaceTaskPreset
   private let columnLimit = 3
+
+  private var sourceTasks: [WorkItem] {
+    switch preset {
+    case .reviewing:
+      model.library.recentTasks.filter {
+        guard !$0.completed else { return false }
+        if $0.status == .reviewing { return true }
+        guard $0.status == .planning, $0.hasSavedPlan else { return false }
+        return !hasActiveRun($0)
+      }
+    case .inProgress:
+      model.library.recentTasks.filter { item in
+        !item.completed && [.planning, .building].contains(item.status) && hasActiveRun(item)
+      }
+    case .recentlyCompleted:
+      model.library.recentlyCompletedTasks
+    }
+  }
+
+  private func hasActiveRun(_ item: WorkItem) -> Bool {
+    guard let run = model.library.latestRun(for: item.id) else { return false }
+    return [.queued, .running].contains(run.status)
+  }
 
   private struct DayGroup: Identifiable {
     let day: Date
@@ -622,7 +647,7 @@ struct RecentTasksView: View {
   }
 
   private var recentItems: [(item: WorkItem, project: Project)] {
-    model.library.recentTasks.compactMap { item in
+    sourceTasks.compactMap { item in
       guard let project = model.library.projects.first(where: { $0.id == item.projectID }) else {
         return nil
       }
@@ -636,10 +661,14 @@ struct RecentTasksView: View {
     }
   }
 
+  private func activityDate(for item: WorkItem) -> Date {
+    preset == .recentlyCompleted ? (item.completedAt ?? item.updatedAt) : item.updatedAt
+  }
+
   private var dayGroups: [DayGroup] {
     let calendar = Calendar.autoupdatingCurrent
     let entriesByDay = Dictionary(grouping: recentItems) {
-      calendar.startOfDay(for: $0.item.updatedAt)
+      calendar.startOfDay(for: activityDate(for: $0.item))
     }
     return entriesByDay.keys.sorted(by: >).compactMap { day in
       guard let entries = entriesByDay[day] else { return nil }
@@ -658,8 +687,10 @@ struct RecentTasksView: View {
     -> [[(item: WorkItem, project: Project)]]
   {
     let ordered = entries.sorted {
-      if $0.item.updatedAt != $1.item.updatedAt {
-        return $0.item.updatedAt < $1.item.updatedAt
+      let leftDate = activityDate(for: $0.item)
+      let rightDate = activityDate(for: $1.item)
+      if leftDate != rightDate {
+        return leftDate < rightDate
       }
       return $0.item.id.uuidString < $1.item.id.uuidString
     }
@@ -719,7 +750,7 @@ struct RecentTasksView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(alignment: .firstTextBaseline) {
-        Text("Recent Tasks").stageFont(.largeTitle, weight: .bold)
+        Text(preset.title).stageFont(.largeTitle, weight: .bold)
         Spacer()
         Text("\(recentItems.count)").stageFont(.caption).monospacedDigit()
           .foregroundStyle(.secondary)
@@ -729,12 +760,9 @@ struct RecentTasksView: View {
 
       if recentItems.isEmpty {
         ContentUnavailableView(
-          model.search.isEmpty ? "No recent tasks" : "No matching tasks",
-          systemImage: "clock.arrow.circlepath",
-          description: Text(
-            model.search.isEmpty
-              ? "Tasks from all projects will appear here as they are updated."
-              : "Try another search."))
+          emptyTitle,
+          systemImage: preset.symbol,
+          description: Text(emptyDescription))
       } else {
         ScrollView {
           LazyVStack(alignment: .leading, spacing: 24) {
@@ -774,6 +802,22 @@ struct RecentTasksView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+
+  private var emptyTitle: String {
+    switch preset {
+    case .reviewing: model.search.isEmpty ? "Nothing to review" : "No matching tasks"
+    case .inProgress: model.search.isEmpty ? "No active planning or build runs" : "No matching tasks"
+    case .recentlyCompleted: model.search.isEmpty ? "No recently completed tasks" : "No matching tasks"
+    }
+  }
+
+  private var emptyDescription: String {
+    switch preset {
+    case .reviewing: "Plans awaiting approval and finished code changes appear here."
+    case .inProgress: "Tasks with an active planning or implementation run appear here."
+    case .recentlyCompleted: "Completed tasks are grouped by the date they were completed."
+    }
   }
 }
 

@@ -3,6 +3,8 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 12 adds revision-checked status changes from a paired phone.
+  // Version 11 adds revision-checked plan approval and plan-availability metadata.
   // Version 10 adds reversible project deletion with lifecycle revisions.
   // Version 9 adds library-wide task short IDs and the allocator high-water mark.
   // Version 8 adds task attachment metadata and explicit attachment file requests.
@@ -10,7 +12,7 @@ public enum SyncProtocol {
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 10
+  public static let version = 12
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -65,6 +67,8 @@ public enum SyncCommand: Codable, Equatable, Sendable {
   case setProjectDeleted(id: UUID, deleted: Bool)
   case createTask(id: UUID, projectID: UUID, title: String, notes: String, stage: WorkflowStage)
   case editTask(id: UUID, title: String, notes: String)
+  case approvePlan(id: UUID)
+  case setTaskStatus(id: UUID, status: TaskStatus)
   case setTaskAttachments(id: UUID, attachments: [TaskAttachment])
   case moveTask(id: UUID, stage: WorkflowStage)
   case reorderTask(id: UUID, beforeID: UUID, orderDigest: String)
@@ -183,6 +187,19 @@ public enum SyncCommandValidator {
       item.title = title
       item.notes = notes
       return .syncEditTask(item, expectedRevision: revision)
+    case .approvePlan(let id):
+      guard let revision = envelope.expectedRevision,
+        let existing = library.tasks.first(where: { $0.id == id })
+      else { throw BoardError.missing }
+      guard existing.status == .planning, existing.planPath != nil else {
+        throw BoardError.invalid("Only a Planning task with a saved plan can be approved.")
+      }
+      return .approvePlan(id, expectedRevision: revision)
+    case .setTaskStatus(let id, let status):
+      guard let revision = envelope.expectedRevision,
+        library.tasks.contains(where: { $0.id == id })
+      else { throw BoardError.missing }
+      return .setStatus(id, status, expectedRevision: revision)
     case .setTaskAttachments(let id, let attachments):
       guard let revision = envelope.expectedRevision,
         library.tasks.contains(where: { $0.id == id })
@@ -239,6 +256,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   public var stage: WorkflowStage
   public var section: WorkflowSection?
   public var status: TaskStatus?
+  public var hasSavedPlan: Bool
   public var rank: Int
   public var completed: Bool
   public var priority: TaskPriority?
@@ -256,6 +274,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
     stage = item.stage
     section = item.section
     status = item.status
+    hasSavedPlan = item.hasSavedPlan
     rank = item.rank
     completed = item.completed
     priority = item.priority
@@ -266,7 +285,8 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority,
+    case id, shortID, projectID, title, notes, stage, section, status, hasSavedPlan, rank,
+      completed, priority,
       revision
     case attachments, createdAt, updatedAt
   }
@@ -281,6 +301,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
     stage = try values.decode(WorkflowStage.self, forKey: .stage)
     section = try values.decodeIfPresent(WorkflowSection.self, forKey: .section)
     status = try values.decodeIfPresent(TaskStatus.self, forKey: .status)
+    hasSavedPlan = try values.decodeIfPresent(Bool.self, forKey: .hasSavedPlan) ?? false
     rank = try values.decode(Int.self, forKey: .rank)
     completed = try values.decode(Bool.self, forKey: .completed)
     priority = try values.decodeIfPresent(TaskPriority.self, forKey: .priority)
@@ -439,7 +460,9 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       var item = WorkItem(projectID: $0.projectID, title: $0.title, stage: $0.stage)
       item.section =
         $0.section ?? ($0.completed ? .implementing : WorkItem.legacySection(for: $0.stage))
-      item.status = $0.status ?? ($0.completed ? .done : TaskStatus.legacyStatus(for: $0.stage))
+      item.status =
+        $0.status ?? ($0.completed ? .reviewing : TaskStatus.legacyStatus(for: $0.stage))
+      item.planAvailable = $0.hasSavedPlan
       item.id = $0.id
       item.shortID = $0.shortID
       item.notes = $0.notes
