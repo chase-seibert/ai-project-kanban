@@ -618,16 +618,18 @@ struct WorkspaceTasksView: View {
 
   private var sourceTasks: [WorkItem] {
     switch preset {
+    case .planApproved:
+      model.library.recentTasks.filter { !$0.completed && $0.status == .planApproved }
+    case .inProgress:
+      model.library.recentTasks.filter { item in
+        !item.completed && [.planning, .building].contains(item.status) && hasActiveRun(item)
+      }
     case .reviewing:
       model.library.recentTasks.filter {
         guard !$0.completed else { return false }
         if $0.status == .reviewing { return true }
         guard $0.status == .planning, $0.hasSavedPlan else { return false }
         return !hasActiveRun($0)
-      }
-    case .inProgress:
-      model.library.recentTasks.filter { item in
-        !item.completed && [.planning, .building].contains(item.status) && hasActiveRun(item)
       }
     case .recentlyCompleted:
       model.library.recentlyCompletedTasks
@@ -728,6 +730,11 @@ struct WorkspaceTasksView: View {
       result.append(Array(ordered[start..<end]))
       start = end
     }
+
+    // Keep three equal-width slots even when this day has only one or two cards.
+    while result.count < columnLimit {
+      result.append([])
+    }
     return result
   }
 
@@ -806,16 +813,18 @@ struct WorkspaceTasksView: View {
 
   private var emptyTitle: String {
     switch preset {
-    case .reviewing: model.search.isEmpty ? "Nothing to review" : "No matching tasks"
+    case .planApproved: model.search.isEmpty ? "No approved plans ready to start" : "No matching tasks"
     case .inProgress: model.search.isEmpty ? "No active planning or build runs" : "No matching tasks"
+    case .reviewing: model.search.isEmpty ? "Nothing to review" : "No matching tasks"
     case .recentlyCompleted: model.search.isEmpty ? "No recently completed tasks" : "No matching tasks"
     }
   }
 
   private var emptyDescription: String {
     switch preset {
-    case .reviewing: "Plans awaiting approval and finished code changes appear here."
+    case .planApproved: "Plans approved for implementation across your projects appear here."
     case .inProgress: "Tasks with an active planning or implementation run appear here."
+    case .reviewing: "Plans awaiting approval and finished code changes appear here."
     case .recentlyCompleted: "Completed tasks are grouped by the date they were completed."
     }
   }

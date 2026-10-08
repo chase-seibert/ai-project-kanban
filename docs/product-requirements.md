@@ -36,11 +36,14 @@
 - As a user, I want to change task status from the card's status menu, its
   right-click or long-press menu, so that I can correct status without moving
   the task between board sections. Waiting, Error, and Quota remain system-set.
-- As a user, I want fixed workspace views for Reviewing, In Progress, and
-  Recently Completed, so that common task filters are always one click away.
+- As a user, I want fixed workspace views for Plan Approved, In Progress,
+  Reviewing, and Recently Completed, so that common task filters are always one
+  click away. Plan Approved includes ready-to-execute tasks across projects.
   Reviewing includes plans awaiting approval and implementation changes ready
   for review. In Progress includes tasks with active planning or implementation
-  runs. Recently Completed is ordered and grouped by completion time.
+  runs. Recently Completed is ordered and grouped by completion time. Workspace
+  views keep cards in three equal-width columns, leaving unused columns empty
+  when a day has fewer than three tasks.
 - As a user, I want Triage gray, Planning and Building bright purple, Plan
   Approved blue, Reviewing green, and Waiting/Quota/Error yellow/orange/red, so
   that workflow progress and exceptions are visually distinct.

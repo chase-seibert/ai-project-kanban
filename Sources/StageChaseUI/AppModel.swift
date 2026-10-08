@@ -6,22 +6,25 @@ import UniformTypeIdentifiers
 #endif
 
 enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
-  case reviewing
+  case planApproved
   case inProgress
+  case reviewing
   case recentlyCompleted
 
   var id: String { rawValue }
   var title: String {
     switch self {
-    case .reviewing: "Reviewing"
+    case .planApproved: "Plan Approved"
     case .inProgress: "In Progress"
+    case .reviewing: "Reviewing"
     case .recentlyCompleted: "Recently Completed"
     }
   }
   var symbol: String {
     switch self {
-    case .reviewing: "eye"
+    case .planApproved: "checkmark.seal"
     case .inProgress: "hammer"
+    case .reviewing: "eye"
     case .recentlyCompleted: "checkmark.circle"
     }
   }

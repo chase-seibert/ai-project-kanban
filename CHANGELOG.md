@@ -9,10 +9,13 @@
 - Advance the strict paired sync protocol to version 12.
 - Keep Waiting, Error, and Quota out of manual status choices, and remove the
   duplicate section and status row from task detail while retaining completion.
-- Replace the Recent Tasks status selector with fixed Reviewing, In Progress,
-  and Recently Completed workspace views. Reviewing combines pending plan
+- Replace the Recent Tasks status selector with cross-project workspace views
+  ordered Plan Approved, In Progress, Reviewing, and Recently Completed. Plan
+  Approved shows tasks ready to execute; Reviewing combines pending plan
   approval with code review; In Progress requires a queued or running plan/build
   run; Recently Completed sorts by completion time.
+- Keep workspace cards in three equal-width columns even when a day has only
+  one or two cards.
 
 ## 2026-10-07
 
