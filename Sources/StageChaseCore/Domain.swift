@@ -120,6 +120,12 @@ public enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
   }
 }
 
+public enum TaskModelTag: String, Codable, CaseIterable, Identifiable, Sendable {
+  case high, medium
+  public var id: String { rawValue }
+  public var title: String { rawValue.capitalized }
+}
+
 public enum TaskStatusBadgeColor: String, Codable, CaseIterable, Sendable {
   case secondary, purple, blue, indigo, orange, yellow, red, green
 }
@@ -418,6 +424,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
   public var rank = 0
   public var completed = false
   public var priority: TaskPriority?
+  public var modelTag: TaskModelTag?
+  public var isFavorite = false
   public var revision = 0
   public var planPath: String?
   public var planAvailable = false
@@ -439,7 +447,7 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case id, shortID, projectID, title, notes, stage, section, status, rank, completed, priority,
-      revision
+      modelTag, isFavorite, revision
     case planPath, planAvailable, latestCodexUpdate, latestCodexUpdateAt, modelOverride, createdAt,
       updatedAt
     case completedAt, attachments
@@ -462,6 +470,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
       ?? (completed ? .reviewing : TaskStatus.legacyStatus(for: stage))
     rank = try values.decodeIfPresent(Int.self, forKey: .rank) ?? 0
     priority = try values.decodeIfPresent(TaskPriority.self, forKey: .priority)
+    modelTag = try values.decodeIfPresent(TaskModelTag.self, forKey: .modelTag)
+    isFavorite = try values.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
     revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
     planPath = try values.decodeIfPresent(String.self, forKey: .planPath)
     planAvailable = try values.decodeIfPresent(Bool.self, forKey: .planAvailable) ?? false
@@ -487,6 +497,8 @@ public struct WorkItem: Codable, Hashable, Identifiable, Sendable {
     try values.encode(rank, forKey: .rank)
     try values.encode(completed, forKey: .completed)
     try values.encodeIfPresent(priority, forKey: .priority)
+    try values.encodeIfPresent(modelTag, forKey: .modelTag)
+    try values.encode(isFavorite, forKey: .isFavorite)
     try values.encode(revision, forKey: .revision)
     try values.encodeIfPresent(planPath, forKey: .planPath)
     try values.encode(planAvailable, forKey: .planAvailable)
@@ -856,6 +868,8 @@ public enum Mutation: Sendable {
   case approvePlan(UUID, expectedRevision: Int)
   case setStatus(UUID, TaskStatus, expectedRevision: Int)
   case setTaskAttachments(UUID, [TaskAttachment], expectedRevision: Int)
+  case setTaskFavorite(UUID, Bool, expectedRevision: Int)
+  case setTaskModelTag(UUID, TaskModelTag?, expectedRevision: Int)
   case saveNotes(UUID, String, expectedRevision: Int)
   case move(
     UUID, WorkflowStage, expectedRevision: Int, configuration: ResolvedCodexConfiguration? = nil)
@@ -1113,6 +1127,18 @@ public enum BoardReducer {
         })
       else { throw BoardError.invalid("The task attachment list is invalid or too large.") }
       state.tasks[index].attachments = attachments
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
+    case .setTaskFavorite(let id, let isFavorite, let expectedRevision):
+      let index = try taskIndex(id, expectedRevision)
+      guard state.tasks[index].isFavorite != isFavorite else { return state }
+      state.tasks[index].isFavorite = isFavorite
+      state.tasks[index].revision += 1
+      state.tasks[index].updatedAt = .now
+    case .setTaskModelTag(let id, let modelTag, let expectedRevision):
+      let index = try taskIndex(id, expectedRevision)
+      guard state.tasks[index].modelTag != modelTag else { return state }
+      state.tasks[index].modelTag = modelTag
       state.tasks[index].revision += 1
       state.tasks[index].updatedAt = .now
     case .saveNotes(let id, let notes, let expectedRevision):

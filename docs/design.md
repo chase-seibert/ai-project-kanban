@@ -61,6 +61,14 @@ Waiting, Error, Quota, and Review sort ahead of ordinary statuses in that order,
 then priority and the user's stable rank decide order. Priority labels and the
 normal detail picker are hidden; stored priority, sorting, and menu/keyboard
 commands remain available.
+Board filters for All, Favorites, High, and Medium compose with search and the
+existing project, section, and completion controls. Favorite and model-tag
+controls are available on task cards and in task detail. High and Medium are
+organizational tags only; they do not change task priority or the selected
+Codex model and effort. Workspace navigation also provides cross-project High,
+Medium, and Favorites views on both devices.
+Cards show only set favorite and model-tag indicators. Users edit these values
+from task detail or the card's Control-click/long-press context menu.
 Mac section headers keep named + buttons and inline multiline capture. On
 iPhone, one blue **Add task** toolbar button creates a task in the currently
 focused section; per-lane + buttons are removed to avoid a second Add task

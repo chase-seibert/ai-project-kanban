@@ -70,100 +70,107 @@ struct RootView: View {
           }
         #else
           NavigationStack(path: $phonePath) {
-            ProjectSidebar(onOpen: { phonePath.append(.board) })
-              .navigationTitle("Projects")
-              .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                  Button("New project", systemImage: "plus") { model.sheet = .newProject }
-                }
+            ProjectSidebar(
+              onOpen: { phonePath.append(.board) },
+              onOpenWorkspace: { phonePath.append(.workspaceTasks($0)) }
+            )
+            .navigationTitle("Projects")
+            .toolbar {
+              ToolbarItem(placement: .primaryAction) {
+                Button("New project", systemImage: "plus") { model.sheet = .newProject }
               }
-              .navigationDestination(for: PhoneDestination.self) { destination in
-                switch destination {
-                case .board:
-                  BoardView(onOpenTask: { phonePath.append(.task($0)) })
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                      ToolbarItem(placement: .principal) {
-                        phoneProjectPicker
+            }
+            .navigationDestination(for: PhoneDestination.self) { destination in
+              switch destination {
+              case .board:
+                BoardView(onOpenTask: { phonePath.append(.task($0)) })
+                  .navigationBarTitleDisplayMode(.inline)
+                  .toolbar {
+                    ToolbarItem(placement: .principal) {
+                      phoneProjectPicker
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                      Button("Add task", systemImage: "plus") {
+                        model.sheet = .newTask(model.boardFocusedStage)
                       }
-                      ToolbarItem(placement: .topBarTrailing) {
-                        Button("Add task", systemImage: "plus") {
-                          model.sheet = .newTask(model.boardFocusedStage)
+                      .buttonStyle(.borderedProminent).tint(.blue)
+                      .disabled(model.selectedProject == nil)
+                      .accessibilityIdentifier("phone-add-task")
+                    }
+                    ToolbarItem(placement: .secondaryAction) {
+                      Menu {
+                        Toggle("Show completed", isOn: $model.showCompleted)
+                        Button(
+                          model.syncClient.isSyncing ? "Refreshing…" : "Refresh from Mac",
+                          systemImage: "arrow.clockwise"
+                        ) {
+                          Task { await model.refreshFromMac(manual: true) }
                         }
-                        .buttonStyle(.borderedProminent).tint(.blue)
-                        .disabled(model.selectedProject == nil)
-                        .accessibilityIdentifier("phone-add-task")
-                      }
-                      ToolbarItem(placement: .secondaryAction) {
-                        Menu {
-                          Toggle("Show completed", isOn: $model.showCompleted)
+                        .disabled(
+                          !model.isConnectedPhone || model.syncClient.isSyncing
+                            || model.syncClient.hasUnsavedEndpoint
+                        )
+                        Button("Connection", systemImage: "network") {
+                          phonePath.append(.connection)
+                        }
+                        Button("Activity", systemImage: "waveform.path.ecg") {
+                          phonePath.append(.activity)
+                        }
+                        Button("Settings", systemImage: "gearshape") {
+                          phonePath.append(.settings)
+                        }
+                        if let project = model.selectedProject {
+                          Divider()
                           Button(
-                            model.syncClient.isSyncing ? "Refreshing…" : "Refresh from Mac",
-                            systemImage: "arrow.clockwise"
+                            "Project Git", systemImage: "chevron.left.forwardslash.chevron.right"
                           ) {
-                            Task { await model.refreshFromMac(manual: true) }
+                            phonePath.append(.projectGit(project.id))
                           }
-                          .disabled(
-                            !model.isConnectedPhone || model.syncClient.isSyncing
-                              || model.syncClient.hasUnsavedEndpoint
-                          )
-                          Button("Connection", systemImage: "network") {
-                            phonePath.append(.connection)
+                          .disabled(!model.isConnectedPhone)
+                          Button("Project settings", systemImage: "slider.horizontal.3") {
+                            model.sheet = .editProject(project)
                           }
-                          Button("Activity", systemImage: "waveform.path.ecg") {
-                            phonePath.append(.activity)
+                          Button(role: .destructive) {
+                            model.projectPendingDeletion = project
+                          } label: {
+                            Label("Delete project", systemImage: "trash")
                           }
-                          Button("Settings", systemImage: "gearshape") {
-                            phonePath.append(.settings)
-                          }
-                          if let project = model.selectedProject {
-                            Divider()
-                            Button(
-                              "Project Git", systemImage: "chevron.left.forwardslash.chevron.right"
-                            ) {
-                              phonePath.append(.projectGit(project.id))
-                            }
-                            .disabled(!model.isConnectedPhone)
-                            Button("Project settings", systemImage: "slider.horizontal.3") {
-                              model.sheet = .editProject(project)
-                            }
-                            Button(role: .destructive) {
-                              model.projectPendingDeletion = project
-                            } label: {
-                              Label("Delete project", systemImage: "trash")
-                            }
-                          }
-                        } label: {
-                          Image(systemName: "ellipsis.circle")
                         }
-                        .accessibilityLabel("More project actions")
+                      } label: {
+                        Image(systemName: "ellipsis.circle")
                       }
+                      .accessibilityLabel("More project actions")
                     }
-                case .activity:
-                  ActivityPanel().navigationTitle("Activity")
-                case .connection:
-                  SyncConnectionView().navigationTitle("Connection")
-                case .settings:
-                  AppSettings().navigationTitle("Settings")
-                case .task(let id):
-                  TaskDetail(taskID: id).id(id)
-                    .navigationTitle("")
-                    .navigationBarTitleDisplayMode(.inline)
-                case .projectGit(let id):
-                  if let project = model.library.activeProjects.first(where: { $0.id == id }) {
-                    ScrollView {
-                      PhoneGitControls(project: project, taskID: nil).padding(16)
-                    }
-                    .navigationTitle("Project Git")
-                    .navigationBarTitleDisplayMode(.inline)
-                  } else {
-                    ContentUnavailableView(
-                      "Project unavailable", systemImage: "folder.questionmark"
-                    )
-                    .navigationTitle("Project Git")
                   }
+              case .workspaceTasks(let preset):
+                WorkspaceTasksView(preset: preset, onOpenTask: { phonePath.append(.task($0)) })
+                  .navigationTitle(preset.title)
+                  .navigationBarTitleDisplayMode(.inline)
+              case .activity:
+                ActivityPanel().navigationTitle("Activity")
+              case .connection:
+                SyncConnectionView().navigationTitle("Connection")
+              case .settings:
+                AppSettings().navigationTitle("Settings")
+              case .task(let id):
+                TaskDetail(taskID: id).id(id)
+                  .navigationTitle("")
+                  .navigationBarTitleDisplayMode(.inline)
+              case .projectGit(let id):
+                if let project = model.library.activeProjects.first(where: { $0.id == id }) {
+                  ScrollView {
+                    PhoneGitControls(project: project, taskID: nil).padding(16)
+                  }
+                  .navigationTitle("Project Git")
+                  .navigationBarTitleDisplayMode(.inline)
+                } else {
+                  ContentUnavailableView(
+                    "Project unavailable", systemImage: "folder.questionmark"
+                  )
+                  .navigationTitle("Project Git")
                 }
               }
+            }
           }
         #endif
       }
@@ -381,6 +388,7 @@ struct RootView: View {
 
 private enum PhoneDestination: Hashable {
   case board
+  case workspaceTasks(WorkspaceTaskPreset)
   case task(UUID)
   case projectGit(UUID)
   case activity
@@ -391,6 +399,7 @@ private enum PhoneDestination: Hashable {
 struct ProjectSidebar: View {
   @Environment(AppModel.self) private var model
   var onOpen: (() -> Void)?
+  var onOpenWorkspace: ((WorkspaceTaskPreset) -> Void)?
   var body: some View {
     List {
       Section {
@@ -450,6 +459,20 @@ struct ProjectSidebar: View {
       } header: {
         Text("YOUR PROJECTS")
       }
+      #if os(iOS)
+        Section("Workspace") {
+          ForEach([WorkspaceTaskPreset.highPriorityModel, .mediumPriorityModel, .favorites]) {
+            preset in
+            Button {
+              model.showWorkspaceTasks(preset)
+              onOpenWorkspace?(preset)
+            } label: {
+              Label(preset.title, systemImage: preset.symbol)
+            }
+            .accessibilityIdentifier("workspace-\(preset.rawValue)-navigation")
+          }
+        }
+      #endif
       Section {
         Button {
           model.sheet = .deletedProjects
@@ -572,10 +595,17 @@ struct WorkspaceTasksView: View {
   @Environment(AppModel.self) private var model
   @State private var editingTaskID: UUID?
   let preset: WorkspaceTaskPreset
+  var onOpenTask: ((UUID) -> Void)?
   private let columnLimit = 3
 
   private var sourceTasks: [WorkItem] {
     switch preset {
+    case .highPriorityModel:
+      model.library.tasks.filter { $0.modelTag == .high }
+    case .mediumPriorityModel:
+      model.library.tasks.filter { $0.modelTag == .medium }
+    case .favorites:
+      model.library.tasks.filter(\.isFavorite)
     case .planApproved:
       model.library.recentTasks.filter { !$0.completed && $0.status == .planApproved }
     case .inProgress:
@@ -608,7 +638,8 @@ struct WorkspaceTasksView: View {
 
   private var recentItems: [(item: WorkItem, project: Project)] {
     sourceTasks.compactMap { item in
-      guard let project = model.library.projects.first(where: { $0.id == item.projectID }) else {
+      guard let project = model.library.activeProjects.first(where: { $0.id == item.projectID })
+      else {
         return nil
       }
       return (item, project)
@@ -746,7 +777,11 @@ struct WorkspaceTasksView: View {
                           item: entry.item,
                           editingTaskID: $editingTaskID,
                           onOpenTask: { taskID in
-                            model.selectedTaskID = taskID
+                            if let onOpenTask {
+                              onOpenTask(taskID)
+                            } else {
+                              model.selectedTaskID = taskID
+                            }
                             model.showActivity = false
                           },
                           scope: .recentTasks,
@@ -771,6 +806,9 @@ struct WorkspaceTasksView: View {
 
   private var emptyTitle: String {
     switch preset {
+    case .highPriorityModel: "No High model tasks"
+    case .mediumPriorityModel: "No Medium model tasks"
+    case .favorites: "No favorite tasks"
     case .planApproved:
       model.search.isEmpty ? "No approved plans ready to start" : "No matching tasks"
     case .inProgress:
@@ -784,6 +822,9 @@ struct WorkspaceTasksView: View {
 
   private var emptyDescription: String {
     switch preset {
+    case .highPriorityModel: "Tasks tagged High across your projects appear here."
+    case .mediumPriorityModel: "Tasks tagged Medium across your projects appear here."
+    case .favorites: "Your favorite tasks across projects appear here."
     case .planApproved: "Plans approved for implementation across your projects appear here."
     case .inProgress: "Tasks with an active planning or implementation run appear here."
     case .reviewing: "Plans awaiting approval and finished code changes appear here."

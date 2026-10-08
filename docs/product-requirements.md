@@ -27,6 +27,16 @@
 - As a user, I want task status to be separate from section and completion, so
   that each task shows Triage, Planning, Plan Approved, Building, Waiting,
   Error, Quota, or Reviewing while completion remains an independent choice.
+- As a user, I want to favorite tasks and assign High or Medium model tags from
+  Mac or iPhone, so that I can identify important tasks and the expected model
+  capability on either device. These tags do not change task priority or the
+  model and reasoning effort selected for a Codex run.
+- As a user, I want board quick filters for All, Favorites, High, and Medium
+  that combine with search, project, section, and completed-task controls, so I
+  can quickly narrow the current board without changing task data.
+- As a user, I want High, Medium, and Favorites workspace views across projects
+  on Mac and iPhone, so I can open those task collections directly from
+  workspace navigation.
 - As a user, I want to manually mark a Planning task with a saved plan as Plan
   Approved from Mac or iPhone, so that I can approve the plan on either device.
   Approval changes status only and does not move the task or start Codex.

@@ -169,6 +169,13 @@ Reviewing sort first within a section in that order, followed by priority and
 stable rank. Saved-plan details and Codex run outcomes remain in task detail,
 with run history also in Activity, rather than appearing on cards.
 
+`WorkItem.isFavorite` and optional `WorkItem.modelTag` (High or Medium) are
+revisioned task fields. Missing fields decode to false and nil for older
+libraries. The paired snapshot carries both fields, and protocol v14 adds
+revision-checked phone commands that change only the requested field. Board
+filter selection stays local to each device. Neither model tags nor favorites
+change task priority or the model and effort captured by a Codex run.
+
 The direct MCP `move_task` operation rejects a move when a task is in
 Implementing and the destination stage is `.next` or `.planned` (Planning). It
 returns a validation error before applying the move, recording activity, or

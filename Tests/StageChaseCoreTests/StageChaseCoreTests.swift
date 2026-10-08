@@ -136,7 +136,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.tasks.first?.id == task.id)
   #expect(replica.tasks.first?.shortID == 23)
   #expect(replica.taskShortIDHighWaterMark == 30)
-  #expect(SyncProtocol.version == 13)
+  #expect(SyncProtocol.version == 14)
 }
 
 @Test func projectGitChangePresentationIncludesStagedUnstagedAndUntrackedFiles() {
@@ -518,11 +518,80 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 13)
+  #expect(decoded.version == 14)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(replica.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
+}
+
+@Test func favoriteAndModelTagDefaultsRoundTripAndReplicate() throws {
+  let projectID = UUID()
+  let legacyItemData = Data("{\"projectID\":\"\(projectID.uuidString)\",\"title\":\"Legacy\"}".utf8)
+  let legacyItem = try JSONDecoder().decode(WorkItem.self, from: legacyItemData)
+  #expect(!legacyItem.isFavorite)
+  #expect(legacyItem.modelTag == nil)
+
+  let project = Project(name: "Tags")
+  var item = WorkItem(projectID: project.id, title: "Tagged")
+  item.isFavorite = true
+  item.modelTag = .high
+  item.priority = .high
+  item.revision = 8
+  item.updatedAt = Date(timeIntervalSince1970: 100)
+  let encodedItem = try JSONEncoder().encode(item)
+  #expect(try JSONDecoder().decode(WorkItem.self, from: encodedItem) == item)
+
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [item]
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 4, library: library)
+  let decodedSnapshot = try JSONDecoder.syncDecoder.decode(
+    SyncSnapshot.self, from: JSONEncoder.syncEncoder.encode(snapshot))
+  let replica = try decodedSnapshot.replica()
+  #expect(replica.tasks.first?.id == item.id)
+  #expect(replica.tasks.first?.revision == item.revision)
+  #expect(replica.tasks.first?.updatedAt == item.updatedAt)
+  #expect(replica.tasks.first?.isFavorite == true)
+  #expect(replica.tasks.first?.modelTag == .high)
+  #expect(replica.tasks.first?.priority == .high)
+
+  var legacySyncTask = try #require(
+    JSONSerialization.jsonObject(with: JSONEncoder().encode(SyncTask(item))) as? [String: Any])
+  legacySyncTask.removeValue(forKey: "isFavorite")
+  legacySyncTask.removeValue(forKey: "modelTag")
+  let oldSyncTask = try JSONDecoder().decode(
+    SyncTask.self, from: JSONSerialization.data(withJSONObject: legacySyncTask))
+  #expect(!oldSyncTask.isFavorite)
+  #expect(oldSyncTask.modelTag == nil)
+}
+
+@Test func favoriteAndModelTagMutationsAreRevisionCheckedAndIndependent() throws {
+  let project = Project(name: "Tags")
+  var item = WorkItem(projectID: project.id, title: "Task")
+  item.priority = .low
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [item]
+
+  let favorited = try BoardReducer.apply(
+    .setTaskFavorite(item.id, true, expectedRevision: 0), to: library)
+  #expect(favorited.tasks[0].isFavorite)
+  #expect(favorited.tasks[0].revision == 1)
+  #expect(favorited.tasks[0].priority == .low)
+  let tagged = try BoardReducer.apply(
+    .setTaskModelTag(item.id, .medium, expectedRevision: 1), to: favorited)
+  #expect(tagged.tasks[0].modelTag == .medium)
+  #expect(tagged.tasks[0].revision == 2)
+  let cleared = try BoardReducer.apply(
+    .setTaskModelTag(item.id, nil, expectedRevision: 2), to: tagged)
+  #expect(cleared.tasks[0].modelTag == nil)
+  let unstarred = try BoardReducer.apply(
+    .setTaskFavorite(item.id, false, expectedRevision: 3), to: cleared)
+  #expect(!unstarred.tasks[0].isFavorite)
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.setTaskFavorite(item.id, true, expectedRevision: 0), to: unstarred)
+  }
 }
 
 @Test func remoteCommandsAreTransactionalRevisionCheckedAndIdempotent() async throws {
@@ -699,6 +768,46 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(afterStale.tasks.first?.status == .reviewing)
 }
 
+@Test func phoneFavoriteAndModelTagCommandsSyncWithRevisionChecks() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Phone tags")
+  _ = try await repository.apply(.createProject(project))
+  let task = WorkItem(projectID: project.id, title: "Tag this task")
+  _ = try await repository.apply(.createTask(task))
+  let state = try await repository.syncStateSnapshot()
+  let deviceID = UUID()
+  let favorite = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: deviceID, clientSequence: 1,
+    expectedRevision: task.revision,
+    command: .setTaskFavorite(id: task.id, isFavorite: true))
+  guard case .applied(_, let favorited) = try await repository.applyRemote(favorite) else {
+    Issue.record("Expected the phone favorite command to apply")
+    return
+  }
+  let tag = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: deviceID, clientSequence: 2,
+    expectedRevision: 1, command: .setTaskModelTag(id: task.id, modelTag: .high))
+  guard case .applied(_, let tagged) = try await repository.applyRemote(tag) else {
+    Issue.record("Expected the phone model-tag command to apply")
+    return
+  }
+  #expect(favorited.tasks.first?.isFavorite == true)
+  #expect(tagged.tasks.first?.isFavorite == true)
+  #expect(tagged.tasks.first?.modelTag == .high)
+  #expect(tagged.tasks.first?.revision == 2)
+
+  let stale = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
+    expectedRevision: 0, command: .setTaskFavorite(id: task.id, isFavorite: false))
+  guard case .conflict = try await repository.applyRemote(stale) else {
+    Issue.record("A stale favorite command must not overwrite newer task state")
+    return
+  }
+  let final = try await repository.load()
+  #expect(final.tasks.first?.isFavorite == true)
+  #expect(final.tasks.first?.modelTag == .high)
+}
+
 @Test func phoneDeleteRejectsAnActiveRunAndPreviousProtocolCommandsFailClearly() throws {
   let project = Project(name: "Compatibility")
   let task = WorkItem(projectID: project.id, title: "Busy task")
@@ -718,7 +827,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 13)
+  #expect(snapshot.version == 14)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }

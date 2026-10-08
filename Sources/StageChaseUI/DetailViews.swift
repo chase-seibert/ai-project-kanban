@@ -1218,6 +1218,17 @@ struct TaskDetail: View {
             .buttonStyle(.bordered)
         }
       }.stageFont(.caption)
+      HStack(spacing: 12) {
+        Button {
+          Task { await model.setFavorite(!item.isFavorite, for: item.id) }
+        } label: {
+          Label(
+            item.isFavorite ? "Favorited" : "Add to favorites",
+            systemImage: item.isFavorite ? "star.fill" : "star")
+        }
+        .buttonStyle(.bordered)
+        TaskModelTagMenu(item: item)
+      }
       if canApprovePlan {
         Button {
           approvePlan(item)

@@ -36,6 +36,10 @@ struct BoardView: View {
     VStack(alignment: .leading, spacing: 0) {
       #if os(macOS)
         BoardHeader()
+      #else
+        TaskQuickFilterBar()
+          .padding(.horizontal, 16)
+          .padding(.top, 8)
       #endif
       #if os(macOS)
         GeometryReader { geometry in
@@ -129,6 +133,7 @@ struct BoardHeader: View {
         if let project = model.selectedProject {
           ProjectHeaderControls(project: project)
         }
+        TaskQuickFilterBar()
       #endif
       #if os(iOS)
         HStack(spacing: 8) {
@@ -216,6 +221,52 @@ struct BoardHeader: View {
     #else
       ""
     #endif
+  }
+}
+
+struct TaskQuickFilterBar: View {
+  @Environment(AppModel.self) private var model
+  var body: some View {
+    ScrollView(.horizontal) {
+      HStack(spacing: 8) {
+        ForEach(TaskBoardFilter.allCases) { filter in
+          Button {
+            model.boardFilter = filter
+          } label: {
+            if let symbol = filter.symbol {
+              Label(filter.title, systemImage: symbol)
+            } else {
+              Text(filter.title)
+            }
+          }
+          .buttonStyle(.bordered)
+          .tint(model.boardFilter == filter ? .accentColor : .secondary)
+          .accessibilityAddTraits(model.boardFilter == filter ? .isSelected : [])
+          .accessibilityIdentifier("board-filter-\(filter.rawValue)")
+        }
+      }
+    }
+    .font(.caption)
+    .scrollIndicators(.hidden)
+    .accessibilityLabel("Filter tasks")
+  }
+}
+
+struct TaskModelTagMenu: View {
+  @Environment(AppModel.self) private var model
+  let item: WorkItem
+  var body: some View {
+    Menu {
+      Button("None") { Task { await model.setModelTag(nil, for: item.id) } }
+      ForEach(TaskModelTag.allCases) { tag in
+        Button(tag.title) { Task { await model.setModelTag(tag, for: item.id) } }
+      }
+    } label: {
+      Label(item.modelTag?.title ?? "Model tag", systemImage: "bolt")
+        .stageFont(.caption, weight: .medium)
+    }
+    .accessibilityLabel("Model tag: \(item.modelTag?.title ?? "None")")
+    .accessibilityIdentifier("task-model-tag-\(item.id.uuidString)")
   }
 }
 
@@ -485,6 +536,35 @@ struct TaskCard: View {
   @ViewBuilder private var taskContextMenu: some View {
     Button("Edit title", systemImage: "pencil") { beginTitleEditing() }
     Divider()
+    Button(
+      item.isFavorite ? "Remove from favorites" : "Add to favorites",
+      systemImage: item.isFavorite ? "star.slash" : "star"
+    ) {
+      Task { await model.setFavorite(!item.isFavorite, for: item.id) }
+    }
+    Section("Model tag") {
+      ForEach(TaskModelTag.allCases) { tag in
+        Button {
+          Task { await model.setModelTag(tag, for: item.id) }
+        } label: {
+          if item.modelTag == tag {
+            Label(tag.title, systemImage: "checkmark")
+          } else {
+            Text(tag.title)
+          }
+        }
+      }
+      Button {
+        Task { await model.setModelTag(nil, for: item.id) }
+      } label: {
+        if item.modelTag == nil {
+          Label("None", systemImage: "checkmark")
+        } else {
+          Text("None")
+        }
+      }
+    }
+    Divider()
     let ordered = model.library.items(in: item.projectID, section: item.section, completed: true)
       .filter { $0.priority == item.priority }
     if scope == .board,
@@ -541,8 +621,27 @@ struct TaskCard: View {
 
   private var cardContents: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text(item.shortID.map { String($0) } ?? "ID pending")
-        .stageFont(.caption, weight: .medium).foregroundStyle(.secondary)
+      HStack {
+        Text(item.shortID.map { String($0) } ?? "ID pending")
+          .stageFont(.caption, weight: .medium).foregroundStyle(.secondary)
+        Spacer()
+        HStack(spacing: 6) {
+          if item.isFavorite {
+            Image(systemName: "star.fill")
+              .foregroundStyle(.yellow)
+              .accessibilityLabel("Favorite")
+          }
+          if let modelTag = item.modelTag {
+            Text(modelTag.title)
+              .stageFont(.caption2, weight: .semibold)
+              .foregroundStyle(.secondary)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(.quaternary, in: Capsule())
+              .accessibilityLabel("Model tag: \(modelTag.title)")
+          }
+        }
+      }
       if let projectName {
         Text(projectName).stageFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
       }

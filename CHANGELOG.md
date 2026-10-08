@@ -2,6 +2,11 @@
 
 ## 2026-10-08
 
+- Add task favorites and High/Medium model tags on Mac and iPhone, with board
+  quick filters and cross-project workspace views. Keep those tags separate
+  from task priority and run model configuration; sync edits with revision
+  checks using protocol v14. Keep card controls in the context menu and show
+  favorite/tag indicators only when set.
 - Add manual status changes to task-card context menus, clickable status badges,
   and task detail on Mac and iPhone. Add a persistent status filter to Recent
   Tasks. Sync phone status changes with revision checks, and share only plan

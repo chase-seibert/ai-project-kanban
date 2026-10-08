@@ -6,6 +6,9 @@ import UniformTypeIdentifiers
 #endif
 
 enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
+  case highPriorityModel
+  case mediumPriorityModel
+  case favorites
   case planApproved
   case inProgress
   case reviewing
@@ -14,6 +17,9 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
   var id: String { rawValue }
   var title: String {
     switch self {
+    case .highPriorityModel: "High"
+    case .mediumPriorityModel: "Medium"
+    case .favorites: "Favorites"
     case .planApproved: "Plan Approved"
     case .inProgress: "In Progress"
     case .reviewing: "Reviewing"
@@ -22,10 +28,35 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
   }
   var symbol: String {
     switch self {
+    case .highPriorityModel: "bolt.fill"
+    case .mediumPriorityModel: "bolt"
+    case .favorites: "star.fill"
     case .planApproved: "checkmark.seal"
     case .inProgress: "hammer"
     case .reviewing: "eye"
     case .recentlyCompleted: "checkmark.circle"
+    }
+  }
+}
+
+enum TaskBoardFilter: String, CaseIterable, Identifiable {
+  case all, favorites, high, medium
+  var id: String { rawValue }
+  var title: String { rawValue == "all" ? "All" : rawValue.capitalized }
+  var symbol: String? {
+    switch self {
+    case .all: nil
+    case .favorites: "star.fill"
+    case .high: "bolt.fill"
+    case .medium: "bolt"
+    }
+  }
+  func includes(_ item: WorkItem) -> Bool {
+    switch self {
+    case .all: true
+    case .favorites: item.isFavorite
+    case .high: item.modelTag == .high
+    case .medium: item.modelTag == .medium
     }
   }
 }
@@ -73,6 +104,7 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
   var sheet: AppSheet?
   var search = ""
   var showCompleted = false
+  var boardFilter: TaskBoardFilter = .all
   var showActivity = false
   var workspaceTaskView: WorkspaceTaskPreset?
   var pendingMove: PendingMove?
@@ -757,6 +789,12 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
         case .setTaskAttachments(let id, let attachments, let expectedRevision):
           wireCommand = .setTaskAttachments(id: id, attachments: attachments)
           revision = expectedRevision
+        case .setTaskFavorite(let id, let isFavorite, let expectedRevision):
+          wireCommand = .setTaskFavorite(id: id, isFavorite: isFavorite)
+          revision = expectedRevision
+        case .setTaskModelTag(let id, let modelTag, let expectedRevision):
+          wireCommand = .setTaskModelTag(id: id, modelTag: modelTag)
+          revision = expectedRevision
         case .move(let id, let stage, let expectedRevision, let configuration):
           guard configuration == nil else {
             throw BoardError.invalid("Confirm automated work on the Mac.")
@@ -944,16 +982,18 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
   func items(_ stage: WorkflowStage) -> [WorkItem] {
     guard let selectedProjectID else { return [] }
     return library.items(in: selectedProjectID, stage: stage, completed: showCompleted).filter {
-      search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)
-        || $0.notes.localizedCaseInsensitiveContains(search)
+      boardFilter.includes($0)
+        && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)
+          || $0.notes.localizedCaseInsensitiveContains(search))
     }
   }
 
   func items(_ section: WorkflowSection) -> [WorkItem] {
     guard let selectedProjectID else { return [] }
     return library.items(in: selectedProjectID, section: section, completed: showCompleted).filter {
-      search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)
-        || $0.notes.localizedCaseInsensitiveContains(search)
+      boardFilter.includes($0)
+        && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)
+          || $0.notes.localizedCaseInsensitiveContains(search))
     }
   }
 
@@ -1130,6 +1170,16 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
     var updated = item
     updated.priority = priority
     _ = await perform(.editTask(updated, expectedRevision: item.revision))
+  }
+
+  func setFavorite(_ isFavorite: Bool, for id: UUID) async {
+    guard let item = library.tasks.first(where: { $0.id == id }) else { return }
+    _ = await perform(.setTaskFavorite(id, isFavorite, expectedRevision: item.revision))
+  }
+
+  func setModelTag(_ modelTag: TaskModelTag?, for id: UUID) async {
+    guard let item = library.tasks.first(where: { $0.id == id }) else { return }
+    _ = await perform(.setTaskModelTag(id, modelTag, expectedRevision: item.revision))
   }
 
   func sheetDidDismiss() {

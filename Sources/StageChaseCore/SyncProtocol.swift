@@ -3,6 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 14 adds revision-checked task favorite and model-tag edits.
   // Version 13 removes unread acknowledgments and snapshot read-marker state.
   // Version 12 adds revision-checked status changes from a paired phone.
   // Version 11 adds revision-checked plan approval and plan-availability metadata.
@@ -13,7 +14,7 @@ public enum SyncProtocol {
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 13
+  public static let version = 14
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -71,6 +72,8 @@ public enum SyncCommand: Codable, Equatable, Sendable {
   case approvePlan(id: UUID)
   case setTaskStatus(id: UUID, status: TaskStatus)
   case setTaskAttachments(id: UUID, attachments: [TaskAttachment])
+  case setTaskFavorite(id: UUID, isFavorite: Bool)
+  case setTaskModelTag(id: UUID, modelTag: TaskModelTag?)
   case moveTask(id: UUID, stage: WorkflowStage)
   case reorderTask(id: UUID, beforeID: UUID, orderDigest: String)
   case completeTask(id: UUID, completed: Bool)
@@ -209,6 +212,16 @@ public enum SyncCommandValidator {
         library.tasks.contains(where: { $0.id == id })
       else { throw BoardError.missing }
       return .setTaskAttachments(id, attachments, expectedRevision: revision)
+    case .setTaskFavorite(let id, let isFavorite):
+      guard let revision = envelope.expectedRevision,
+        library.tasks.contains(where: { $0.id == id })
+      else { throw BoardError.missing }
+      return .setTaskFavorite(id, isFavorite, expectedRevision: revision)
+    case .setTaskModelTag(let id, let modelTag):
+      guard let revision = envelope.expectedRevision,
+        library.tasks.contains(where: { $0.id == id })
+      else { throw BoardError.missing }
+      return .setTaskModelTag(id, modelTag, expectedRevision: revision)
     case .moveTask(let id, let stage):
       guard let revision = envelope.expectedRevision,
         library.tasks.contains(where: { $0.id == id })
@@ -264,6 +277,8 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
   public var rank: Int
   public var completed: Bool
   public var priority: TaskPriority?
+  public var modelTag: TaskModelTag?
+  public var isFavorite: Bool
   public var revision: Int
   public var attachments: [TaskAttachment]
   public var createdAt: Date
@@ -282,6 +297,8 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
     rank = item.rank
     completed = item.completed
     priority = item.priority
+    modelTag = item.modelTag
+    isFavorite = item.isFavorite
     revision = item.revision
     attachments = item.attachments
     createdAt = item.createdAt
@@ -290,7 +307,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case id, shortID, projectID, title, notes, stage, section, status, hasSavedPlan, rank,
-      completed, priority,
+      completed, priority, modelTag, isFavorite,
       revision
     case attachments, createdAt, updatedAt
   }
@@ -309,6 +326,8 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
     rank = try values.decode(Int.self, forKey: .rank)
     completed = try values.decode(Bool.self, forKey: .completed)
     priority = try values.decodeIfPresent(TaskPriority.self, forKey: .priority)
+    modelTag = try values.decodeIfPresent(TaskModelTag.self, forKey: .modelTag)
+    isFavorite = try values.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
     revision = try values.decode(Int.self, forKey: .revision)
     attachments = try values.decodeIfPresent([TaskAttachment].self, forKey: .attachments) ?? []
     createdAt = try values.decode(Date.self, forKey: .createdAt)
@@ -458,6 +477,8 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       item.rank = $0.rank
       item.completed = $0.completed
       item.priority = $0.priority
+      item.modelTag = $0.modelTag
+      item.isFavorite = $0.isFavorite
       item.revision = $0.revision
       item.attachments = $0.attachments
       item.createdAt = $0.createdAt
