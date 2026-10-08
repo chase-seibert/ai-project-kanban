@@ -136,7 +136,21 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.tasks.first?.id == task.id)
   #expect(replica.tasks.first?.shortID == 23)
   #expect(replica.taskShortIDHighWaterMark == 30)
-  #expect(SyncProtocol.version == 12)
+  #expect(SyncProtocol.version == 13)
+}
+
+@Test func projectGitChangePresentationIncludesStagedUnstagedAndUntrackedFiles() {
+  let clean = SyncGitStatus(
+    branch: "main", head: "abc", changedFileCount: 0, stagedFileCount: 0,
+    unstagedFileCount: 0, untrackedFileCount: 0, isEmptyRepository: false)
+  #expect(!clean.hasChanges)
+  let dirty = SyncGitStatus(
+    branch: "main", head: "abc", changedFileCount: 3, stagedFileCount: 1,
+    unstagedFileCount: 1, untrackedFileCount: 1, isEmptyRepository: false)
+  #expect(dirty.hasChanges)
+  #expect(
+    dirty.changedFileCount
+      == dirty.stagedFileCount + dirty.unstagedFileCount + dirty.untrackedFileCount)
 }
 
 @Test func explicitTaskRunPreservesPlacementAndSnapshotsProjectSettings() throws {
@@ -504,7 +518,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 12)
+  #expect(decoded.version == 13)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -663,14 +677,14 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let change = SyncEnvelope(
     libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
     expectedRevision: task.revision,
-    command: .setTaskStatus(id: task.id, status: .waiting))
+    command: .setTaskStatus(id: task.id, status: .reviewing))
 
   guard case .applied(_, let changed) = try await repository.applyRemote(change) else {
     Issue.record("Expected revision-matched phone status change to apply")
     return
   }
   let saved = try #require(changed.tasks.first)
-  #expect(saved.status == .waiting)
+  #expect(saved.status == .reviewing)
   #expect(saved.section == .planning)
   #expect(saved.completed == false)
   #expect(saved.revision == 1)
@@ -682,7 +696,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     Issue.record("A stale status change must not be applied")
   }
   let afterStale = try await repository.load()
-  #expect(afterStale.tasks.first?.status == .waiting)
+  #expect(afterStale.tasks.first?.status == .reviewing)
 }
 
 @Test func phoneDeleteRejectsAnActiveRunAndPreviousProtocolCommandsFailClearly() throws {
@@ -704,107 +718,83 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 12)
+  #expect(snapshot.version == 13)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }
 }
 
-@Test func unreadAcknowledgmentsSyncBidirectionallyAndNeverMoveBackward() async throws {
+@Test func retiredUnreadAcknowledgmentsAreRejectedWithoutChangingLibrary() async throws {
   let repository = try LibraryRepository(inMemory: true)
-  let project = Project(name: "Unread")
+  let project = Project(name: "No unread state")
   _ = try await repository.apply(.createProject(project))
-  let task = WorkItem(projectID: project.id, title: "Moved")
+  let task = WorkItem(projectID: project.id, title: "Still available")
   _ = try await repository.apply(.createTask(task))
-  _ = try await repository.apply(.move(task.id, .planned, expectedRevision: task.revision))
-  var state = try await repository.syncStateSnapshot()
-  let firstChange = try #require(state.library.activity.last(where: { $0.taskChange != nil }))
-  let phoneID = UUID()
-  let firstRead = SyncEnvelope(
-    libraryID: state.libraryID, deviceID: phoneID, clientSequence: 1,
+  let before = try await repository.load()
+  let envelope = SyncEnvelope(
+    libraryID: try await repository.syncStateSnapshot().libraryID, deviceID: UUID(),
+    expectedRevision: task.revision,
     command: .acknowledgeTaskChanges(
-      taskID: task.id,
-      marker: TaskChangeReadMarker(date: firstChange.date, activityID: firstChange.id)))
-  guard case .applied(_, let readSnapshot) = try await repository.applyRemote(firstRead) else {
-    Issue.record("Expected the phone task acknowledgment to reach the Mac")
+      taskID: task.id, marker: RetiredUnreadMarker(date: .now, activityID: UUID())))
+  let result = try await repository.applyRemote(envelope)
+  guard case .rejected(let message) = result else {
+    Issue.record("Retired unread acknowledgments must be rejected")
     return
   }
-  #expect(readSnapshot.taskReadMarkers[task.id]?.activityID == firstChange.id)
-  #expect(readSnapshot.projectReadMarkers[project.id] == nil)
-
-  _ = try await repository.apply(.move(task.id, .implementation, expectedRevision: 1))
-  state = try await repository.syncStateSnapshot()
-  let newerChange = try #require(state.library.activity.last(where: { $0.taskChange != nil }))
-  #expect(!readSnapshot.taskReadMarkers[task.id]!.acknowledges(newerChange))
-  let newerRead = SyncEnvelope(
-    libraryID: state.libraryID, deviceID: phoneID, clientSequence: 2,
-    command: .acknowledgeTaskChanges(
-      taskID: task.id,
-      marker: TaskChangeReadMarker(date: newerChange.date, activityID: newerChange.id)))
-  guard case .applied = try await repository.applyRemote(newerRead) else {
-    Issue.record("Expected the newer task acknowledgment to apply")
-    return
-  }
-
-  // A delayed acknowledgment from another device cannot roll the shared marker back.
-  let delayed = SyncEnvelope(
-    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
-    command: .acknowledgeTaskChanges(
-      taskID: task.id,
-      marker: TaskChangeReadMarker(date: firstChange.date, activityID: firstChange.id)))
-  guard case .applied = try await repository.applyRemote(delayed) else {
-    Issue.record("Expected the idempotent stale marker to be accepted")
-    return
-  }
-  state = try await repository.syncStateSnapshot()
-  #expect(state.taskReadMarkers[task.id]?.activityID == newerChange.id)
-
-  let projectRead = SyncEnvelope(
-    libraryID: state.libraryID, deviceID: phoneID, clientSequence: 3,
-    command: .acknowledgeProjectChanges(
-      projectID: project.id,
-      marker: TaskChangeReadMarker(date: newerChange.date, activityID: newerChange.id)))
-  guard case .applied(_, let cleared) = try await repository.applyRemote(projectRead) else {
-    Issue.record("Expected project-level acknowledgment to apply independently")
-    return
-  }
-  #expect(cleared.projectReadMarkers[project.id]?.activityID == newerChange.id)
-  #expect(cleared.taskReadMarkers[task.id]?.activityID == newerChange.id)
-  let roundTrip = try JSONDecoder().decode(
-    SyncSnapshot.self, from: JSONEncoder().encode(cleared))
-  #expect(roundTrip.taskReadMarkers == cleared.taskReadMarkers)
-  #expect(roundTrip.projectReadMarkers == cleared.projectReadMarkers)
+  #expect(message.localizedCaseInsensitiveContains("retired"))
+  #expect(try await repository.load() == before)
 }
 
-@Test func sharedReadMarkersSurviveRepositoryRestart() async throws {
-  let root = FileManager.default.temporaryDirectory
-    .appendingPathComponent("StageChaseReadMarkers-\(UUID().uuidString)", isDirectory: true)
-  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-  defer { try? FileManager.default.removeItem(at: root) }
-  let store = root.appendingPathComponent("Library.sqlite")
-  var repository: LibraryRepository? = try LibraryRepository(url: store)
-  let project = Project(name: "Persistent read state")
-  _ = try await repository!.apply(.createProject(project))
-  let task = WorkItem(projectID: project.id, title: "Read once")
-  _ = try await repository!.apply(.createTask(task))
-  _ = try await repository!.apply(.move(task.id, .planned, expectedRevision: task.revision))
-  let before = try await repository!.syncStateSnapshot()
-  let change = try #require(before.library.activity.last(where: { $0.taskChange != nil }))
-  let acknowledgment = SyncEnvelope(
-    libraryID: before.libraryID, deviceID: UUID(),
-    command: .acknowledgeProjectChanges(
-      projectID: project.id,
-      marker: TaskChangeReadMarker(date: change.date, activityID: change.id)))
-  guard case .applied = try await repository!.applyRemote(acknowledgment) else {
-    Issue.record("Expected the project read marker to persist")
-    return
-  }
-  repository = nil
-  repository = try LibraryRepository(url: store)
-  let reopened = try await repository!.syncStateSnapshot()
-  #expect(reopened.projectReadMarkers[project.id]?.activityID == change.id)
-  #expect(reopened.taskReadMarkers[task.id] == nil)
-  repository = nil
+@Test func projectSidebarCountsOnlyOpenTasksAndSeparatesReviewStates() {
+  let project = Project(name: "Counts")
+  var plan = WorkItem(projectID: project.id, title: "Plan", stage: .planned)
+  plan.status = .planApproved
+  var code = WorkItem(projectID: project.id, title: "Code", stage: .implementation)
+  code.status = .reviewing
+  let other = WorkItem(projectID: project.id, title: "Other")
+  var completedReview = WorkItem(projectID: project.id, title: "Completed", stage: .implementation)
+  completedReview.status = .reviewing
+  completedReview.completed = true
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [plan, code, other, completedReview]
+  let counts = library.sidebarCounts(for: project.id)
+  #expect(counts.total == 3)
+  #expect(counts.planReview == 1)
+  #expect(counts.codeReview == 1)
+  #expect(library.sidebarCounts(for: UUID()).total == 0)
+}
+
+@Test func oldActivityAndSnapshotUnreadMetadataDecodeWithoutRecreatingState() throws {
+  let project = Project(name: "Legacy")
+  let task = WorkItem(projectID: project.id, title: "Legacy task")
+  let activity = Activity("Moved", projectID: project.id, taskID: task.id)
+  var activityJSON = try #require(
+    JSONSerialization.jsonObject(with: JSONEncoder().encode(activity)) as? [String: Any])
+  activityJSON["taskChange"] = "stageChanged"
+  let decodedActivity = try JSONDecoder().decode(
+    Activity.self, from: JSONSerialization.data(withJSONObject: activityJSON))
+  #expect(decodedActivity.message == "Moved")
+
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 1, library: library)
+  var snapshotJSON = try #require(
+    JSONSerialization.jsonObject(with: JSONEncoder.syncEncoder.encode(snapshot)) as? [String: Any])
+  snapshotJSON["taskReadMarkers"] = [
+    task.id.uuidString: [
+      "date": Date.now.timeIntervalSince1970
+    ]
+  ]
+  snapshotJSON["projectReadMarkers"] = [
+    project.id.uuidString: [
+      "date": Date.now.timeIntervalSince1970
+    ]
+  ]
+  let decodedSnapshot = try JSONDecoder.syncDecoder.decode(
+    SyncSnapshot.self, from: JSONSerialization.data(withJSONObject: snapshotJSON))
+  #expect(try decodedSnapshot.replica().tasks.first?.id == task.id)
 }
 
 @Test func directGitRequestsStayOutOfTheEditCommandProtocol() throws {

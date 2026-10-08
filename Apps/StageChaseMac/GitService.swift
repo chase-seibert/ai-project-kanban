@@ -8,6 +8,7 @@ struct GitRepositoryStatus: Sendable {
   var unstagedFileCount: Int
   var untrackedFileCount: Int
   var isEmptyRepository: Bool
+  var hasChanges: Bool { changedFileCount > 0 }
 }
 
 struct GitCommitResult: Sendable {

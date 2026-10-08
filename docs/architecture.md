@@ -45,9 +45,9 @@ device behavior remains a separate acceptance check from builds and fixtures.
   records remain persisted. Mac opens saved Codex thread links directly. iPhone
   tries the same URL and offers a Mac continuation message plus session-ID copy
   when no handler accepts it. New Project and Edit Project are distinct routes.
-  Move and completion activity is tagged for unread badges. Task and project
-  read-through markers are synchronized separately, so opening a task never clears
-  its project marker and selecting a project never clears task markers.
+  Project sidebar counts derive from open tasks and their status. Project Git status
+  is transient presentation data, read locally on Mac and through direct paired-Mac
+  requests on iPhone; it is never persisted or included in snapshots.
   Model configuration is a global Mac preference with optional project/task
   overrides; queued runs save the resolved model, effort, policy, and source.
   The Mac Projects List and `MenuBarExtra` show Codex usage, backed by a Mac-only
@@ -409,53 +409,61 @@ release. Protocol source:
 [OpenAI app-server](https://learn.chatgpt.com/docs/app-server); the installed CLI's
 generated JSON schema was checked for exact request spellings.
 
+## Project sidebar counts and Git state
+
+The shared project list derives total, plan-review, and code-review counts from
+open library tasks. `.planApproved` and `.reviewing` remain distinct and reuse
+their status badge colors. Rows place four compact count badges to the right of
+the project name: neutral total, blue plan review, green code review, and orange
+Git changes. Missing or failed Git status uses a dash in the Git position. The
+Mac project header echoes a changed-file count in orange. Main board columns
+show blue and green review counts only when open tasks in that column have the
+matching status. Project Git state is transient: Mac rows call the existing Git
+service, while paired iPhone rows request status from the Mac. The sidebar
+refreshes when rows appear and existing Git actions complete; it does not poll
+in the background.
+
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Protocol version 10 adds reversible project deletion and
-lifecycle revisions; version 9 adds task short IDs and their allocator state;
-version 8 adds task attachment metadata and direct
-image upload/download requests; version 7 adds timestamped Codex usage snapshots;
-version 6 adds explicit project creation from a paired phone; version 5 adds the linked Codex thread ID to read-only run
-snapshots; version 4 added synchronized task and project read markers and
-acknowledgment commands. Version 9 and older clients are rejected explicitly;
-they must update before syncing with this build. Queued phone edits remain a
-small allowlist (project creation/delete/restore, task creation/edit/move/reorder/complete/delete,
-and read acknowledgments) with expected task or project deletion revisions where applicable. Each
-command carries the phone edit timestamp captured when queued and the device's
-monotonic client sequence. A stale task edit is rebased only when its source timestamp is newer
-than the Mac task timestamp. Exact timestamp ties favor the Mac; ties between
-phone writes use device ID and then client sequence. Phone timestamps more than
-five minutes in the future are capped at that boundary. Accepted phone timestamps
-are retained with task sync metadata so a later queued edit can be ordered; a
-subsequent Mac task mutation clears that phone marker. Older writes receive a
-durable superseded receipt and the current snapshot, so the outbox advances.
-Unresolvable task, reorder, active-run, or project-setting conflicts resolve to
-the current Mac snapshot and consume the queued operation. After a successful
-sync exchange, the phone acknowledges every command that was applied, superseded,
-or rejected and replaced by the authoritative snapshot. Network failures keep
-the durable outbox intact. A separate authenticated request
-path is used only after a visible phone action: it updates a project's Codex
-profile/model with compare-before-write values, reads a bounded saved plan,
-refreshes the desktop model catalog, or requests a plan/run action. These
-requests never enter background refresh or the offline edit queue. The Mac
-checks task revisions before acting; planning and run requests open the matching
-existing Mac confirmation before the runner starts. Plan
-reads resolve relative paths inside the configured project folder and return
-Markdown without exposing a Mac filesystem path. The Mac `LibraryRepository` remains the only authoritative writer. It stores a library
+sanitized snapshots. Protocol version 13 removes unread acknowledgment commands
+and read-marker maps from snapshots; clients using earlier protocol versions are
+rejected before replica or outbox state changes and must update before syncing.
+The legacy acknowledgment command shape remains decodable only so a saved phone
+outbox can be opened; sending one is rejected as retired. Old sync metadata keys
+and old `Activity.taskChange` payload fields are ignored on decode and are not
+written again. Ordinary activity messages remain available for audit history.
+Protocol version 12 adds revision-checked task status changes; versions 11 and
+10 add plan approval and reversible project deletion; version 9 adds task short
+IDs; version 8 adds task attachment metadata and direct image requests; version 7
+adds timestamped Codex usage snapshots; version 6 adds project creation; and
+version 5 adds linked Codex thread IDs to read-only run snapshots. Queued phone
+edits remain a small allowlist (project creation/delete/restore, task
+creation/edit/move/reorder/complete/delete, and project Codex settings) with
+expected task or project deletion revisions where applicable. Each command
+carries the phone edit timestamp captured when queued and the device's monotonic
+client sequence. Stale task edits are rebased only when their source timestamp is
+newer than the Mac task timestamp. Exact timestamp ties favor the Mac; ties
+between phone writes use device ID and then client sequence. Phone timestamps
+more than five minutes in the future are capped at that boundary. Accepted phone
+timestamps are retained with task sync metadata so a later queued edit can be
+ordered; a subsequent Mac task mutation clears that phone marker. Older writes
+receive a durable superseded receipt and the current snapshot, so the outbox
+advances. Unresolvable conflicts resolve to the current Mac snapshot and consume
+the queued operation. After a successful sync exchange, the phone acknowledges
+commands that were applied, superseded, or rejected and replaced by the
+authoritative snapshot. Network failures keep the durable outbox intact. A
+separate authenticated request path is used only after a visible phone action.
+It never enters background refresh or the offline edit queue. The Mac
+`LibraryRepository` remains the only authoritative writer. It stores a library
 identity, monotonic sequence, device high-water marks, and operation receipts in
 the existing SwiftData metadata rows, committing accepted edits and receipts in
 one save. A changed snapshot is returned when the phone cursor is stale; an
-unchanged response avoids retransmitting the library every foreground poll.
-The explicit **Refresh everything from Mac** action first submits queued phone
-operations, including read acknowledgments, then requests an unconditional full
-snapshot. A transport failure leaves unaccepted operations in the outbox. The
-Mac stores task and project read markers in the existing metadata row alongside
-the sequence and receipts, and snapshots return the authoritative maps. A marker
-contains an activity date and ID; equal dates are ordered by activity UUID, while
-date-only legacy markers acknowledge all activity at their timestamp. Markers
-advance monotonically, so a delayed phone acknowledgment cannot hide a newer
-change. Version 3 clients fail clearly rather than exchanging a partial snapshot.
+unchanged response avoids retransmitting the library every foreground poll. The
+explicit **Refresh everything from Mac** action submits supported queued edits
+then requests an unconditional full snapshot. A transport failure leaves
+unaccepted operations in the outbox. Version 3 clients fail clearly rather than
+exchanging a partial snapshot.
 
 The Mac app starts `NWListener` on port 47928 only after the user enables local
 sync from Settings → Connection. That explicit choice is remembered, so the

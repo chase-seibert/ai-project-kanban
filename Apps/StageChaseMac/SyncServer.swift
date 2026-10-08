@@ -422,8 +422,6 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
           response = .snapshot(
             SyncSnapshot(
               libraryID: state.libraryID, sequence: state.sequence, library: state.library,
-              taskReadMarkers: state.taskReadMarkers,
-              projectReadMarkers: state.projectReadMarkers,
               codexUsage: codexUsageSnapshot))
         }
       case .fullSnapshot:
@@ -432,8 +430,6 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
         response = .snapshot(
           SyncSnapshot(
             libraryID: state.libraryID, sequence: state.sequence, library: state.library,
-            taskReadMarkers: state.taskReadMarkers,
-            projectReadMarkers: state.projectReadMarkers,
             codexUsage: codexUsageSnapshot))
       case .command(let envelope):
         guard envelope.deviceID == deviceID else { return .error("Invalid device identity.") }

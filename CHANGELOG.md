@@ -6,7 +6,13 @@
   and task detail on Mac and iPhone. Add a persistent status filter to Recent
   Tasks. Sync phone status changes with revision checks, and share only plan
   availability metadata so a saved Mac path is not exposed to the phone.
-- Advance the strict paired sync protocol to version 12.
+- Advance the strict paired sync protocol to version 13 and remove unread
+  markers, clear-on-open behavior, and synchronization of read acknowledgments.
+- Replace unread badges with compact per-project open-item, plan-review,
+  code-review, and Git change counts. Reuse blue Plan Approved, green Reviewing,
+  and orange Git treatments; use a dash when Git status is unavailable. Echo
+  review counts in matching board columns and changed-file counts in the project
+  header.
 - Keep Waiting, Error, and Quota out of manual status choices, and remove the
   duplicate section and status row from task detail while retaining completion.
 - Replace the Recent Tasks status selector with cross-project workspace views

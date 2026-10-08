@@ -362,22 +362,15 @@ Phone confirmation for automated transitions remains open.
   a remote host/workspace and pass task context. Do not construct a remote URL;
   keep task context copyable until Codex documents that contract.
 
-## Unread task changes
+## Project sidebar review and Git state
 
-- As a user, I want task cards to identify column moves and completion-status
-  changes that I have not opened, so I can see what changed after returning.
-- As a user, I want each project row to show how many tasks have unread changes,
-  so I can find affected projects quickly.
-- Opening a task clears only that task's badge. Selecting a project clears its
-  project-level badge independently. Read markers are shared through Mac snapshots,
-  so acknowledging on either paired device clears the same indicator on both.
-- Offline phone acknowledgments appear immediately and remain in the durable outbox
-  until accepted. Full refresh first resolves queued operations and then applies
-  the authoritative snapshot; transport failures preserve unaccepted acknowledgments.
-- A read marker records the activity date and ID. Date ties use activity UUID order,
-  and accepted markers only advance, so delayed acknowledgments cannot hide newer changes.
-- Only column and completion-status changes create these badges; task edits and
-  agent activity do not.
+- As a user, I want each project row to show compact unlabeled counts for its total open tasks, tasks ready for plan review, tasks ready for code review, and changed Git files.
+- Plan-review counts use the blue Plan Approved badge treatment; code-review counts use the green Reviewing treatment; changed-file counts use orange. The number colors and treatments explain the values without repeated labels.
+- Missing or unavailable Git status uses a dash in the Git count position; the sidebar does not show an unavailable message.
+- Review counts exclude completed tasks and are derived from the current library. Opening a task or selecting a project does not change any counts or add read state.
+- Git status is transient presentation data. A clean repository shows zero changed files; changed repositories show the changed-file count, including staged, unstaged, and untracked work. Refresh occurs when the sidebar row appears and after existing Git actions, without background polling.
+- Mac and iPhone align the four count badges to the right of the project name, allowing long names to wrap beneath themselves. The phone reads Git state through an explicit direct request to its paired Mac.
+- The Mac project header echoes the Git changed-file count in orange. Each main board column shows blue plan-review and green code-review badges only when it contains open tasks with those statuses; the counts are scoped to that column.
 
 ## Codex Desktop task tools
 

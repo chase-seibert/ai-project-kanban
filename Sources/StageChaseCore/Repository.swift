@@ -69,12 +69,9 @@ private struct StoredSyncState: Codable, Sendable {
   var deviceHighWater: [UUID: UInt64] = [:]
   var receipts: [UUID: StoredSyncReceipt] = [:]
   var phoneTaskVersions: [UUID: StoredTaskEditVersion] = [:]
-  var taskReadMarkers: [UUID: TaskChangeReadMarker] = [:]
-  var projectReadMarkers: [UUID: TaskChangeReadMarker] = [:]
 
   private enum CodingKeys: String, CodingKey {
-    case libraryID, sequence, taskShortIDHighWaterMark, deviceHighWater, receipts, phoneTaskVersions, taskReadMarkers,
-      projectReadMarkers
+    case libraryID, sequence, taskShortIDHighWaterMark, deviceHighWater, receipts, phoneTaskVersions
   }
 
   init() {}
@@ -83,18 +80,14 @@ private struct StoredSyncState: Codable, Sendable {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     libraryID = try values.decodeIfPresent(UUID.self, forKey: .libraryID) ?? UUID()
     sequence = try values.decodeIfPresent(UInt64.self, forKey: .sequence) ?? 0
-    taskShortIDHighWaterMark = try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
+    taskShortIDHighWaterMark =
+      try values.decodeIfPresent(Int.self, forKey: .taskShortIDHighWaterMark) ?? 0
     deviceHighWater =
       try values.decodeIfPresent([UUID: UInt64].self, forKey: .deviceHighWater) ?? [:]
     receipts = try values.decodeIfPresent([UUID: StoredSyncReceipt].self, forKey: .receipts) ?? [:]
     phoneTaskVersions =
       try values.decodeIfPresent(
         [UUID: StoredTaskEditVersion].self, forKey: .phoneTaskVersions) ?? [:]
-    taskReadMarkers =
-      try values.decodeIfPresent([UUID: TaskChangeReadMarker].self, forKey: .taskReadMarkers) ?? [:]
-    projectReadMarkers =
-      try values.decodeIfPresent([UUID: TaskChangeReadMarker].self, forKey: .projectReadMarkers)
-      ?? [:]
   }
 }
 
@@ -111,8 +104,6 @@ public struct SyncLibraryState: Sendable {
   public var libraryID: UUID
   public var sequence: UInt64
   public var library: Library
-  public var taskReadMarkers: [UUID: TaskChangeReadMarker]
-  public var projectReadMarkers: [UUID: TaskChangeReadMarker]
 }
 
 /// One durable row per entity; mutations update only changed rows in a single SQLite transaction.
@@ -296,45 +287,12 @@ public actor LibraryRepository {
   public func syncStateSnapshot() throws -> SyncLibraryState {
     let library = try load()
     let state = syncState ?? StoredSyncState()
-    return SyncLibraryState(
-      libraryID: state.libraryID, sequence: state.sequence, library: library,
-      taskReadMarkers: state.taskReadMarkers, projectReadMarkers: state.projectReadMarkers)
-  }
-
-  /// Persists a Mac-side read action in the same durable metadata used by phone snapshots.
-  public func acknowledgeTaskRead(_ taskID: UUID, marker: TaskChangeReadMarker) throws {
-    var state = syncState ?? StoredSyncState()
-    let current = try load()
-    guard current.tasks.contains(where: { $0.id == taskID }),
-      current.activity.contains(where: {
-        $0.taskID == taskID && $0.taskChange != nil && Self.marker($0, isValidFor: marker)
-      })
-    else { return }
-    state.taskReadMarkers[taskID] = .later(state.taskReadMarkers[taskID], marker)
-    state.sequence &+= 1
-    try persist(current, syncState: state)
-    syncState = state
-  }
-
-  public func acknowledgeProjectRead(_ projectID: UUID, marker: TaskChangeReadMarker) throws {
-    var state = syncState ?? StoredSyncState()
-    let current = try load()
-    guard current.projects.contains(where: { $0.id == projectID }),
-      current.activity.contains(where: {
-        $0.projectID == projectID && $0.taskChange != nil && Self.marker($0, isValidFor: marker)
-      })
-    else { return }
-    state.projectReadMarkers[projectID] = .later(state.projectReadMarkers[projectID], marker)
-    state.sequence &+= 1
-    try persist(current, syncState: state)
-    syncState = state
+    return SyncLibraryState(libraryID: state.libraryID, sequence: state.sequence, library: library)
   }
 
   /// Replica application persists downloaded Mac state without performing local-run recovery.
   public func replaceReplica(
     _ library: Library, libraryID: UUID, sequence: UInt64,
-    taskReadMarkers: [UUID: TaskChangeReadMarker] = [:],
-    projectReadMarkers: [UUID: TaskChangeReadMarker] = [:]
   ) throws {
     guard !recoverActiveRuns else {
       throw BoardError.invalid("Replica data requires a non-recovering repository.")
@@ -350,8 +308,6 @@ public actor LibraryRepository {
     nextState.libraryID = libraryID
     nextState.sequence = sequence
     nextState.taskShortIDHighWaterMark = library.taskShortIDHighWaterMark
-    nextState.taskReadMarkers = taskReadMarkers
-    nextState.projectReadMarkers = projectReadMarkers
     try persist(library, syncState: nextState)
     Self.removeDeletedAttachmentFiles(from: existing, keeping: library)
     cached = library
@@ -376,8 +332,7 @@ public actor LibraryRepository {
         return .rejected(message: "This operation ID was already used for different content.")
       }
       let snapshot = SyncSnapshot(
-        libraryID: state.libraryID, sequence: state.sequence, library: current,
-        taskReadMarkers: state.taskReadMarkers, projectReadMarkers: state.projectReadMarkers)
+        libraryID: state.libraryID, sequence: state.sequence, library: current)
       return receipt.superseded
         ? .superseded(sequence: receipt.sequence, current: snapshot)
         : .applied(sequence: receipt.sequence, snapshot: snapshot)
@@ -386,16 +341,6 @@ public actor LibraryRepository {
     guard envelope.clientSequence > highWater else {
       return .rejected(
         message: "The phone’s queued operation sequence is out of date. Refresh and retry.")
-    }
-    if case .acknowledgeTaskChanges(let taskID, let marker) = envelope.command {
-      return try applyReadAcknowledgment(
-        envelope, digest: digest, current: current, state: &state,
-        taskID: taskID, projectID: nil, marker: marker)
-    }
-    if case .acknowledgeProjectChanges(let projectID, let marker) = envelope.command {
-      return try applyReadAcknowledgment(
-        envelope, digest: digest, current: current, state: &state,
-        taskID: nil, projectID: projectID, marker: marker)
     }
     do {
       var commandEnvelope = envelope
@@ -450,8 +395,7 @@ public actor LibraryRepository {
         return .applied(
           sequence: sequence,
           snapshot: SyncSnapshot(
-            libraryID: state.libraryID, sequence: sequence, library: resolved,
-            taskReadMarkers: state.taskReadMarkers, projectReadMarkers: state.projectReadMarkers))
+            libraryID: state.libraryID, sequence: sequence, library: resolved))
       }
       if let taskID = Self.lastWriteWinsTaskID(in: envelope.command),
         let index = updated.tasks.firstIndex(where: { $0.id == taskID }),
@@ -476,8 +420,7 @@ public actor LibraryRepository {
       return .applied(
         sequence: state.sequence,
         snapshot: SyncSnapshot(
-          libraryID: state.libraryID, sequence: state.sequence, library: updated,
-          taskReadMarkers: state.taskReadMarkers, projectReadMarkers: state.projectReadMarkers))
+          libraryID: state.libraryID, sequence: state.sequence, library: updated))
     } catch BoardError.conflict {
       return .conflict(current: Self.snapshot(for: current, state: state))
     } catch BoardError.busy {
@@ -489,62 +432,8 @@ public actor LibraryRepository {
     }
   }
 
-  private func applyReadAcknowledgment(
-    _ envelope: SyncEnvelope, digest: String, current: Library,
-    state: inout StoredSyncState, taskID: UUID?, projectID: UUID?, marker: TaskChangeReadMarker
-  ) throws -> SyncCommandResult {
-    let validScope: Bool
-    if let taskID {
-      validScope =
-        current.tasks.contains(where: { $0.id == taskID })
-        && current.activity.contains(where: {
-          $0.taskID == taskID && $0.taskChange != nil && Self.marker($0, isValidFor: marker)
-        })
-    } else if let projectID {
-      validScope =
-        current.projects.contains(where: { $0.id == projectID })
-        && current.activity.contains(where: {
-          $0.projectID == projectID && $0.taskChange != nil && Self.marker($0, isValidFor: marker)
-        })
-    } else {
-      validScope = false
-    }
-    guard validScope else {
-      return .rejected(message: "The unread change is no longer available. Refresh and retry.")
-    }
-    if let taskID {
-      state.taskReadMarkers[taskID] = .later(state.taskReadMarkers[taskID], marker)
-    } else if let projectID {
-      state.projectReadMarkers[projectID] = .later(state.projectReadMarkers[projectID], marker)
-    }
-    state.sequence &+= 1
-    state.deviceHighWater[envelope.deviceID] = envelope.clientSequence
-    state.receipts[envelope.operationID] = StoredSyncReceipt(
-      payloadDigest: digest, sequence: state.sequence, deviceID: envelope.deviceID,
-      clientSequence: envelope.clientSequence)
-    try Self.trimReceipts(in: &state)
-    try persist(current, syncState: state)
-    cached = current
-    syncState = state
-    return .applied(
-      sequence: state.sequence,
-      snapshot: SyncSnapshot(
-        libraryID: state.libraryID, sequence: state.sequence, library: current,
-        taskReadMarkers: state.taskReadMarkers, projectReadMarkers: state.projectReadMarkers))
-  }
-
-  private static func marker(_ activity: Activity, isValidFor marker: TaskChangeReadMarker) -> Bool
-  {
-    if let activityID = marker.activityID {
-      return activity.id == activityID && activity.date == marker.date
-    }
-    return activity.date <= marker.date
-  }
-
   private static func snapshot(for library: Library, state: StoredSyncState) -> SyncSnapshot {
-    SyncSnapshot(
-      libraryID: state.libraryID, sequence: state.sequence, library: library,
-      taskReadMarkers: state.taskReadMarkers, projectReadMarkers: state.projectReadMarkers)
+    SyncSnapshot(libraryID: state.libraryID, sequence: state.sequence, library: library)
   }
 
   private func persistSuperseded(
@@ -564,8 +453,7 @@ public actor LibraryRepository {
     return .superseded(
       sequence: state.sequence,
       current: SyncSnapshot(
-        libraryID: state.libraryID, sequence: state.sequence, library: current,
-        taskReadMarkers: state.taskReadMarkers, projectReadMarkers: state.projectReadMarkers))
+        libraryID: state.libraryID, sequence: state.sequence, library: current))
   }
 
   private static func lastWriteWinsTaskID(in command: SyncCommand) -> UUID? {
@@ -650,7 +538,9 @@ public actor LibraryRepository {
 
   /// The Mac repository is the sole allocator. Client-supplied IDs are discarded on create;
   /// repository actor serialization makes allocation atomic with the persisted mutation.
-  private static func applyAuthoritative(_ command: Mutation, to current: Library) throws -> Library {
+  private static func applyAuthoritative(
+    _ command: Mutation, to current: Library
+  ) throws -> Library {
     var acceptedCommand = command
     if case .createTask(var item, let configuration) = command {
       item.shortID = nil
@@ -711,7 +601,8 @@ public actor LibraryRepository {
     }
     if cached == nil { try upsert(1, key: "schema", kind: "metadata", project: nil) }
     if var state = syncState ?? self.syncState {
-      state.taskShortIDHighWaterMark = max(state.taskShortIDHighWaterMark, library.taskShortIDHighWaterMark)
+      state.taskShortIDHighWaterMark = max(
+        state.taskShortIDHighWaterMark, library.taskShortIDHighWaterMark)
       try upsert(state, key: "sync-state", kind: "metadata", project: nil)
       self.syncState = state
     }

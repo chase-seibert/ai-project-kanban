@@ -302,25 +302,31 @@ struct ProjectEditor: View {
     private var currentProject: Project {
       model.library.projects.first(where: { $0.id == project.id }) ?? project
     }
-    private var gitSummary: String {
-      if model.gitStatusErrors[project.id] != nil { return "Git unavailable" }
-      guard let status = model.gitStatuses[project.id] else { return "Repository" }
-      return
-        "\(status.branch ?? "Detached HEAD") · \(status.changedFileCount == 0 ? "Clean" : "\(status.changedFileCount) changed")"
-    }
-
     var body: some View {
       HStack(spacing: 12) {
         makeTargetMenu
         Button {
           showingGit = true
         } label: {
-          Label(
-            gitSummary,
-            systemImage: model.gitStatusErrors[project.id] == nil
-              ? "chevron.left.forwardslash.chevron.right" : "exclamationmark.triangle"
-          )
-          .lineLimit(1)
+          HStack(spacing: 6) {
+            Label(
+              model.gitStatuses[project.id]?.branch ?? "Repository",
+              systemImage:
+                "chevron.left.forwardslash.chevron.right"
+            )
+            .lineLimit(1)
+            if let status = model.gitStatuses[project.id] {
+              CompactCountBadge(
+                value: "\(status.changedFileCount)",
+                color: status.hasChanges ? .orange : .secondary,
+                accessibilityLabel: status.hasChanges
+                  ? "\(status.changedFileCount) Git changes" : "Git clean",
+                symbol: status.hasChanges ? "circle.fill" : nil)
+            } else {
+              CompactCountBadge(
+                value: "-", color: .secondary, accessibilityLabel: "Git status dash")
+            }
+          }
         }
         .buttonStyle(.borderless)
         .popover(isPresented: $showingGit) {

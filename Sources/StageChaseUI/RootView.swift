@@ -28,7 +28,7 @@ struct RootView: View {
         #if os(macOS)
           NavigationSplitView {
             ProjectSidebar()
-              .navigationSplitViewColumnWidth(min: 200, ideal: 225, max: 310)
+              .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 400)
           } detail: {
             HStack(spacing: 0) {
               if let workspaceTaskView = model.workspaceTaskView {
@@ -407,58 +407,13 @@ struct ProjectSidebar: View {
       }
       Section {
         ForEach(model.library.activeProjects) { project in
-          let unreadCount = model.unreadProjectChangeCount(project.id)
-          HStack(spacing: 8) {
-            Button {
-              model.select(project.id)
-              onOpen?()
-            } label: {
-              HStack(spacing: 10) {
-                Image(systemName: "square.stack.3d.up.fill").foregroundStyle(
-                  project.id == model.selectedProjectID ? Color.accentColor : .secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                  Text(project.name).stageFont(.body, weight: .medium).foregroundStyle(.primary)
-                  #if os(iOS)
-                    Text("\(model.library.items(in: project.id).count) open tasks").stageFont(
-                      .caption
-                    )
-                    .foregroundStyle(.secondary)
-                  #endif
-                }
-                Spacer()
-                #if os(macOS)
-                  Text("\(model.library.items(in: project.id).count)").stageFont(.caption)
-                    .monospacedDigit().foregroundStyle(.secondary)
-                #else
-                  Image(systemName: "chevron.right").stageFont(.caption).foregroundStyle(.tertiary)
-                #endif
-              }
-              .padding(.vertical, 6)
-              .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if unreadCount > 0 {
-              Button {
-                model.markProjectChangesRead(project.id)
-              } label: {
-                Text("\(unreadCount)")
-                  .font(.caption2.weight(.bold).monospacedDigit())
-                  .foregroundStyle(.white)
-                  .padding(.horizontal, 7)
-                  .padding(.vertical, 3)
-                  .background(Color.accentColor, in: Capsule())
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Clear \(unreadCount) changed tasks in \(project.name)")
-              .accessibilityIdentifier("unread-project-\(project.id.uuidString)")
-              .help("Clear changed task badges for this project")
-            }
+          let counts = model.library.sidebarCounts(for: project.id)
+          ProjectSidebarProjectRow(
+            project: project, counts: counts, isSelected: project.id == model.selectedProjectID
+          ) {
+            model.select(project.id)
+            onOpen?()
           }
-          .accessibilityElement(children: .contain)
-          .listRowBackground(
-            project.id == model.selectedProjectID ? Color.accentColor.opacity(0.1) : .clear
-          )
           .contextMenu {
             #if os(macOS)
               Button("Project settings…") { model.sheet = .editProject(project) }
@@ -514,7 +469,10 @@ struct ProjectSidebar: View {
             }
             .buttonStyle(.plain)
             .listRowBackground(
-              model.workspaceTaskView == preset ? Color.accentColor.opacity(0.1) : .clear)
+              model.workspaceTaskView == preset
+                ? Color.accentColor.opacity(0.1)
+                : .clear
+            )
             .accessibilityIdentifier("workspace-\(preset.rawValue)-navigation")
           }
           Button {
@@ -813,10 +771,14 @@ struct WorkspaceTasksView: View {
 
   private var emptyTitle: String {
     switch preset {
-    case .planApproved: model.search.isEmpty ? "No approved plans ready to start" : "No matching tasks"
-    case .inProgress: model.search.isEmpty ? "No active planning or build runs" : "No matching tasks"
-    case .reviewing: model.search.isEmpty ? "Nothing to review" : "No matching tasks"
-    case .recentlyCompleted: model.search.isEmpty ? "No recently completed tasks" : "No matching tasks"
+    case .planApproved:
+      model.search.isEmpty ? "No approved plans ready to start" : "No matching tasks"
+    case .inProgress:
+      model.search.isEmpty ? "No active planning or build runs" : "No matching tasks"
+    case .reviewing:
+      model.search.isEmpty ? "Nothing to review" : "No matching tasks"
+    case .recentlyCompleted:
+      model.search.isEmpty ? "No recently completed tasks" : "No matching tasks"
     }
   }
 
@@ -987,4 +949,137 @@ private struct GeneralSettingsForm: View {
       }
   }
 
+}
+
+private struct ProjectSidebarProjectRow: View {
+  @Environment(AppModel.self) private var model
+  let project: Project
+  let counts: ProjectSidebarCounts
+  let isSelected: Bool
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      HStack(alignment: .top, spacing: 7) {
+        Image(systemName: "square.stack.3d.up.fill")
+          .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+          .padding(.top, 3)
+        Text(project.name).stageFont(.body, weight: .medium).foregroundStyle(.primary)
+          .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 4) {
+          SidebarCountBadge(
+            value: "\(counts.total)", color: .secondary,
+            accessibilityLabel: "\(counts.total) items")
+          SidebarCountBadge(
+            value: "\(counts.planReview)",
+            color: TaskStatus.planApproved.badgeStyle.color.swiftUIColor,
+            accessibilityLabel: "\(counts.planReview) ready for plan review")
+          SidebarCountBadge(
+            value: "\(counts.codeReview)",
+            color: TaskStatus.reviewing.badgeStyle.color.swiftUIColor,
+            accessibilityLabel: "\(counts.codeReview) ready for code review")
+          ProjectSidebarGitStatus(projectID: project.id)
+        }
+      }
+      .padding(.vertical, 7)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(
+      "\(project.name), \(counts.total) items, "
+        + "\(counts.planReview) ready for plan review, "
+        + "\(counts.codeReview) ready for code review, "
+        + "\(modelGitAccessibilityDescription)"
+    )
+    .listRowBackground(isSelected ? Color.accentColor.opacity(0.1) : .clear)
+  }
+
+  private var modelGitAccessibilityDescription: String {
+    #if os(macOS)
+      if let status = model.gitStatuses[project.id] {
+        return status.hasChanges ? "\(status.changedFileCount) Git changes" : "Git clean"
+      }
+    #else
+      let key = "\(project.id.uuidString):project"
+      if let status = model.phoneGitStatuses[key] {
+        return status.hasChanges ? "\(status.changedFileCount) Git changes" : "Git clean"
+      }
+    #endif
+    return "Git status dash"
+  }
+}
+
+private struct SidebarCountBadge: View {
+  let value: String
+  let color: Color
+  let accessibilityLabel: String
+
+  var body: some View {
+    CompactCountBadge(value: value, color: color, accessibilityLabel: accessibilityLabel)
+  }
+}
+
+private struct ProjectSidebarGitStatus: View {
+  @Environment(AppModel.self) private var model
+  let projectID: UUID
+
+  var body: some View {
+    Group {
+      #if os(macOS)
+        if let status = model.gitStatuses[projectID] {
+          macGitBadge(status)
+        } else {
+          macGitBadge(nil)
+        }
+      #else
+        let key = "\(projectID.uuidString):project"
+        if let status = model.phoneGitStatuses[key] {
+          badge(status)
+        } else {
+          badge(nil)
+        }
+      #endif
+    }
+    .task(id: projectID) {
+      #if os(macOS)
+        await model.refreshGitStatus(projectID: projectID)
+      #else
+        await model.refreshPhoneGitStatus(projectID: projectID)
+      #endif
+    }
+  }
+
+  @ViewBuilder
+  private func badge(_ status: SyncGitStatus?) -> some View {
+    if let status {
+      CompactCountBadge(
+        value: "\(status.changedFileCount)",
+        color: status.hasChanges ? Color.orange : .secondary,
+        accessibilityLabel: status.hasChanges
+          ? "\(status.changedFileCount) Git changes" : "Git clean",
+        symbol: status.hasChanges ? "circle.fill" : nil
+      )
+    } else {
+      CompactCountBadge(value: "-", color: .secondary, accessibilityLabel: "Git status dash")
+    }
+  }
+
+  #if os(macOS)
+    @ViewBuilder
+    private func macGitBadge(_ status: GitRepositoryStatus?) -> some View {
+      if let status {
+        CompactCountBadge(
+          value: "\(status.changedFileCount)",
+          color: status.hasChanges ? Color.orange : .secondary,
+          accessibilityLabel: status.hasChanges
+            ? "\(status.changedFileCount) Git changes" : "Git clean",
+          symbol: status.hasChanges ? "circle.fill" : nil
+        )
+      } else {
+        CompactCountBadge(value: "-", color: .secondary, accessibilityLabel: "Git status dash")
+      }
+    }
+  #endif
 }

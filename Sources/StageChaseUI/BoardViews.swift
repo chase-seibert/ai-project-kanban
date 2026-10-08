@@ -230,15 +230,34 @@ struct BoardLane: View {
   @State private var saving = false
   @State private var captureError: String?
   @FocusState private var captureFocused: Bool
+  private var visibleItems: [WorkItem] { model.items(section) }
+  private var openItems: [WorkItem] { visibleItems.filter { !$0.completed } }
+  private var planReviewCount: Int { openItems.filter { $0.status == .planApproved }.count }
+  private var codeReviewCount: Int { openItems.filter { $0.status == .reviewing }.count }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
         Image(systemName: section.symbol).foregroundStyle(section.color)
         Text(section.title).stageFont(.headline)
-        Text("\(model.items(section).count)").stageFont(.caption).monospacedDigit().foregroundStyle(
+        Text("\(visibleItems.count)").stageFont(.caption).monospacedDigit().foregroundStyle(
           .secondary
         )
         .padding(.horizontal, 7).padding(.vertical, 3).background(.quaternary, in: Capsule())
+        if planReviewCount > 0 {
+          CompactCountBadge(
+            value: "\(planReviewCount)",
+            color: TaskStatus.planApproved.badgeStyle.color.swiftUIColor,
+            accessibilityLabel: "\(planReviewCount) plan review items in \(section.title)",
+            symbol: TaskStatus.planApproved.badgeStyle.symbol)
+        }
+        if codeReviewCount > 0 {
+          CompactCountBadge(
+            value: "\(codeReviewCount)",
+            color: TaskStatus.reviewing.badgeStyle.color.swiftUIColor,
+            accessibilityLabel: "\(codeReviewCount) code review items in \(section.title)",
+            symbol: TaskStatus.reviewing.badgeStyle.symbol)
+        }
         Spacer(minLength: 0)
         #if os(macOS)
           Button {
@@ -255,10 +274,10 @@ struct BoardLane: View {
       Rectangle().fill(section.color.opacity(0.5)).frame(height: 2)
       ScrollView(.vertical) {
         LazyVStack(alignment: .leading, spacing: 10) {
-          ForEach(model.items(section)) { item in
+          ForEach(visibleItems) { item in
             TaskCard(item: item, editingTaskID: $editingTaskID, onOpenTask: onOpenTask)
           }
-          if model.items(section).isEmpty && !adding {
+          if visibleItems.isEmpty && !adding {
             VStack(spacing: 8) {
               Image(systemName: section.symbol).stageFont(.title2).foregroundStyle(
                 section.color.opacity(0.65))
@@ -626,10 +645,7 @@ struct TaskCard: View {
         }
       }
     }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
-      .background(
-        model.unreadTaskChangeKind(for: item.id) == nil ? Palette.card : Color.blue.opacity(0.08),
-        in: RoundedRectangle(cornerRadius: 12)
-      )
+      .background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
       .overlay(
         RoundedRectangle(cornerRadius: 12).stroke(
           model.boardSelectedTaskID == item.id || model.selectedTaskID == item.id
@@ -657,7 +673,6 @@ struct TaskCard: View {
   }
 
   private func openDetails() {
-    model.markTaskChangesRead(item.id)
     #if os(macOS)
       model.selectedTaskID = item.id
       if scope == .board {
@@ -728,7 +743,7 @@ struct TaskStatusBadge: View {
 
   var body: some View {
     let style = status.badgeStyle
-    let tint = color(for: style.color)
+    let tint = style.color.swiftUIColor
     Label(status.title, systemImage: style.symbol)
       .stageFont(.caption, weight: .semibold)
       .foregroundStyle(tint)
@@ -738,17 +753,29 @@ struct TaskStatusBadge: View {
       .accessibilityLabel("Status: \(status.title)")
   }
 
-  private func color(for color: TaskStatusBadgeColor) -> Color {
-    switch color {
-    case .secondary: .secondary
-    case .purple: Color(red: 168.0 / 255, green: 85.0 / 255, blue: 247.0 / 255)
-    case .blue: Color(red: 59.0 / 255, green: 130.0 / 255, blue: 246.0 / 255)
-    case .indigo: .indigo
-    case .orange: Color(red: 249.0 / 255, green: 115.0 / 255, blue: 22.0 / 255)
-    case .yellow: Color(red: 234.0 / 255, green: 179.0 / 255, blue: 8.0 / 255)
-    case .red: Color(red: 239.0 / 255, green: 68.0 / 255, blue: 68.0 / 255)
-    case .green: Color(red: 34.0 / 255, green: 197.0 / 255, blue: 94.0 / 255)
+}
+
+struct CompactCountBadge: View {
+  let value: String
+  let color: Color
+  let accessibilityLabel: String
+  var symbol: String? = nil
+
+  var body: some View {
+    HStack(spacing: 3) {
+      if let symbol {
+        Image(systemName: symbol)
+      }
+      Text(value)
     }
+    .font(.caption2.weight(.bold).monospacedDigit())
+    .foregroundStyle(color)
+    .padding(.horizontal, 6)
+    .padding(.vertical, 3)
+    .background(color.opacity(0.12), in: Capsule())
+    .fixedSize()
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabel)
   }
 }
 
@@ -809,6 +836,21 @@ struct RunBadge: View {
     case .failed: .red
     case .succeeded: .green
     default: .secondary
+    }
+  }
+}
+
+extension TaskStatusBadgeColor {
+  var swiftUIColor: Color {
+    switch self {
+    case .secondary: .secondary
+    case .purple: Color(red: 168.0 / 255, green: 85.0 / 255, blue: 247.0 / 255)
+    case .blue: Color(red: 59.0 / 255, green: 130.0 / 255, blue: 246.0 / 255)
+    case .indigo: .indigo
+    case .orange: Color(red: 249.0 / 255, green: 115.0 / 255, blue: 22.0 / 255)
+    case .yellow: Color(red: 234.0 / 255, green: 179.0 / 255, blue: 8.0 / 255)
+    case .red: Color(red: 239.0 / 255, green: 68.0 / 255, blue: 68.0 / 255)
+    case .green: Color(red: 34.0 / 255, green: 197.0 / 255, blue: 94.0 / 255)
     }
   }
 }

@@ -3,6 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 13 removes unread acknowledgments and snapshot read-marker state.
   // Version 12 adds revision-checked status changes from a paired phone.
   // Version 11 adds revision-checked plan approval and plan-availability metadata.
   // Version 10 adds reversible project deletion with lifecycle revisions.
@@ -12,7 +13,7 @@ public enum SyncProtocol {
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 12
+  public static let version = 13
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -74,8 +75,10 @@ public enum SyncCommand: Codable, Equatable, Sendable {
   case reorderTask(id: UUID, beforeID: UUID, orderDigest: String)
   case completeTask(id: UUID, completed: Bool)
   case deleteTask(id: UUID)
-  case acknowledgeTaskChanges(taskID: UUID, marker: TaskChangeReadMarker)
-  case acknowledgeProjectChanges(projectID: UUID, marker: TaskChangeReadMarker)
+  /// Retired in protocol v13; retained only so persisted phone outboxes remain readable.
+  case acknowledgeTaskChanges(taskID: UUID, marker: RetiredUnreadMarker)
+  /// Retired in protocol v13; retained only so persisted phone outboxes remain readable.
+  case acknowledgeProjectChanges(projectID: UUID, marker: RetiredUnreadMarker)
   case updateProjectCodexSettings(
     id: UUID, expectedProfile: CodexExecutionProfile,
     expectedModelOverride: CodexModelConfiguration?, profile: CodexExecutionProfile,
@@ -113,6 +116,7 @@ public struct SyncGitStatus: Codable, Equatable, Sendable {
   public var unstagedFileCount: Int
   public var untrackedFileCount: Int
   public var isEmptyRepository: Bool
+  public var hasChanges: Bool { changedFileCount > 0 }
 
   public init(
     branch: String?, head: String?, changedFileCount: Int, stagedFileCount: Int,
@@ -231,7 +235,7 @@ public enum SyncCommandValidator {
       else { throw BoardError.missing }
       return .deleteTask(id, expectedRevision: revision)
     case .acknowledgeTaskChanges, .acknowledgeProjectChanges:
-      throw BoardError.invalid("Read acknowledgments are handled by the sync repository.")
+      throw BoardError.invalid("Unread acknowledgments are retired. Refresh this phone and retry.")
     case .updateProjectCodexSettings(
       let id, let expectedProfile, let expectedModelOverride, let profile, let modelOverride):
       guard envelope.expectedRevision == nil,
@@ -375,14 +379,10 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
   public var tasks: [SyncTask]
   public var runs: [SyncRun]
   public var activity: [Activity]
-  public var taskReadMarkers: [UUID: TaskChangeReadMarker]
-  public var projectReadMarkers: [UUID: TaskChangeReadMarker]
   public var codexUsage: CodexUsageSnapshot?
 
   public init(
     libraryID: UUID, sequence: UInt64, library: Library,
-    taskReadMarkers: [UUID: TaskChangeReadMarker] = [:],
-    projectReadMarkers: [UUID: TaskChangeReadMarker] = [:],
     codexUsage: CodexUsageSnapshot? = nil
   ) {
     version = SyncProtocol.version
@@ -402,15 +402,12 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       }
       return safe
     }
-    self.taskReadMarkers = taskReadMarkers
-    self.projectReadMarkers = projectReadMarkers
     self.codexUsage = codexUsage
   }
 
   private enum CodingKeys: String, CodingKey {
     case version, libraryID, sequence, taskShortIDHighWaterMark, projects, tasks, runs, activity,
-      taskReadMarkers,
-      projectReadMarkers, codexUsage
+      codexUsage
   }
 
   public init(from decoder: Decoder) throws {
@@ -424,11 +421,6 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     tasks = try values.decode([SyncTask].self, forKey: .tasks)
     runs = try values.decode([SyncRun].self, forKey: .runs)
     activity = try values.decode([Activity].self, forKey: .activity)
-    taskReadMarkers =
-      try values.decodeIfPresent([UUID: TaskChangeReadMarker].self, forKey: .taskReadMarkers) ?? [:]
-    projectReadMarkers =
-      try values.decodeIfPresent([UUID: TaskChangeReadMarker].self, forKey: .projectReadMarkers)
-      ?? [:]
     codexUsage = try values.decodeIfPresent(CodexUsageSnapshot.self, forKey: .codexUsage)
   }
 
@@ -436,9 +428,6 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     guard version == SyncProtocol.version else {
       throw BoardError.invalid("The Mac uses an unsupported synchronization protocol version.")
     }
-    guard taskReadMarkers.keys.allSatisfy({ id in tasks.contains(where: { $0.id == id }) }),
-      projectReadMarkers.keys.allSatisfy({ id in projects.contains(where: { $0.id == id }) })
-    else { throw BoardError.invalid("The Mac returned read markers for missing records.") }
     var library = Library()
     library.taskShortIDHighWaterMark = taskShortIDHighWaterMark
     library.projects = projects.map {
@@ -495,29 +484,14 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
   }
 }
 
-/// A read-through point captures both activity time and ID so timestamp ties converge.
-public struct TaskChangeReadMarker: Codable, Equatable, Sendable {
+/// Payload retained solely to decode protocol v12 phone outboxes.
+public struct RetiredUnreadMarker: Codable, Equatable, Sendable {
   public var date: Date
-  /// Nil is used only for migrated date-only markers and acknowledges all events at that time.
   public var activityID: UUID?
 
   public init(date: Date, activityID: UUID? = nil) {
     self.date = date
     self.activityID = activityID
-  }
-
-  public func acknowledges(_ activity: Activity) -> Bool {
-    if activity.date != date { return activity.date < date }
-    guard let activityID else { return true }
-    return activity.id.uuidString.lowercased() <= activityID.uuidString.lowercased()
-  }
-
-  public static func later(_ lhs: Self?, _ rhs: Self) -> Self {
-    guard let lhs else { return rhs }
-    if lhs.date != rhs.date { return lhs.date > rhs.date ? lhs : rhs }
-    guard let lhsID = lhs.activityID else { return lhs }
-    guard let rhsID = rhs.activityID else { return rhs }
-    return lhsID.uuidString.lowercased() >= rhsID.uuidString.lowercased() ? lhs : rhs
   }
 }
 
