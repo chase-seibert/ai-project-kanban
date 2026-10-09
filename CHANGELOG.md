@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-09
+
+- Extend the loopback StageChase MCP with task image metadata, verified image
+  retrieval, and revision-checked screenshot attachment. Return retrieved images
+  as MCP image content, validate base64 uploads with the existing size, type,
+  dimension, and integrity rules, and support bounded image-sized HTTP requests.
+
 ## 2026-10-08
 
 - Add task favorites and High/Medium model tags on Mac and iPhone, with board

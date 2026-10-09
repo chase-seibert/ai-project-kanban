@@ -34,6 +34,11 @@ never start, stop, retry, or approve Codex work.
 - Use `list_projects` and `list_tasks` to find tasks by stable IDs, then call
   `read_task` with the exact project and task IDs before planning or
   implementation. Verify the returned IDs match.
+- `read_task` includes attachment metadata. Use `get_task_attachment` with the
+  exact project/task/attachment IDs and current task revision to retrieve and
+  inspect an available image. Attach a useful new screenshot with
+  `attach_task_screenshot`, passing its validated image bytes as base64, the
+  current task revision, and a fresh operation ID.
 - Call `begin_task` only when the user asks to start planning or implementation
   in this already-open Codex session. Set optional `activity_kind` to `planning`
   for plan prompts or `implementation` for task execution; older clients may omit

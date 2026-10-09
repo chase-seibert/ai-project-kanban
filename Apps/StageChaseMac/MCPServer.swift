@@ -3,6 +3,7 @@ import Foundation
 import Network
 
 @MainActor @Observable final class MCPServer {
+  private static let maximumHTTPRequestBytes = 5_800_000
   private(set) var status = "Off"
   private(set) var endpoint: String?
   private(set) var error: String?
@@ -95,7 +96,7 @@ import Network
           let bytes = Self.httpResponse(response)
           connection.send(
             content: bytes, completion: .contentProcessed { _ in connection.cancel() })
-        } else if done || combined.count > 65_536 {
+        } else if done || combined.count > Self.maximumHTTPRequestBytes {
           let bytes = Self.httpResponse(
             (413, Self.rpcError(nil, code: -32000, message: "Request too large.")))
           connection.send(
@@ -148,14 +149,28 @@ import Network
       let arguments = params["arguments"] as? [String: Any] ?? [:]
       do {
         let result = try await callTool(name, arguments: arguments)
-        let data =
-          (try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
-          ?? Data("{}".utf8)
-        let text = String(data: data, encoding: .utf8) ?? "{}"
+        let content: [[String: Any]]
+        if let image = result["image_base64"] as? String,
+          let mediaType = result["media_type"] as? String
+        {
+          content = [
+            ["type": "image", "data": image, "mimeType": mediaType],
+            [
+              "type": "text",
+              "text": "Attached image: \(result["display_name"] as? String ?? "screenshot")",
+            ],
+          ]
+        } else {
+          let data =
+            (try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
+            ?? Data("{}".utf8)
+          content = [["type": "text", "text": String(data: data, encoding: .utf8) ?? "{}"]]
+        }
+        var structured = result
+        structured.removeValue(forKey: "image_base64")
         return (
           200,
-          Self.rpcResult(
-            id, result: ["content": [["type": "text", "text": text]], "structuredContent": result])
+          Self.rpcResult(id, result: ["content": content, "structuredContent": structured])
         )
       } catch {
         return (
@@ -197,6 +212,75 @@ import Network
       guard let task = library.tasks.first(where: { $0.id == taskID && $0.projectID == projectID })
       else { throw BoardError.missing }
       return taskJSON(task, detailed: true)
+    case "get_task_attachment":
+      let projectID = try uuid("project_id", arguments)
+      let taskID = try uuid("task_id", arguments)
+      let attachmentID = try uuid("attachment_id", arguments)
+      guard let task = library.tasks.first(where: { $0.id == taskID && $0.projectID == projectID }),
+        task.revision == (try integer("expected_revision", arguments)),
+        let attachment = task.attachments.first(where: { $0.id == attachmentID })
+      else { throw BoardError.missing }
+      guard attachment.transferState == .available else {
+        throw BoardError.invalid("The attached image is not available on this Mac yet.")
+      }
+      let bytes = try TaskAttachmentFiles.read(attachment)
+      return [
+        "task_id": taskID.uuidString.lowercased(),
+        "attachment_id": attachmentID.uuidString.lowercased(),
+        "revision": task.revision,
+        "display_name": attachment.displayName,
+        "media_type": attachment.mediaType,
+        "byte_count": attachment.byteCount,
+        "sha256": attachment.sha256,
+        "image_base64": bytes.base64EncodedString(),
+      ]
+    case "attach_task_screenshot":
+      let projectID = try uuid("project_id", arguments)
+      let taskID = try uuid("task_id", arguments)
+      guard let task = library.tasks.first(where: { $0.id == taskID && $0.projectID == projectID })
+      else { throw BoardError.missing }
+      let revision = try integer("expected_revision", arguments)
+      let operationID = try uuid("operation_id", arguments)
+      let displayName = try string("display_name", arguments, max: 180)
+      let mediaType = try string("media_type", arguments, max: 40)
+      let encoded = try string("image_base64", arguments, max: 5_600_000)
+      guard let bytes = Data(base64Encoded: encoded, options: []) else {
+        throw BoardError.invalid("image_base64 must contain valid base64-encoded image data.")
+      }
+      if let existing = task.attachments.first(where: { $0.id == operationID }) {
+        guard existing.displayName == displayName, existing.mediaType == mediaType else {
+          throw BoardError.invalid("operation_id is already used by different attachment content.")
+        }
+        try TaskAttachmentFiles.validate(bytes, matches: existing)
+        let replay = try await commit(
+          .setTaskAttachments(taskID, task.attachments, expectedRevision: revision),
+          operationID: operationID, arguments: arguments)
+        return taskJSON(try requiredTask(taskID, in: replay), detailed: true)
+      }
+      guard !library.tasks.flatMap(\.attachments).contains(where: { $0.id == operationID }) else {
+        throw BoardError.invalid("operation_id is already used by another task attachment.")
+      }
+      guard task.revision == revision else {
+        throw BoardError.conflict
+      }
+      guard task.attachments.count < TaskAttachmentFiles.maximumCount else {
+        throw BoardError.invalid("This task already has the maximum number of images.")
+      }
+      do {
+        let attachment = try TaskAttachmentFiles.save(
+          bytes, id: operationID, displayName: displayName, mediaType: mediaType)
+        let result = try await commit(
+          .setTaskAttachments(taskID, task.attachments + [attachment], expectedRevision: revision),
+          operationID: operationID, arguments: arguments)
+        return taskJSON(try requiredTask(taskID, in: result), detailed: true)
+      } catch {
+        let current = try? await repository.load()
+        let wasCommitted =
+          current?.tasks.first(where: { $0.id == taskID })?.attachments.contains(
+            where: { $0.id == operationID }) == true
+        if !wasCommitted { try? TaskAttachmentFiles.remove(operationID) }
+        throw error
+      }
     case "create_task":
       let projectID = try uuid("project_id", arguments)
       guard library.projects.contains(where: { $0.id == projectID }) else {
@@ -379,6 +463,17 @@ import Network
         task.latestCodexUpdateAt.map {
           ISO8601DateFormatter().string(from: $0)
         } as Any? ?? NSNull()
+      result["attachments"] = task.attachments.map { attachment in
+        [
+          "id": attachment.id.uuidString.lowercased(),
+          "display_name": attachment.displayName,
+          "media_type": attachment.mediaType,
+          "byte_count": attachment.byteCount,
+          "sha256": attachment.sha256,
+          "available": attachment.transferState == .available,
+          "created_at": ISO8601DateFormatter().string(from: attachment.createdAt),
+        ] as [String: Any]
+      }
     }
     return result
   }
@@ -466,6 +561,38 @@ extension MCPServer {
       [
         "type": "object", "properties": ["project_id": uuidSchema, "task_id": uuidSchema],
         "required": ["project_id", "task_id"], "additionalProperties": false,
+      ]),
+    tool(
+      "get_task_attachment",
+      "Read and integrity-check one image attached to a task. First call read_task to obtain attachment IDs and the current revision. Returns the image as MCP image content.",
+      [
+        "type": "object",
+        "properties": [
+          "project_id": uuidSchema, "task_id": uuidSchema, "attachment_id": uuidSchema,
+          "expected_revision": ["type": "integer"],
+        ],
+        "required": ["project_id", "task_id", "attachment_id", "expected_revision"],
+        "additionalProperties": false,
+      ]),
+    tool(
+      "attach_task_screenshot",
+      "Attach a validated JPEG, PNG, or HEIC screenshot to a task. Requires the current task revision and a fresh operation_id UUID; send the image bytes as base64.",
+      [
+        "type": "object",
+        "properties": [
+          "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
+          "expected_revision": ["type": "integer"],
+          "display_name": ["type": "string", "minLength": 1, "maxLength": 180],
+          "media_type": [
+            "type": "string", "enum": Array(TaskAttachmentFiles.allowedTypes).sorted(),
+          ],
+          "image_base64": ["type": "string", "minLength": 1, "maxLength": 5_600_000],
+        ],
+        "required": [
+          "project_id", "task_id", "operation_id", "expected_revision", "display_name",
+          "media_type", "image_base64",
+        ],
+        "additionalProperties": false,
       ]),
     tool(
       "begin_task",
@@ -560,7 +687,8 @@ extension MCPServer {
     [
       "name": name, "description": description, "inputSchema": schema,
       "annotations": [
-        "readOnlyHint": ["list_projects", "list_tasks", "read_task"].contains(name),
+        "readOnlyHint": ["list_projects", "list_tasks", "read_task", "get_task_attachment"]
+          .contains(name),
         "destructiveHint": false, "openWorldHint": false,
       ],
     ]
@@ -591,6 +719,7 @@ extension MCPServer {
         Int($0.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) ?? "")
       } ?? 0
     let bodyStart = headerEnd.upperBound
+    guard length >= 0, bodyStart + length <= MCPServer.maximumHTTPRequestBytes else { return nil }
     guard data.count >= bodyStart + length else { return nil }
     return (String(parts[0]), String(parts[1]), data.subdata(in: bodyStart..<(bodyStart + length)))
   }

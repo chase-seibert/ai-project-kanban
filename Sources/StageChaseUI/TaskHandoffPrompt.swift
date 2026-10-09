@@ -23,7 +23,7 @@
 
         Execute this existing task in the repository opened in this Codex Desktop session. Follow this repository's AGENTS.md instructions. Use the StageChase MCP server (`stagechase`) to read and update the task; do not start or manage another Codex session.
 
-        First call `read_task` with the exact project and task IDs below and verify the returned IDs match. Then inspect the task context and work on it.
+        First call `read_task` with the exact project and task IDs below and verify the returned IDs match. Inspect any listed task attachments for relevant context using `get_task_attachment` with the attachment ID and current task revision. If a new screenshot would help document the result, attach it with `attach_task_screenshot`, using the current revision and a fresh operation ID.
 
         \(taskBrief)
 
