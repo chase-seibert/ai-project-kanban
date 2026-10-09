@@ -2,6 +2,10 @@
 
 ## 2026-10-09
 
+- Update the iPhone workspace list to Favorites, Plan Approved, Reviewing, and
+  Recently Completed, using the same task filters as Mac. Show each workspace
+  day in one full-width column on iPhone while keeping the three-column Mac view.
+  Hide completed tasks from Favorites on both platforms and from High/Medium on Mac.
 - Extend the loopback StageChase MCP with task image metadata, verified image
   retrieval, and revision-checked screenshot attachment. Return retrieved images
   as MCP image content, validate base64 uploads with the existing size, type,

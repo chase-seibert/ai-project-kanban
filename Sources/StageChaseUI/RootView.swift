@@ -461,8 +461,12 @@ struct ProjectSidebar: View {
       }
       #if os(iOS)
         Section("Workspace") {
-          ForEach([WorkspaceTaskPreset.highPriorityModel, .mediumPriorityModel, .favorites]) {
-            preset in
+          ForEach([
+            WorkspaceTaskPreset.favorites,
+            .planApproved,
+            .reviewing,
+            .recentlyCompleted,
+          ]) { preset in
             Button {
               model.showWorkspaceTasks(preset)
               onOpenWorkspace?(preset)
@@ -601,11 +605,11 @@ struct WorkspaceTasksView: View {
   private var sourceTasks: [WorkItem] {
     switch preset {
     case .highPriorityModel:
-      model.library.tasks.filter { $0.modelTag == .high }
+      model.library.tasks.filter { !$0.completed && $0.modelTag == .high }
     case .mediumPriorityModel:
-      model.library.tasks.filter { $0.modelTag == .medium }
+      model.library.tasks.filter { !$0.completed && $0.modelTag == .medium }
     case .favorites:
-      model.library.tasks.filter(\.isFavorite)
+      model.library.tasks.filter { !$0.completed && $0.isFavorite }
     case .planApproved:
       model.library.recentTasks.filter { !$0.completed && $0.status == .planApproved }
     case .inProgress:
@@ -688,7 +692,11 @@ struct WorkspaceTasksView: View {
     guard !ordered.isEmpty else { return [] }
 
     let heights = ordered.map(estimatedCardHeight)
-    let numberOfColumns = min(columnLimit, ordered.count)
+    #if os(iOS)
+      let numberOfColumns = 1
+    #else
+      let numberOfColumns = min(columnLimit, ordered.count)
+    #endif
     var result: [[(item: WorkItem, project: Project)]] = []
     var start = 0
 
@@ -720,10 +728,12 @@ struct WorkspaceTasksView: View {
       start = end
     }
 
-    // Keep three equal-width slots even when this day has only one or two cards.
-    while result.count < columnLimit {
-      result.append([])
-    }
+    #if os(macOS)
+      // Keep three equal-width slots even when this day has only one or two cards.
+      while result.count < columnLimit {
+        result.append([])
+      }
+    #endif
     return result
   }
 
