@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-13
+
+- Sort Inbox tasks by creation time, newest first. Sort Planning and Implementing
+  with Waiting, Error, Quota, and Reviewing first in that order, then Plan
+  Approved, then other statuses; sort within each status by most recent update
+  and use task IDs to break timestamp ties.
+
 ## 2026-10-09
 
 - Update the iPhone workspace list to Favorites, Plan Approved, Reviewing, and

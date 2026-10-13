@@ -1902,64 +1902,99 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   }
 }
 
-@Test func specialStatusesSortFirstAndCompletionDoesNotReplaceStatus() throws {
-  let project = Project(name: "Statuses")
-  var normal = WorkItem(projectID: project.id, title: "Normal", stage: .implementation)
-  normal.updatedAt = Date(timeIntervalSince1970: 10)
-  normal.rank = 0
-  var review = WorkItem(projectID: project.id, title: "Review", stage: .review)
-  review.updatedAt = Date(timeIntervalSince1970: 40)
-  review.rank = 8
-  var waiting = WorkItem(projectID: project.id, title: "Waiting", stage: .implementation)
-  waiting.updatedAt = Date(timeIntervalSince1970: 30)
+@Test func planningAndImplementingPrioritizeAttentionThenRecentUpdates() throws {
+  let project = Project(name: "Readiness")
+  var waiting = WorkItem(projectID: project.id, title: "Waiting", stage: .next)
   waiting.status = .waiting
-  waiting.rank = 9
-  var failed = WorkItem(projectID: project.id, title: "Failed", stage: .implementation)
-  failed.updatedAt = Date(timeIntervalSince1970: 20)
-  failed.status = .error
-  failed.rank = 10
+  waiting.updatedAt = Date(timeIntervalSince1970: 10)
+  var error = WorkItem(projectID: project.id, title: "Error", stage: .next)
+  error.status = .error
+  error.updatedAt = Date(timeIntervalSince1970: 50)
+  var quota = WorkItem(projectID: project.id, title: "Quota", stage: .next)
+  quota.status = .quota
+  quota.updatedAt = Date(timeIntervalSince1970: 40)
+  var reviewing = WorkItem(projectID: project.id, title: "Reviewing", stage: .next)
+  reviewing.status = .reviewing
+  reviewing.updatedAt = Date(timeIntervalSince1970: 60)
+  var planApproved = WorkItem(projectID: project.id, title: "Plan Approved", stage: .next)
+  planApproved.status = .planApproved
+  planApproved.updatedAt = Date(timeIntervalSince1970: 5)
+  var olderPlanning = WorkItem(projectID: project.id, title: "Older planning", stage: .next)
+  olderPlanning.updatedAt = Date(timeIntervalSince1970: 20)
+  var newerPlanning = WorkItem(projectID: project.id, title: "Newer planning", stage: .next)
+  newerPlanning.updatedAt = Date(timeIntervalSince1970: 30)
+  newerPlanning.priority = .low
+  olderPlanning.priority = .high
+  var tiedEarlierID = WorkItem(projectID: project.id, title: "Tie A", stage: .next)
+  tiedEarlierID.id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+  tiedEarlierID.updatedAt = Date(timeIntervalSince1970: 70)
+  var tiedLaterID = WorkItem(projectID: project.id, title: "Tie B", stage: .next)
+  tiedLaterID.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+  tiedLaterID.updatedAt = tiedEarlierID.updatedAt
+
+  var implementingWaiting = WorkItem(
+    projectID: project.id, title: "Implementing waiting", stage: .implementation)
+  implementingWaiting.status = .waiting
+  implementingWaiting.updatedAt = Date(timeIntervalSince1970: 10)
+  var implementingBuilding = WorkItem(
+    projectID: project.id, title: "Implementing building", stage: .implementation)
+  implementingBuilding.updatedAt = Date(timeIntervalSince1970: 90)
   var library = Library()
   library.projects = [project]
-  library.tasks = [normal, review, waiting, failed]
-
-  #expect(
-    library.items(in: project.id, section: .implementing).map(\.title)
-      == ["Review", "Waiting", "Failed", "Normal"])
-  library = try BoardReducer.apply(.complete(review.id, true, expectedRevision: 0), to: library)
-  let done = try #require(library.tasks.first(where: { $0.id == review.id }))
-  #expect(done.completed)
-  #expect(done.status == .reviewing)
-  #expect(done.section == .implementing)
-}
-
-@Test func planningAndImplementingSectionsSortByMostRecentlyUpdated() {
-  let project = Project(name: "Recent updates")
-  var oldPlanning = WorkItem(projectID: project.id, title: "Old planning", stage: .next)
-  oldPlanning.updatedAt = Date(timeIntervalSince1970: 10)
-  oldPlanning.priority = .high
-  var newPlanning = WorkItem(projectID: project.id, title: "New planning", stage: .planned)
-  newPlanning.updatedAt = Date(timeIntervalSince1970: 30)
-  newPlanning.priority = .low
-  var oldImplementation = WorkItem(
-    projectID: project.id, title: "Old implementation", stage: .implementation)
-  oldImplementation.updatedAt = Date(timeIntervalSince1970: 20)
-  oldImplementation.priority = .high
-  var newImplementation = WorkItem(
-    projectID: project.id, title: "New implementation", stage: .review)
-  newImplementation.updatedAt = Date(timeIntervalSince1970: 40)
-  newImplementation.priority = .low
-  var library = Library()
-  library.projects = [project]
-  library.tasks = [oldPlanning, oldImplementation, newPlanning, newImplementation]
+  library.tasks = [
+    newerPlanning, reviewing, implementingBuilding, planApproved, quota, tiedLaterID, olderPlanning,
+    implementingWaiting, error, waiting, tiedEarlierID,
+  ]
 
   #expect(
     library.items(in: project.id, section: .planning).map(\.title) == [
-      "New planning", "Old planning",
+      "Waiting", "Error", "Quota", "Reviewing", "Plan Approved", "Tie A", "Tie B",
+      "Newer planning", "Older planning",
     ])
   #expect(
     library.items(in: project.id, section: .implementing).map(\.title) == [
-      "New implementation", "Old implementation",
+      "Implementing waiting", "Implementing building",
     ])
+  library = try BoardReducer.apply(.complete(reviewing.id, true, expectedRevision: 0), to: library)
+  let completedReview = try #require(library.tasks.first(where: { $0.id == reviewing.id }))
+  #expect(completedReview.completed)
+  #expect(completedReview.status == .reviewing)
+  #expect(completedReview.section == .planning)
+}
+
+@Test func inboxSortsByNewestCreationWithStableTiesAndCompletionFilter() {
+  let project = Project(name: "Inbox order")
+  var older = WorkItem(projectID: project.id, title: "Older")
+  older.createdAt = Date(timeIntervalSince1970: 10)
+  older.status = .waiting
+  older.priority = .high
+  older.rank = 0
+  var tiedLaterID = WorkItem(projectID: project.id, title: "Tie B")
+  tiedLaterID.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+  tiedLaterID.createdAt = Date(timeIntervalSince1970: 20)
+  tiedLaterID.status = .error
+  var tiedEarlierID = WorkItem(projectID: project.id, title: "Tie A")
+  tiedEarlierID.id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+  tiedEarlierID.createdAt = tiedLaterID.createdAt
+  tiedEarlierID.status = .triage
+  var newer = WorkItem(projectID: project.id, title: "Newer")
+  newer.createdAt = Date(timeIntervalSince1970: 30)
+  newer.status = .triage
+  newer.priority = .low
+  var completed = WorkItem(projectID: project.id, title: "Completed")
+  completed.createdAt = Date(timeIntervalSince1970: 40)
+  completed.completed = true
+
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [older, tiedLaterID, completed, newer, tiedEarlierID]
+
+  #expect(
+    library.items(in: project.id, section: .inbox).map(\.title)
+      == ["Newer", "Tie A", "Tie B", "Older"])
+  #expect(
+    library.items(in: project.id, section: .inbox, completed: true).map(\.title)
+      == ["Completed", "Newer", "Tie A", "Tie B", "Older"])
 }
 
 @Test func taskRunDisclosuresKeepLatestOpenAndUserChoicesAcrossUpdates() {

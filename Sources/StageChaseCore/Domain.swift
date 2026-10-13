@@ -110,6 +110,16 @@ public enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
     default: 4
     }
   }
+  public var boardReadinessOrder: Int {
+    switch self {
+    case .waiting: 0
+    case .error: 1
+    case .quota: 2
+    case .reviewing: 3
+    case .planApproved: 4
+    default: 5
+    }
+  }
   public static func legacyStatus(for stage: WorkflowStage) -> Self {
     switch stage {
     case .inbox: .triage
@@ -757,17 +767,15 @@ public struct Library: Codable, Equatable, Sendable {
       $0.projectID == project && $0.section == section && (completed || !$0.completed)
     }
     .sorted {
-      if section == .planning || section == .implementing {
-        if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+      if section == .inbox {
+        if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
         return $0.id.uuidString < $1.id.uuidString
       }
-      if $0.status.attentionOrder != $1.status.attentionOrder {
-        return $0.status.attentionOrder < $1.status.attentionOrder
+      if $0.status.boardReadinessOrder != $1.status.boardReadinessOrder {
+        return $0.status.boardReadinessOrder < $1.status.boardReadinessOrder
       }
-      let leftPriority = $0.priority?.rawValue ?? Int.max
-      let rightPriority = $1.priority?.rawValue ?? Int.max
-      if leftPriority != rightPriority { return leftPriority < rightPriority }
-      return $0.rank == $1.rank ? $0.createdAt < $1.createdAt : $0.rank < $1.rank
+      if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+      return $0.id.uuidString < $1.id.uuidString
     }
   }
   public var activeProjects: [Project] { projects.filter { !$0.isDeleted } }

@@ -57,10 +57,12 @@ task lists; iPhone keeps horizontally paged columns. Each card shows one
 colored, icon-led task-status capsule; plan and Codex run details stay out of
 cards, with saved plans and the latest run available in task detail and run
 history in Activity. Status capsules use the same styling on Mac and iPhone.
-Waiting, Error, Quota, and Review sort ahead of ordinary statuses in that order,
-then priority and the user's stable rank decide order. Priority labels and the
-normal detail picker are hidden; stored priority, sorting, and menu/keyboard
-commands remain available.
+Inbox sorts by creation time, newest first, with task ID as a stable tie-break.
+Planning and Implementing sort Waiting, Error, Quota, and Reviewing first in
+that order, followed by Plan Approved and then other statuses. Tasks within a
+status group sort by most recent update, with task ID breaking timestamp ties.
+Priority labels and the normal detail picker are hidden; stored priority and
+menu/keyboard commands remain available.
 Board filters for All, Favorites, High, and Medium compose with search and the
 existing project, section, and completion controls. Favorite and model-tag
 controls are available on task cards and in task detail. High and Medium are

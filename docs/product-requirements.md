@@ -62,8 +62,14 @@
   need redundant ready-for-review or Done statuses.
 - As a user, I want MCP moves from Implementing back to Planning rejected, so
   that automation cannot reverse board progress.
-- As a user, I want Waiting, Error, Quota, and Reviewing tasks sorted first in
-  that order within their section, so that attention-needed work is easy to find.
+- As a user, I want Planning and Implementing tasks with Waiting, Error, Quota,
+  and Reviewing statuses sorted first in that order, followed by Plan Approved
+  tasks and then other tasks, so that work ready for my attention or the next
+  stage is easy to find. Within each status group, most recently updated tasks
+  come first; timestamp ties use a stable task-ID order.
+- As a user, I want Inbox tasks ordered by creation time with the newest first,
+  so newly captured work is easy to find. Creation-time ties use a stable
+  task-ID order.
 - As a user, I want the Mac sections shown as three side-by-side columns with
   vertical task lists and iPhone sections kept as horizontal pages, so each
   device retains a useful board layout.
