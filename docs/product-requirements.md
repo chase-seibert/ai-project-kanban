@@ -388,6 +388,12 @@ Phone confirmation for automated transitions remains open.
 - Mac and iPhone align the four count badges to the right of the project name, allowing long names to wrap beneath themselves. The phone reads Git state through an explicit direct request to its paired Mac.
 - The Mac project header echoes the Git changed-file count in orange. Each main board column shows blue plan-review and green code-review badges only when it contains open tasks with those statuses; the counts are scoped to that column.
 
+## Local sync verification in the project sidebar
+
+- While Mac local sync is enabled, show a network icon in the leading area of the Mac window toolbar beside the sidebar toggle. Keep it neutral while checking or before the first result, green after this app instance verifies the loopback port, and red after a failed verification. Keep this app-wide status available when the sidebar is hidden.
+- Verify at startup and every five minutes while enabled. Do not overlap probes, and discard callbacks from an earlier listener generation after stop, failure, or restart.
+- Clicking the icon opens Settings with Connection selected, where the detailed port-registration diagnostic and listener state remain available. Keep the phone Connection view and the separate Codex Desktop MCP listener unchanged.
+
 ## Codex Desktop task tools
 
 - As a user, I want Codex Desktop to list, read, and create project tasks, so I

@@ -5,6 +5,7 @@ struct RootView: View {
   @Environment(\.undoManager) private var undoManager
   @Environment(\.scenePhase) private var scenePhase
   @State private var phonePath: [PhoneDestination] = []
+  @State private var settingsInitialTab: AppSettingsTab = .general
   var body: some View {
     @Bindable var model = model
     Group {
@@ -27,7 +28,7 @@ struct RootView: View {
       } else {
         #if os(macOS)
           NavigationSplitView {
-            ProjectSidebar()
+            ProjectSidebar(settingsInitialTab: $settingsInitialTab)
               .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 400)
           } detail: {
             HStack(spacing: 0) {
@@ -47,6 +48,21 @@ struct RootView: View {
               }
             }
             .toolbar {
+              if let server = model.syncServer, server.isEnabled {
+                ToolbarItem(placement: .navigation) {
+                  Button {
+                    settingsInitialTab = .connection
+                    model.sheet = .settings
+                  } label: {
+                    Image(systemName: "network")
+                      .foregroundStyle(loopbackVerificationColor(server.portRegistrationState))
+                  }
+                  .buttonStyle(.plain)
+                  .help("Open Connection settings to inspect local sync verification")
+                  .accessibilityLabel(loopbackVerificationLabel(server.portRegistrationState))
+                  .accessibilityIdentifier("local-sync-verification-settings")
+                }
+              }
               ToolbarItemGroup {
                 Button {
                   model.selectedTaskID = nil
@@ -187,7 +203,7 @@ struct RootView: View {
         #endif
         case .settings:
           NavigationStack {
-            AppSettings().navigationTitle("Settings")
+            AppSettings(initialTab: settingsInitialTab).navigationTitle("Settings")
               .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { model.sheet = nil } }
               }
@@ -398,6 +414,7 @@ private enum PhoneDestination: Hashable {
 
 struct ProjectSidebar: View {
   @Environment(AppModel.self) private var model
+  @Binding var settingsInitialTab: AppSettingsTab
   var onOpen: (() -> Void)?
   var onOpenWorkspace: ((WorkspaceTaskPreset) -> Void)?
   var body: some View {
@@ -510,6 +527,7 @@ struct ProjectSidebar: View {
             Label("Agent activity", systemImage: "waveform.path.ecg")
           }.buttonStyle(.plain)
           Button {
+            settingsInitialTab = .general
             model.sheet = .settings
           } label: {
             Label("Settings & backups", systemImage: "gearshape")
@@ -860,11 +878,21 @@ struct WelcomeView: View {
 }
 
 struct AppSettings: View {
+  var initialTab: AppSettingsTab = .general
+  @State private var selectedTab: AppSettingsTab
+
+  init(initialTab: AppSettingsTab = .general) {
+    self.initialTab = initialTab
+    _selectedTab = State(initialValue: initialTab)
+  }
+
   var body: some View {
     #if os(macOS)
-      TabView {
+      TabView(selection: $selectedTab) {
         GeneralSettingsForm().tabItem { Label("General", systemImage: "gearshape") }
+          .tag(AppSettingsTab.general)
         SyncConnectionView().tabItem { Label("Connection", systemImage: "network") }
+          .tag(AppSettingsTab.connection)
       }
       .frame(minWidth: 640, minHeight: 680)
     #else
@@ -872,6 +900,30 @@ struct AppSettings: View {
     #endif
   }
 }
+
+enum AppSettingsTab: Hashable {
+  case general
+  case connection
+}
+
+#if os(macOS)
+  private func loopbackVerificationColor(_ state: LoopbackVerificationState) -> Color {
+    switch state.presentationColor {
+    case .neutral: .secondary
+    case .green: .green
+    case .red: .red
+    }
+  }
+
+  private func loopbackVerificationLabel(_ state: LoopbackVerificationState) -> String {
+    switch state {
+    case .inactive: "Local sync is off"
+    case .checking: "Checking local sync port; open Connection settings for details"
+    case .verified: "Local sync port verified; open Connection settings for details"
+    case .failed: "Local sync port verification failed; open Connection settings for details"
+    }
+  }
+#endif
 
 private struct GeneralSettingsForm: View {
   @Environment(AppModel.self) private var model

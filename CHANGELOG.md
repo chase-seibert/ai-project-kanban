@@ -2,6 +2,8 @@
 
 ## 2026-10-13
 
+- Show local sync loopback verification in the Mac project sidebar header with neutral, green, and red states. Recheck every five minutes while enabled and open Connection settings directly from the icon.
+- Place the local sync status icon in the window toolbar beside the sidebar toggle so app-wide connection state remains visible with the sidebar hidden.
 - Show the weekly Codex quota's scheduled reset weekday, date, and time. Record
   bounded Mac-local quota history, distinguish observed scheduled, extra, and
   ambiguous refills from the API schedule, and show a qualified date-range

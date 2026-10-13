@@ -50,6 +50,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
   private let instanceID = UUID()
   private var loopbackProbeID: UUID?
   private var loopbackConnection: NWConnection?
+  private var loopbackVerificationTask: Task<Void, Never>?
   private var pairingKey = SyncCrypto.randomSecret()
   private var pairingExpiresAt = Date().addingTimeInterval(5 * 60)
   private var devices: [UUID: SavedDevice] = [:]
@@ -60,6 +61,8 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
   private var pairingAttempts: [Date] = []
   var status = "Off"
   var portRegistrationStatus = "Not verified"
+  var portRegistrationState: LoopbackVerificationState = .inactive
+  var isEnabled: Bool { status != "Off" }
   var address: String?
   var pairingCode: String?
   var pendingDeviceName: String?
@@ -157,7 +160,10 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
             let detail = Self.listenerErrorMessage(failure)
             self.status = "Unavailable"
             self.error = detail
-            self.verifyPortRegistration()
+            self.cancelLoopbackVerification()
+            self.cancelLoopbackProbe()
+            self.portRegistrationState = .failed
+            self.portRegistrationStatus = detail
             self.recordNetworkEvent(
               SyncNetworkEvent(
                 direction: "Mac", operation: "Listener failed", requestBytes: 0,
@@ -170,6 +176,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
               self.status = "Off"
               self.address = nil
               self.portRegistrationStatus = "Not verified"
+              self.portRegistrationState = .inactive
             }
           default: break
           }
@@ -178,6 +185,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
       self.listener = listener
       status = "Starting"
       listener.start(queue: DispatchQueue(label: "com.cseibert.StageChase.sync-listener"))
+      scheduleLoopbackVerification(generation: generation)
       let monitor = NWPathMonitor()
       monitor.pathUpdateHandler = { [weak self] path in
         Task { @MainActor [weak self] in
@@ -209,19 +217,21 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
       let detail = Self.listenerErrorMessage(error)
       self.error = detail
       status = "Unavailable"
+      cancelLoopbackVerification()
+      cancelLoopbackProbe()
+      portRegistrationState = .failed
+      portRegistrationStatus = detail
       recordNetworkEvent(
         SyncNetworkEvent(
           direction: "Mac", operation: "Listener failed", requestBytes: 0,
           responseBytes: nil, outcome: "Failed", detail: detail, elapsedMilliseconds: nil))
-      verifyPortRegistration()
     }
   }
 
   func stop() {
     startupGeneration = UUID()
-    loopbackProbeID = nil
-    loopbackConnection?.cancel()
-    loopbackConnection = nil
+    cancelLoopbackVerification()
+    cancelLoopbackProbe()
     isStarting = false
     recordNetworkEvent(
       SyncNetworkEvent(
@@ -238,6 +248,33 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
     address = nil
     status = "Off"
     portRegistrationStatus = "Not verified"
+    portRegistrationState = .inactive
+  }
+
+  private func scheduleLoopbackVerification(generation: UUID) {
+    loopbackVerificationTask?.cancel()
+    loopbackVerificationTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        do {
+          try await Task.sleep(for: .seconds(LocalSyncVerification.intervalSeconds))
+        } catch {
+          return
+        }
+        guard let self, self.startupGeneration == generation, self.listener != nil else { return }
+        self.verifyPortRegistration()
+      }
+    }
+  }
+
+  private func cancelLoopbackVerification() {
+    loopbackVerificationTask?.cancel()
+    loopbackVerificationTask = nil
+  }
+
+  private func cancelLoopbackProbe() {
+    loopbackProbeID = nil
+    loopbackConnection?.cancel()
+    loopbackConnection = nil
   }
 
   private static func listenerErrorMessage(_ error: Error) -> String {
@@ -730,8 +767,10 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
   func verifyPortRegistration() {
     guard status != "Off" else {
       portRegistrationStatus = "Listener is not running"
+      portRegistrationState = .inactive
       return
     }
+    guard loopbackProbeID == nil else { return }
     let probeID = UUID()
     loopbackProbeID = probeID
     let nonce = UUID()
@@ -740,6 +779,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
     loopbackConnection?.cancel()
     loopbackConnection = connection
     portRegistrationStatus = "Checking this StageChase instance…"
+    portRegistrationState = .checking
     let queue = DispatchQueue(label: "com.cseibert.StageChase.loopback-probe")
     connection.stateUpdateHandler = { [weak self] state in
       switch state {
@@ -748,7 +788,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
           Task { @MainActor in
             self?.finishPortRegistration(
               probeID: probeID, connection: connection,
-              status: "Could not create the loopback verification request.")
+              status: "Could not create the loopback verification request.", state: .failed)
           }
           return
         }
@@ -759,7 +799,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
               Task { @MainActor in
                 self?.finishPortRegistration(
                   probeID: probeID, connection: connection,
-                  status: "Port check failed: \(error.localizedDescription)")
+                  status: "Port check failed: \(error.localizedDescription)", state: .failed)
               }
               return
             }
@@ -771,7 +811,8 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
                 Task { @MainActor in
                   self?.finishPortRegistration(
                     probeID: probeID, connection: connection,
-                    status: "Another service answered on port \(Self.port.rawValue).")
+                    status: "Another service answered on port \(Self.port.rawValue).",
+                    state: .failed)
                 }
                 return
               }
@@ -782,24 +823,28 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
                   guard responseNonce == nonce else {
                     self.finishPortRegistration(
                       probeID: probeID, connection: connection,
-                      status: "A different service answered on port \(Self.port.rawValue).")
+                      status: "A different service answered on port \(Self.port.rawValue).",
+                      state: .failed)
                     return
                   }
                   guard responseInstanceID == self.instanceID else {
                     self.finishPortRegistration(
                       probeID: probeID, connection: connection,
-                      status: "Another StageChase instance answered on port \(Self.port.rawValue).")
+                      status: "Another StageChase instance answered on port \(Self.port.rawValue).",
+                      state: .failed)
                     return
                   }
                   self.finishPortRegistration(
                     probeID: probeID, connection: connection,
                     status:
-                      "Verified · this StageChase instance is receiving requests on port \(Self.port.rawValue)."
+                      "Verified · this StageChase instance is receiving requests on port \(Self.port.rawValue).",
+                    state: .verified
                   )
                 default:
                   self.finishPortRegistration(
                     probeID: probeID, connection: connection,
-                    status: "A different service answered on port \(Self.port.rawValue).")
+                    status: "A different service answered on port \(Self.port.rawValue).",
+                    state: .failed)
                 }
               }
             }
@@ -808,7 +853,8 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
         Task { @MainActor in
           self?.finishPortRegistration(
             probeID: probeID, connection: connection,
-            status: "Could not reach port \(Self.port.rawValue): \(error.localizedDescription)")
+            status: "Could not reach port \(Self.port.rawValue): \(error.localizedDescription)",
+            state: .failed)
         }
       default:
         break
@@ -819,17 +865,18 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
       Task { @MainActor in
         self?.finishPortRegistration(
           probeID: probeID, connection: connection,
-          status: "Port verification timed out after five seconds.")
+          status: "Port verification timed out after five seconds.", state: .failed)
       }
     }
   }
 
   private func finishPortRegistration(
-    probeID: UUID, connection: NWConnection, status: String
+    probeID: UUID, connection: NWConnection, status: String, state: LoopbackVerificationState
   ) {
     guard loopbackProbeID == probeID else { return }
     loopbackProbeID = nil
     portRegistrationStatus = status
+    portRegistrationState = state
     connection.cancel()
     loopbackConnection = nil
   }

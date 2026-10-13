@@ -1,5 +1,30 @@
 import Foundation
 
+public enum LoopbackVerificationState: Equatable, Sendable {
+  case inactive
+  case checking
+  case verified
+  case failed
+
+  public var presentationColor: LoopbackVerificationColor {
+    switch self {
+    case .inactive, .checking: .neutral
+    case .verified: .green
+    case .failed: .red
+    }
+  }
+}
+
+public enum LoopbackVerificationColor: Equatable, Sendable {
+  case neutral
+  case green
+  case red
+}
+
+public enum LocalSyncVerification {
+  public static let intervalSeconds: TimeInterval = 5 * 60
+}
+
 public enum WorkflowStage: String, Codable, CaseIterable, Identifiable, Sendable {
   case inbox, next, planned, implementation, review
   public var id: String { rawValue }

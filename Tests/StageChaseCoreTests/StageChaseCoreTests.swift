@@ -6,6 +6,14 @@ import Testing
 private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   selection: .latestLuna, modelID: "gpt-6.10-luna", effort: "high", scope: .global)
 
+@Test func loopbackVerificationStatesUseNeutralSuccessAndFailureColors() {
+  #expect(LoopbackVerificationState.inactive.presentationColor == .neutral)
+  #expect(LoopbackVerificationState.checking.presentationColor == .neutral)
+  #expect(LoopbackVerificationState.verified.presentationColor == .green)
+  #expect(LoopbackVerificationState.failed.presentationColor == .red)
+  #expect(LocalSyncVerification.intervalSeconds == 300)
+}
+
 @Test func recentTasksAreCombinedNewestFirstAndStableForTies() {
   let firstProject = Project(name: "First")
   let secondProject = Project(name: "Second")
