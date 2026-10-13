@@ -211,7 +211,7 @@
     case missingLogin, apiKeyOnly, expired
     case rateLimited(Date?)
     case network, invalidLogin
-    case invalidResponse, credentialSave, keychainUnavailable
+    case invalidResponse, credentialSave, keychainUnavailable, invalidHistory
     var errorDescription: String? {
       switch self {
       case .missingLogin: "Codex is not signed in on this Mac. Sign in with the Codex app or CLI."
@@ -229,6 +229,8 @@
       case .credentialSave:
         "Codex refreshed its login, but the updated credentials could not be saved."
       case .keychainUnavailable: "StageChase could not read the local Codex Keychain item."
+      case .invalidHistory:
+        "Local Codex refill history could not be saved or read safely; the estimate is unavailable."
       }
     }
   }
@@ -442,6 +444,11 @@
     private(set) var isStale = false
     private(set) var refreshedAt: Date?
     @ObservationIgnored private let provider = CodexUsageProvider()
+    @ObservationIgnored private let historyFiles: any CodexUsageFileAccess =
+      LocalCodexUsageFileAccess()
+    @ObservationIgnored private var weeklyHistory: CodexWeeklyUsageHistory?
+    @ObservationIgnored private var weeklyHistoryLoaded = false
+    @ObservationIgnored private var historyUnavailable = false
     var onSnapshot: ((CodexUsageSnapshot) -> Void)?
     @ObservationIgnored private var pollingTask: Task<Void, Never>?
     @ObservationIgnored private var pollingID: UUID?
@@ -475,11 +482,14 @@
       isRefreshing = true
       defer { isRefreshing = false }
       do {
-        let value = try await provider.fetch()
+        var value = try await provider.fetch()
+        addLocalHistory(to: &value)
         snapshot = value
         onSnapshot?(value)
         refreshedAt = snapshot?.fetchedAt
-        status = "Updated \((refreshedAt ?? .now).formatted(date: .omitted, time: .shortened))"
+        let refreshed =
+          "Updated \((refreshedAt ?? .now).formatted(date: .omitted, time: .shortened))"
+        status = historyUnavailable ? "\(refreshed) · local history unavailable" : refreshed
         isStale = false
       } catch let error as LocalizedError {
         status = error.errorDescription ?? "Codex usage could not be updated."
@@ -488,6 +498,64 @@
         status = "Codex usage could not be updated."
         isStale = snapshot != nil
       }
+    }
+
+    private func addLocalHistory(to snapshot: inout CodexUsageSnapshot) {
+      do {
+        var history = try loadWeeklyHistory()
+        guard let weekly = snapshot.windows.first(where: { $0.kind == .weekly }) else { return }
+        history.record(
+          CodexWeeklyUsageSample(
+            observedAt: snapshot.fetchedAt, remainingPercent: weekly.remainingPercent,
+            scheduledResetAt: weekly.resetsAt))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(history)
+        guard let text = String(data: data, encoding: .utf8) else {
+          throw CodexUsageError.invalidHistory
+        }
+        try historyFiles.write(Self.weeklyHistoryPath, text: text)
+        weeklyHistory = history
+        historyUnavailable = false
+        snapshot.recentWeeklyRefills = history.latestRefills
+        snapshot.recentScheduledWeeklyResets = history.latestScheduledResets
+        snapshot.nextUnscheduledWeeklyRefill = history.nextUnscheduledRefillEstimate(
+          now: snapshot.fetchedAt)
+      } catch {
+        historyUnavailable = true
+        snapshot.recentWeeklyRefills = nil
+        snapshot.recentScheduledWeeklyResets = nil
+        snapshot.nextUnscheduledWeeklyRefill = nil
+      }
+    }
+
+    private func loadWeeklyHistory() throws -> CodexWeeklyUsageHistory {
+      if let weeklyHistory { return weeklyHistory }
+      if !weeklyHistoryLoaded {
+        weeklyHistoryLoaded = true
+        if historyFiles.exists(Self.weeklyHistoryPath) {
+          guard let text = try? historyFiles.read(Self.weeklyHistoryPath),
+            let data = text.data(using: .utf8),
+            let history = try? JSONDecoder().decode(CodexWeeklyUsageHistory.self, from: data),
+            history.version == CodexWeeklyUsageHistory.currentVersion
+          else {
+            weeklyHistoryLoaded = false
+            throw CodexUsageError.invalidHistory
+          }
+          weeklyHistory = history
+        } else {
+          weeklyHistory = CodexWeeklyUsageHistory()
+        }
+      }
+      guard let weeklyHistory else { throw CodexUsageError.invalidHistory }
+      return weeklyHistory
+    }
+
+    private static var weeklyHistoryPath: String {
+      let support = FileManager.default.urls(
+        for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      return support.appendingPathComponent("StageChase", isDirectory: true)
+        .appendingPathComponent("codex-weekly-usage-history-v1.json").path
     }
   }
 #endif

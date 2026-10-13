@@ -2,6 +2,11 @@
 
 ## 2026-10-13
 
+- Show the weekly Codex quota's scheduled reset weekday, date, and time. Record
+  bounded Mac-local quota history, distinguish observed scheduled, extra, and
+  ambiguous refills from the API schedule, and show a qualified date-range
+  estimate for consistent extra-refill history. Share only recent event
+  summaries and the credential-free estimate with the phone and widgets.
 - Sort Inbox tasks by creation time, newest first. Sort Planning and Implementing
   with Waiting, Error, Quota, and Reviewing first in that order, then Plan
   Approved, then other statuses; sort within each status by most recent update

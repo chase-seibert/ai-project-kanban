@@ -22,6 +22,246 @@ public struct CodexQuotaWindow: Codable, Equatable, Sendable, Identifiable {
   }
 }
 
+public struct CodexWeeklyUsageSample: Codable, Equatable, Sendable {
+  public var observedAt: Date
+  public var remainingPercent: Double
+  public var scheduledResetAt: Date?
+
+  public init(observedAt: Date, remainingPercent: Double, scheduledResetAt: Date?) {
+    self.observedAt = observedAt
+    self.remainingPercent = min(max(remainingPercent, 0), 100)
+    self.scheduledResetAt = scheduledResetAt
+  }
+}
+
+public enum CodexWeeklyRefillClassification: String, Codable, Equatable, Sendable {
+  case scheduled
+  case unscheduled
+  case ambiguous
+}
+
+public enum CodexWeeklyScheduledResetState: String, Codable, Equatable, Sendable {
+  case upcoming
+  case observed
+  case notObserved
+  case ambiguous
+}
+
+public struct CodexWeeklyScheduledReset: Codable, Equatable, Sendable, Identifiable {
+  public var expectedAt: Date
+  public var state: CodexWeeklyScheduledResetState
+  public var id: Date { expectedAt }
+
+  public init(expectedAt: Date, state: CodexWeeklyScheduledResetState) {
+    self.expectedAt = expectedAt
+    self.state = state
+  }
+}
+
+public struct CodexWeeklyRefillEvent: Codable, Equatable, Sendable, Identifiable {
+  public var observedAfter: Date
+  public var observedBy: Date
+  public var previousRemainingPercent: Double
+  public var newRemainingPercent: Double
+  public var scheduledResetAt: Date?
+  public var classification: CodexWeeklyRefillClassification
+  public var id: Date { observedBy }
+
+  public init(
+    observedAfter: Date, observedBy: Date, previousRemainingPercent: Double,
+    newRemainingPercent: Double, scheduledResetAt: Date?,
+    classification: CodexWeeklyRefillClassification
+  ) {
+    self.observedAfter = observedAfter
+    self.observedBy = observedBy
+    self.previousRemainingPercent = previousRemainingPercent
+    self.newRemainingPercent = newRemainingPercent
+    self.scheduledResetAt = scheduledResetAt
+    self.classification = classification
+  }
+}
+
+public struct CodexWeeklyRefillEstimate: Codable, Equatable, Sendable {
+  public var earliest: Date
+  public var latest: Date
+  public var basedOnEvents: Int
+
+  public init(earliest: Date, latest: Date, basedOnEvents: Int) {
+    self.earliest = earliest
+    self.latest = latest
+    self.basedOnEvents = basedOnEvents
+  }
+}
+
+/// Mac-local observations. This bounded raw history is never part of a sync payload.
+public struct CodexWeeklyUsageHistory: Codable, Equatable, Sendable {
+  public static let currentVersion = 1
+  public static let retention: TimeInterval = 548 * 24 * 60 * 60
+  public static let recentCadence: TimeInterval = 7 * 24 * 60 * 60
+  public static let coarseCadence: TimeInterval = 60 * 60
+  public static let maximumSamples = 20_000
+  public static let materialRefillIncrease = 25.0
+  public static let scheduleClassificationWindow: TimeInterval = 2 * 60 * 60
+
+  public var version: Int
+  public var samples: [CodexWeeklyUsageSample]
+  public var refills: [CodexWeeklyRefillEvent]
+  public var scheduledResets: [CodexWeeklyScheduledReset]
+
+  public init(
+    version: Int = currentVersion, samples: [CodexWeeklyUsageSample] = [],
+    refills: [CodexWeeklyRefillEvent] = [], scheduledResets: [CodexWeeklyScheduledReset] = []
+  ) {
+    self.version = version
+    self.samples = samples
+    self.refills = refills
+    self.scheduledResets = scheduledResets
+  }
+
+  public mutating func record(_ sample: CodexWeeklyUsageSample) {
+    guard version == Self.currentVersion else { return }
+    var newRefill: CodexWeeklyRefillEvent?
+    if let previous = samples.last, sample.observedAt > previous.observedAt {
+      if sample.remainingPercent - previous.remainingPercent >= Self.materialRefillIncrease {
+        let result = Self.classify(
+          after: previous.observedAt, by: sample.observedAt,
+          previousSchedule: previous.scheduledResetAt, currentSchedule: sample.scheduledResetAt)
+        let refill = CodexWeeklyRefillEvent(
+          observedAfter: previous.observedAt, observedBy: sample.observedAt,
+          previousRemainingPercent: previous.remainingPercent,
+          newRemainingPercent: sample.remainingPercent, scheduledResetAt: result.schedule,
+          classification: result.classification)
+        newRefill = refill
+        refills.append(refill)
+      }
+      samples.append(sample)
+      updateScheduledResets(for: sample, observedRefill: newRefill)
+      compact(now: sample.observedAt)
+    } else if samples.isEmpty {
+      samples.append(sample)
+      updateScheduledResets(for: sample, observedRefill: nil)
+    }
+  }
+
+  public var latestRefills: [CodexWeeklyRefillEvent] { Array(refills.suffix(3).reversed()) }
+  public var latestScheduledResets: [CodexWeeklyScheduledReset] {
+    Array(scheduledResets.suffix(3).reversed())
+  }
+
+  public func nextUnscheduledRefillEstimate(now: Date) -> CodexWeeklyRefillEstimate? {
+    let events = refills.filter { $0.classification == .unscheduled }
+    guard events.count >= 3, let last = events.last else { return nil }
+    let eventWidths = events.map { $0.observedBy.timeIntervalSince($0.observedAfter) }
+    guard eventWidths.allSatisfy({ $0 <= 24 * 60 * 60 }) else { return nil }
+    let midpoints = events.map {
+      $0.observedAfter.addingTimeInterval($0.observedBy.timeIntervalSince($0.observedAfter) / 2)
+    }
+    let intervals = zip(midpoints, midpoints.dropFirst()).map { $1.timeIntervalSince($0) }
+    guard intervals.count >= 2 else { return nil }
+    let cadence = Self.median(intervals)
+    let shortestCadence: TimeInterval = 3 * 24 * 60 * 60
+    let longestCadence: TimeInterval = 60 * 24 * 60 * 60
+    guard cadence >= shortestCadence, cadence <= longestCadence else { return nil }
+    let deviations = intervals.map { abs($0 - cadence) }
+    let medianDeviation = Self.median(deviations)
+    guard medianDeviation / cadence <= 0.25 else { return nil }
+    guard now.timeIntervalSince(last.observedBy) <= cadence * 1.5 else { return nil }
+    let nextMidpoint = midpoints[midpoints.count - 1].addingTimeInterval(cadence)
+    let uncertainty = max(12 * 60 * 60, Self.median(eventWidths) / 2 + medianDeviation * 1.5)
+    return CodexWeeklyRefillEstimate(
+      earliest: nextMidpoint.addingTimeInterval(-uncertainty),
+      latest: nextMidpoint.addingTimeInterval(uncertainty), basedOnEvents: events.count)
+  }
+
+  private mutating func compact(now: Date) {
+    let cutoff = now.addingTimeInterval(-Self.retention)
+    samples.removeAll { $0.observedAt < cutoff }
+    refills.removeAll { $0.observedBy < cutoff }
+    scheduledResets.removeAll { $0.expectedAt < cutoff }
+    guard samples.count > Self.maximumSamples else { return }
+
+    let refillBoundaries = Set(refills.flatMap { [$0.observedAfter, $0.observedBy] })
+    let recentCutoff = now.addingTimeInterval(-Self.recentCadence)
+    var latestInHour: [Int: CodexWeeklyUsageSample] = [:]
+    var keep: [CodexWeeklyUsageSample] = []
+    for sample in samples {
+      if sample.observedAt >= recentCutoff || refillBoundaries.contains(sample.observedAt) {
+        keep.append(sample)
+      } else {
+        latestInHour[Int(sample.observedAt.timeIntervalSince1970 / Self.coarseCadence)] = sample
+      }
+    }
+    samples = (keep + latestInHour.values).sorted { $0.observedAt < $1.observedAt }
+    if samples.count > Self.maximumSamples {
+      let protected = Set(refillBoundaries)
+      let removable = samples.filter {
+        $0.observedAt < recentCutoff && !protected.contains($0.observedAt)
+      }
+      let removeCount = min(samples.count - Self.maximumSamples, removable.count)
+      let removeDates = Set(removable.prefix(removeCount).map(\.observedAt))
+      samples.removeAll { removeDates.contains($0.observedAt) }
+    }
+  }
+
+  private mutating func updateScheduledResets(
+    for sample: CodexWeeklyUsageSample, observedRefill: CodexWeeklyRefillEvent?
+  ) {
+    if let expectedAt = sample.scheduledResetAt,
+      !scheduledResets.contains(where: { $0.expectedAt == expectedAt })
+    {
+      scheduledResets.append(
+        CodexWeeklyScheduledReset(
+          expectedAt: expectedAt,
+          state: sample.observedAt
+            > expectedAt.addingTimeInterval(Self.scheduleClassificationWindow)
+            ? .notObserved : .upcoming))
+    }
+    for index in scheduledResets.indices where scheduledResets[index].state == .upcoming {
+      if sample.observedAt
+        > scheduledResets[index].expectedAt.addingTimeInterval(
+          Self.scheduleClassificationWindow)
+      {
+        scheduledResets[index].state = .notObserved
+      }
+    }
+    guard let observedRefill, let schedule = observedRefill.scheduledResetAt,
+      let index = scheduledResets.firstIndex(where: { $0.expectedAt == schedule })
+    else { return }
+    switch observedRefill.classification {
+    case .scheduled: scheduledResets[index].state = .observed
+    case .ambiguous: scheduledResets[index].state = .ambiguous
+    case .unscheduled: break
+    }
+  }
+
+  private static func classify(
+    after: Date, by: Date, previousSchedule: Date?, currentSchedule: Date?
+  ) -> (classification: CodexWeeklyRefillClassification, schedule: Date?) {
+    let schedules = Array(Set([previousSchedule, currentSchedule].compactMap { $0 })).sorted()
+    guard by.timeIntervalSince(after) <= 12 * 60 * 60 else { return (.ambiguous, schedules.first) }
+    if let scheduled = schedules.first(where: { (after...by).contains($0) }) {
+      return (.scheduled, scheduled)
+    }
+    let lower = after.addingTimeInterval(-scheduleClassificationWindow)
+    let upper = by.addingTimeInterval(scheduleClassificationWindow)
+    if let scheduled = schedules.first(where: { (lower...upper).contains($0) }) {
+      return (.ambiguous, scheduled)
+    }
+    if previousSchedule != currentSchedule {
+      return (.ambiguous, currentSchedule ?? previousSchedule)
+    }
+    return (.unscheduled, currentSchedule ?? previousSchedule)
+  }
+
+  private static func median(_ values: [TimeInterval]) -> TimeInterval {
+    let sorted = values.sorted()
+    guard !sorted.isEmpty else { return 0 }
+    let middle = sorted.count / 2
+    return sorted.count.isMultiple(of: 2)
+      ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+  }
+}
+
 public enum CodexQuotaStatus: String, Equatable, Sendable {
   public static let redUpperBoundRemainingPercent = 30.000_001
   public static let greenLowerBoundRemainingPercent = 64.999_999
@@ -101,17 +341,26 @@ public struct CodexUsageSnapshot: Codable, Equatable, Sendable {
   public var windows: [CodexQuotaWindow]
   public var remainingCredits: Int?
   public var fetchedAt: Date
+  public var recentWeeklyRefills: [CodexWeeklyRefillEvent]?
+  public var recentScheduledWeeklyResets: [CodexWeeklyScheduledReset]?
+  public var nextUnscheduledWeeklyRefill: CodexWeeklyRefillEstimate?
   public var flexCreditUSDValue: Double? {
     remainingCredits.map { Double($0) * CodexUsageMapper.creditUSDRate }
   }
 
   public init(
-    planName: String?, windows: [CodexQuotaWindow], remainingCredits: Int?, fetchedAt: Date
+    planName: String?, windows: [CodexQuotaWindow], remainingCredits: Int?, fetchedAt: Date,
+    recentWeeklyRefills: [CodexWeeklyRefillEvent]? = nil,
+    recentScheduledWeeklyResets: [CodexWeeklyScheduledReset]? = nil,
+    nextUnscheduledWeeklyRefill: CodexWeeklyRefillEstimate? = nil
   ) {
     self.planName = planName
     self.windows = windows
     self.remainingCredits = remainingCredits
     self.fetchedAt = fetchedAt
+    self.recentWeeklyRefills = recentWeeklyRefills
+    self.recentScheduledWeeklyResets = recentScheduledWeeklyResets
+    self.nextUnscheduledWeeklyRefill = nextUnscheduledWeeklyRefill
   }
 }
 

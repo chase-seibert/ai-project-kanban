@@ -78,6 +78,26 @@ SwiftPM exposes StageChaseCore for tests. App targets do not import it separatel
 
 `Sources/StageChaseCore/CodexUsage.swift` contains the fixture-testable response
 mapper, quota windows, flex-credit conversion, and reset-anchored weekly pacing.
+The weekly window keeps the API-reported `resetsAt` as the scheduled reset, shown
+with its weekday, date, and time in the viewer's locale. The Mac usage service
+also records successful weekly remaining-capacity observations in a versioned
+Application Support JSON history. It retains up to 18 months, keeps five-minute
+samples for the newest week, and compacts older observations to hourly samples
+with refill boundary samples preserved. A refill requires a 25-point increase.
+Its event stores the observation interval, the quota levels on either side, and
+the schedule associated with the samples. An event is scheduled when its
+observation interval contains the API reset, ambiguous within two hours of it
+or when the observation gap exceeds 12 hours, and unscheduled otherwise.
+Expected scheduled reset dates are retained as upcoming, observed, not observed,
+or ambiguous, so a due schedule stays distinguishable from a refill. Only three
+recent scheduled/refill event summaries and a forecast are included in the shared
+snapshot; raw observations remain Mac-local. Forecasts require three consistent
+unscheduled events with 3-to-60-day cadence, low interval uncertainty, and a
+recent last event. Sparse, stale, irregular, or ambiguous histories show a
+collecting state. The estimate is a date range and is labeled as an inference,
+not an API-provided reset. Invalid or unsupported history is left untouched and
+suppresses the estimate. Optional snapshot fields preserve compatibility with
+older clients and do not change the strict sync protocol version.
 Shared quota presentation keeps the session cutoffs at 30% red and 65% green.
 For weekly windows, green starts 10 percentage points below expected remaining
 capacity and red ends at 30% of that expected amount.

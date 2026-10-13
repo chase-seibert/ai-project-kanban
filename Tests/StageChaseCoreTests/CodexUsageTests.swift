@@ -91,6 +91,96 @@ import Testing
   #expect(try JSONDecoder().decode(CodexUsageSnapshot.self, from: data) == snapshot)
 }
 
+@Test func codexUsageSnapshotDecodesBeforeOptionalRefillFieldsExisted() throws {
+  let data = Data(
+    #"{"windows":[{"kind":"weekly","usedPercent":20,"resetsAt":null}],"fetchedAt":600000000}"#.utf8)
+  let snapshot = try JSONDecoder().decode(CodexUsageSnapshot.self, from: data)
+  #expect(snapshot.recentWeeklyRefills == nil)
+  #expect(snapshot.nextUnscheduledWeeklyRefill == nil)
+}
+
+@Test func weeklyHistoryRecordsOnlyMaterialRefillsAndClassifiesAgainstSchedule() {
+  let start = Date(timeIntervalSince1970: 2_000_000_000)
+  let scheduled = start.addingTimeInterval(2 * 24 * 60 * 60)
+  var history = CodexWeeklyUsageHistory()
+  history.record(.init(observedAt: start, remainingPercent: 60, scheduledResetAt: scheduled))
+  history.record(
+    .init(
+      observedAt: start.addingTimeInterval(300), remainingPercent: 50, scheduledResetAt: scheduled))
+  history.record(
+    .init(
+      observedAt: scheduled.addingTimeInterval(-300), remainingPercent: 48,
+      scheduledResetAt: scheduled))
+  history.record(
+    .init(
+      observedAt: scheduled.addingTimeInterval(300), remainingPercent: 100,
+      scheduledResetAt: scheduled))
+
+  #expect(history.refills.count == 1)
+  #expect(history.refills[0].classification == .scheduled)
+  #expect(history.refills[0].observedAfter == scheduled.addingTimeInterval(-300))
+  #expect(history.refills[0].observedBy == scheduled.addingTimeInterval(300))
+  #expect(history.latestScheduledResets.first?.state == .observed)
+}
+
+@Test func weeklyHistoryMarksScheduleAdjacentRefillsAmbiguousAndNormalSpendingIsNotARefill() {
+  let start = Date(timeIntervalSince1970: 2_000_000_000)
+  let scheduled = start.addingTimeInterval(24 * 60 * 60)
+  var history = CodexWeeklyUsageHistory()
+  history.record(.init(observedAt: start, remainingPercent: 70, scheduledResetAt: scheduled))
+  history.record(
+    .init(
+      observedAt: start.addingTimeInterval(300), remainingPercent: 40, scheduledResetAt: scheduled))
+  history.record(
+    .init(
+      observedAt: scheduled.addingTimeInterval(-3 * 60 * 60), remainingPercent: 38,
+      scheduledResetAt: scheduled))
+  history.record(
+    .init(
+      observedAt: scheduled.addingTimeInterval(-2 * 60 * 60), remainingPercent: 80,
+      scheduledResetAt: scheduled))
+
+  #expect(history.refills.count == 1)
+  #expect(history.refills[0].classification == .ambiguous)
+  #expect(history.latestScheduledResets.first?.state == .ambiguous)
+}
+
+@Test func weeklyHistoryKeepsExpectedScheduleWhenNoRefillWasObserved() {
+  let scheduled = Date(timeIntervalSince1970: 2_000_000_000)
+  var history = CodexWeeklyUsageHistory()
+  history.record(
+    .init(
+      observedAt: scheduled.addingTimeInterval(-24 * 60 * 60), remainingPercent: 40,
+      scheduledResetAt: scheduled))
+  history.record(
+    .init(
+      observedAt: scheduled.addingTimeInterval(3 * 60 * 60), remainingPercent: 39,
+      scheduledResetAt: scheduled))
+
+  #expect(history.latestScheduledResets.first?.expectedAt == scheduled)
+  #expect(history.latestScheduledResets.first?.state == .notObserved)
+}
+
+@Test func weeklyHistoryEstimatesConsistentUnscheduledCadenceWithInterval() {
+  let origin = Date(timeIntervalSince1970: 2_000_000_000)
+  let cadence: TimeInterval = 10 * 24 * 60 * 60
+  var history = CodexWeeklyUsageHistory()
+  for index in 0..<3 {
+    let refill = origin.addingTimeInterval(Double(index) * cadence)
+    history.record(
+      .init(
+        observedAt: refill.addingTimeInterval(-1800), remainingPercent: 20, scheduledResetAt: nil))
+    history.record(.init(observedAt: refill, remainingPercent: 90, scheduledResetAt: nil))
+  }
+
+  let estimate = history.nextUnscheduledRefillEstimate(now: origin.addingTimeInterval(2 * cadence))
+  #expect(estimate?.basedOnEvents == 3)
+  let nextRefillIntervalMidpoint = origin.addingTimeInterval(3 * cadence - 15 * 60)
+  #expect(estimate?.earliest == nextRefillIntervalMidpoint.addingTimeInterval(-12 * 60 * 60))
+  #expect(estimate?.latest == nextRefillIntervalMidpoint.addingTimeInterval(12 * 60 * 60))
+  #expect(history.nextUnscheduledRefillEstimate(now: origin.addingTimeInterval(5 * cadence)) == nil)
+}
+
 @Test func syncSnapshotCarriesCodexUsageWithoutLibraryMutation() throws {
   let usage = CodexUsageSnapshot(
     planName: "Pro 20x",

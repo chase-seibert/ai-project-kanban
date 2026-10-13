@@ -35,6 +35,7 @@ struct CodexUsageSummary: View {
             creditSummary(snapshot)
           }
         }
+        weeklyHistory(snapshot)
         if isStale {
           Label("Showing the last successful reading", systemImage: "exclamationmark.triangle.fill")
             .stageFont(.caption).foregroundStyle(.orange)
@@ -79,8 +80,13 @@ struct CodexUsageSummary: View {
       CodexQuotaBar(window: window, now: now)
         .accessibilityHidden(true)
       if let reset = window.resetsAt {
-        Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
-          .stageFont(.caption2).foregroundStyle(.tertiary)
+        if window.kind == .weekly || window.kind == .sparkWeekly {
+          Text("Scheduled reset: \(reset.formatted(date: .complete, time: .shortened))")
+            .stageFont(.caption2).foregroundStyle(.tertiary).lineLimit(2)
+        } else {
+          Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
+            .stageFont(.caption2).foregroundStyle(.tertiary)
+        }
       }
       if window.kind == .weekly || window.kind == .sparkWeekly, let reset = window.resetsAt {
         Text(CodexWeeklyPacing(resetAt: reset, now: now).text)
@@ -88,6 +94,60 @@ struct CodexUsageSummary: View {
       }
     }
     .accessibilityElement(children: .combine)
+  }
+
+  @ViewBuilder private func weeklyHistory(_ snapshot: CodexUsageSnapshot) -> some View {
+    if snapshot.windows.contains(where: { $0.kind == .weekly }) {
+      VStack(alignment: .leading, spacing: 3) {
+        if let refills = snapshot.recentWeeklyRefills, !refills.isEmpty {
+          ForEach(refills) { event in
+            Text(refillDescription(event))
+              .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
+          }
+        } else {
+          Text("Collecting history for additional quota increases.")
+            .stageFont(.caption2).foregroundStyle(.secondary)
+        }
+        if let resets = snapshot.recentScheduledWeeklyResets?.filter({ $0.state != .upcoming }) {
+          ForEach(resets) { reset in
+            Text(scheduledResetDescription(reset))
+              .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
+          }
+        }
+        if let estimate = snapshot.nextUnscheduledWeeklyRefill {
+          Text(
+            "Likely next extra refill: \(estimate.earliest.formatted(date: .abbreviated, time: .shortened))–\(estimate.latest.formatted(date: .abbreviated, time: .shortened))"
+          )
+          .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
+          Text("Estimate from \(estimate.basedOnEvents) observed refills; not an API schedule.")
+            .stageFont(.caption2).foregroundStyle(.tertiary)
+        } else {
+          Text("Extra refill estimate appears after three consistent observations.")
+            .stageFont(.caption2).foregroundStyle(.tertiary)
+        }
+      }
+    }
+  }
+
+  private func refillDescription(_ event: CodexWeeklyRefillEvent) -> String {
+    let start = event.observedAfter.formatted(date: .abbreviated, time: .shortened)
+    let end = event.observedBy.formatted(date: .abbreviated, time: .shortened)
+    let interval = "\(start)–\(end)"
+    switch event.classification {
+    case .scheduled: return "Scheduled refill observed between \(interval)."
+    case .unscheduled: return "Extra refill observed between \(interval)."
+    case .ambiguous: return "Refill near schedule observed between \(interval)."
+    }
+  }
+
+  private func scheduledResetDescription(_ reset: CodexWeeklyScheduledReset) -> String {
+    let date = reset.expectedAt.formatted(date: .complete, time: .shortened)
+    switch reset.state {
+    case .upcoming: return "Scheduled reset: \(date)."
+    case .observed: return "Scheduled reset \(date); refill observed."
+    case .notObserved: return "Scheduled reset \(date); no refill observed."
+    case .ambiguous: return "Scheduled reset \(date); refill timing is uncertain."
+    }
   }
 
   #if os(macOS)

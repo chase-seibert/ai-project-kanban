@@ -75,11 +75,14 @@ private struct UsageWidgetView: View {
         Text("Open StageChase to sync usage")
       }
       if let reset = weekly?.resetsAt {
-        Text("Resets \(reset.formatted(date: .omitted, time: .shortened))")
+        Text(
+          "Reset \(reset.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))"
+        )
         if family == .systemMedium {
           Text(CodexWeeklyPacing(resetAt: reset, now: .now).text)
         }
       }
+      refillHistory
     }
     .font(.caption)
   }
@@ -95,13 +98,22 @@ private struct UsageWidgetView: View {
       }
       if let weekly {
         quota("Weekly", window: weekly)
+        if let reset = weekly.resetsAt {
+          Text(
+            "Reset \(reset.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
+          )
+          .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
       } else {
         Text("Open StageChase to sync usage").font(.caption).foregroundStyle(.secondary)
       }
       if let session { quota("Session", window: session) }
-      if family == .systemMedium, let reset = weekly?.resetsAt {
-        Text(CodexWeeklyPacing(resetAt: reset, now: .now).text)
-          .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+      if family == .systemMedium {
+        if let reset = weekly?.resetsAt {
+          Text(CodexWeeklyPacing(resetAt: reset, now: .now).text)
+            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        refillHistory
       }
       if let credits = entry.snapshot?.remainingCredits {
         let value = entry.snapshot?.flexCreditUSDValue ?? 0
@@ -122,6 +134,33 @@ private struct UsageWidgetView: View {
       }
       ProgressView(value: window.remainingPercent, total: 100)
         .tint(window.remainingPercent < 20 ? .orange : .indigo)
+    }
+  }
+
+  @ViewBuilder private var refillHistory: some View {
+    if let reset = entry.snapshot?.recentScheduledWeeklyResets?.first(where: {
+      $0.state != .upcoming
+    }) {
+      let stateText: String =
+        switch reset.state {
+        case .upcoming: "upcoming"
+        case .observed: "refill observed"
+        case .notObserved: "no refill observed"
+        case .ambiguous: "timing uncertain"
+        }
+      Text(
+        "Scheduled reset \(reset.expectedAt.formatted(date: .abbreviated, time: .omitted)): \(stateText)"
+      )
+      .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+    }
+    if let estimate = entry.snapshot?.nextUnscheduledWeeklyRefill {
+      Text(
+        "Likely extra refill: \(estimate.earliest.formatted(date: .abbreviated, time: .omitted))–\(estimate.latest.formatted(date: .abbreviated, time: .omitted))"
+      )
+      .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+    } else if weekly != nil {
+      Text("Collecting history for extra refills")
+        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
     }
   }
 }
