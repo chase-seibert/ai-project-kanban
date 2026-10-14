@@ -620,6 +620,9 @@ public struct AgentRun: Codable, Hashable, Identifiable, Sendable {
   /// Optional for decoding older runs; retries resolve the project's safe/current profile once.
   public var executionProfile: CodexExecutionProfile?
   public var handoffContext: String?
+  /// Present for an explicitly submitted phone plan revision; supports retry-safe responses.
+  public var phoneRequestID: UUID? = nil
+  public var phoneRequestDigest: String? = nil
   public var createdAt = Date()
   public var updatedAt = Date()
   public init(
@@ -894,7 +897,9 @@ public enum Mutation: Sendable {
   case setProjectDeleted(UUID, Bool, expectedRevision: Int)
   case createTask(WorkItem, configuration: ResolvedCodexConfiguration? = nil)
   case runTaskNow(
-    UUID, expectedRevision: Int, kind: RunKind, configuration: ResolvedCodexConfiguration)
+    UUID, expectedRevision: Int, kind: RunKind, configuration: ResolvedCodexConfiguration,
+    phoneRequestID: UUID? = nil, phoneRequestDigest: String? = nil,
+    handoffContext: String? = nil)
   case createManualRun(AgentRun)
   case beginExternalRun(AgentRun)
   case editTask(WorkItem, expectedRevision: Int)
@@ -1035,7 +1040,9 @@ public enum BoardReducer {
         Activity(
           "Added “\(item.title)” to \(item.stage.title).", projectID: item.projectID,
           taskID: item.id))
-    case .runTaskNow(let id, let revision, let kind, let configuration):
+    case .runTaskNow(
+      let id, let revision, let kind, let configuration, let phoneRequestID,
+      let phoneRequestDigest, let handoffContext):
       let index = try taskIndex(id, revision)
       try ensureIdle(id)
       var item = state.tasks[index]
@@ -1060,10 +1067,13 @@ public enum BoardReducer {
         item.revision += 1
         item.updatedAt = .now
       }
-      let run = AgentRun(
+      var run = AgentRun(
         task: item, kind: kind,
         modelConfiguration: configuration, usesWorktrees: project.usesWorktrees,
         executionProfile: project.executionProfile)
+      run.phoneRequestID = phoneRequestID
+      run.phoneRequestDigest = phoneRequestDigest
+      run.handoffContext = handoffContext
       state.tasks[index] = item
       state.runs.append(run)
       state.activity.append(

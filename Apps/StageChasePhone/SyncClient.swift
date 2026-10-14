@@ -327,6 +327,7 @@ private struct PhoneOutbox: Codable {
   private static func directOperationName(_ request: SyncDirectRequest) -> String {
     switch request {
     case .readPlan: "Read saved plan"
+    case .replanWithFeedback: "Revise saved plan"
     case .modelCatalog: "Refresh Codex model list"
     case .invokeCodex(_, _, _, let action):
       action == .plan ? "Plan in Codex" : "Execute Task"

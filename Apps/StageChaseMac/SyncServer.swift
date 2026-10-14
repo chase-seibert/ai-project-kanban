@@ -75,6 +75,7 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
   var codexUsageSnapshot: CodexUsageSnapshot?
   var onLibraryChanged: ((Library) -> Void)?
   var onPhoneCodexAction: ((UUID, Int, SyncPhoneCodexAction) async throws -> String)?
+  var onPhonePlanFeedback: ((UUID, UUID, Int, String) async throws -> UUID)?
   var onPhoneModelCatalogRequest:
     (() async throws -> (CodexModelConfiguration, [CodexModelOption]))?
   private let networkEventsURL: URL
@@ -520,6 +521,17 @@ private final class SyncConnectionDeadline: @unchecked Sendable {
         return .plan(markdown)
       } catch {
         return .rejected("Could not read the saved plan: \(error.localizedDescription)")
+      }
+    case .replanWithFeedback(let requestID, let taskID, let expectedRevision, let feedback):
+      guard requestID != UUID.zero else { return .rejected("The request ID is invalid.") }
+      do {
+        guard let onPhonePlanFeedback else {
+          return .rejected("The Mac plan-revision handler is unavailable.")
+        }
+        let runID = try await onPhonePlanFeedback(requestID, taskID, expectedRevision, feedback)
+        return .planRevisionQueued(runID: runID)
+      } catch {
+        return .rejected(error.localizedDescription)
       }
     case .modelCatalog:
       do {

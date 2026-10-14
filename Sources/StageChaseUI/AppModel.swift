@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -354,6 +355,67 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
         return try await self.handlePhoneCodexAction(
           taskID: taskID, expectedRevision: expectedRevision, action: action)
       }
+      server.onPhonePlanFeedback = { [weak self] requestID, taskID, expectedRevision, feedback in
+        guard let self else { throw BoardError.invalid("The StageChase model is unavailable.") }
+        return try await self.handlePhonePlanFeedback(
+          requestID: requestID, taskID: taskID, expectedRevision: expectedRevision,
+          feedback: feedback)
+      }
+    }
+
+    private func handlePhonePlanFeedback(
+      requestID: UUID, taskID: UUID, expectedRevision: Int, feedback: String
+    ) async throws -> UUID {
+      guard !feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        throw BoardError.invalid("Enter or dictate feedback before saving.")
+      }
+      let digest = SHA256.hash(data: Data(feedback.utf8)).map { String(format: "%02x", $0) }
+        .joined()
+      if let existing = library.runs.first(where: { $0.phoneRequestID == requestID }) {
+        guard existing.phoneRequestDigest == digest else {
+          throw BoardError.invalid("This request ID was already used for different feedback.")
+        }
+        if existing.status == .queued { kickRunner(runID: existing.id) }
+        return existing.id
+      }
+      guard let item = library.tasks.first(where: { $0.id == taskID }),
+        item.revision == expectedRevision, !item.completed,
+        let planPath = item.planPath,
+        let project = library.activeProjects.first(where: { $0.id == item.projectID }),
+        !project.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        PlanHandoffPrompt.hasReadablePlan(for: item, project: project),
+        !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive }),
+        !isPreview, runner != nil
+      else {
+        throw BoardError.invalid(
+          "The task, attached plan, or runner changed. Refresh the task and try again.")
+      }
+
+      try await refreshModelCatalog()
+      guard let current = library.tasks.first(where: { $0.id == taskID }),
+        current.revision == expectedRevision, !current.completed,
+        current.planPath == planPath,
+        let currentProject = library.activeProjects.first(where: { $0.id == current.projectID }),
+        !library.runs.contains(where: { $0.taskID == taskID && $0.status.isActive }),
+        !currentProject.directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        PlanHandoffPrompt.hasReadablePlan(for: current, project: currentProject)
+      else {
+        throw BoardError.invalid("The task or attached plan changed. Refresh and try again.")
+      }
+
+      try await planFileStore.appendFeedback(
+        feedback, projectDirectory: currentProject.directory, relativePath: planPath)
+      let configuration = try resolvedConfiguration(for: current)
+      let queued = await perform(
+        .runTaskNow(
+          current.id, expectedRevision: current.revision, kind: .planning,
+          configuration: configuration, phoneRequestID: requestID,
+          phoneRequestDigest: digest, handoffContext: feedback))
+      guard queued, let run = library.runs.first(where: { $0.phoneRequestID == requestID }) else {
+        throw BoardError.invalid(error ?? "The Mac could not queue the plan revision.")
+      }
+      kickRunner(runID: run.id)
+      return run.id
     }
 
     private func handlePhoneCodexAction(
@@ -537,6 +599,22 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
           .readPlan(taskID: item.id, expectedRevision: item.revision))
       else { throw BoardError.invalid("The Mac returned an invalid plan response.") }
       return markdown
+    }
+
+    func requestPlanRevisionFromMac(
+      _ item: WorkItem, feedback: String, requestID: UUID
+    ) async throws -> UUID {
+      guard syncClient.isPaired else {
+        throw BoardError.invalid(
+          "Pair this phone with StageChase on the Mac to revise saved plans.")
+      }
+      guard
+        case .planRevisionQueued(let runID) = try await syncClient.requestDirect(
+          .replanWithFeedback(
+            requestID: requestID, taskID: item.id, expectedRevision: item.revision,
+            feedback: feedback))
+      else { throw BoardError.invalid("The Mac did not accept the plan revision request.") }
+      return runID
     }
 
     func requestCodexFromMac(_ item: WorkItem, action: SyncPhoneCodexAction) async {

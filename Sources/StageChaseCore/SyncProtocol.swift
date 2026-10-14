@@ -3,6 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 15 adds explicit, revision-checked phone feedback requests for revising plans.
   // Version 14 adds revision-checked task favorite and model-tag edits.
   // Version 13 removes unread acknowledgments and snapshot read-marker state.
   // Version 12 adds revision-checked status changes from a paired phone.
@@ -14,7 +15,7 @@ public enum SyncProtocol {
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 14
+  public static let version = 15
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -97,6 +98,8 @@ public enum SyncPhoneCodexAction: String, Codable, Sendable {
 /// refresh or the offline edit queue.
 public enum SyncDirectRequest: Codable, Sendable {
   case readPlan(taskID: UUID, expectedRevision: Int)
+  case replanWithFeedback(
+    requestID: UUID, taskID: UUID, expectedRevision: Int, feedback: String)
   case modelCatalog
   case invokeCodex(
     requestID: UUID, taskID: UUID, expectedRevision: Int, action: SyncPhoneCodexAction)
@@ -137,6 +140,7 @@ public struct SyncGitStatus: Codable, Equatable, Sendable {
 
 public enum SyncDirectResponse: Codable, Sendable {
   case plan(String)
+  case planRevisionQueued(runID: UUID)
   case modelCatalog(globalConfiguration: CodexModelConfiguration, options: [CodexModelOption])
   case accepted(String)
   case gitStatus(SyncGitStatus)

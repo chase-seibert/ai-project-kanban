@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-14
+
+- Open saved plans on iPhone in a dedicated full-screen Markdown reader with a
+  keyboard-aware multiline feedback editor. Saving feedback explicitly appends
+  it to the Mac plan and starts one revision-checked, retry-safe planning run;
+  the reader reloads the revised plan when the run succeeds. Advance paired
+  sync protocol to version 15.
+
 ## 2026-10-13
 
 - Show local sync loopback verification in the Mac project sidebar header with neutral, green, and red states. Recheck every five minutes while enabled and open Connection settings directly from the icon.

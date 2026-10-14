@@ -144,7 +144,28 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.tasks.first?.id == task.id)
   #expect(replica.tasks.first?.shortID == 23)
   #expect(replica.taskShortIDHighWaterMark == 30)
-  #expect(SyncProtocol.version == 14)
+  #expect(SyncProtocol.version == 15)
+}
+
+@Test func phonePlanFeedbackDirectRequestPreservesExactFeedbackAndRequestID() throws {
+  let requestID = UUID()
+  let taskID = UUID()
+  let feedback = "Keep this exact line.\n\nAdd **a second section**.  "
+  let request = SyncDirectRequest.replanWithFeedback(
+    requestID: requestID, taskID: taskID, expectedRevision: 7, feedback: feedback)
+  let decoded = try JSONDecoder.syncDecoder.decode(
+    SyncDirectRequest.self, from: JSONEncoder.syncEncoder.encode(request))
+  guard
+    case .replanWithFeedback(let decodedRequestID, let decodedTaskID, let revision, let text) =
+      decoded
+  else {
+    Issue.record("The phone feedback request did not round-trip as its direct request case")
+    return
+  }
+  #expect(decodedRequestID == requestID)
+  #expect(decodedTaskID == taskID)
+  #expect(revision == 7)
+  #expect(text == feedback)
 }
 
 @Test func projectGitChangePresentationIncludesStagedUnstagedAndUntrackedFiles() {
@@ -170,11 +191,14 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   var library = Library()
   library.projects = [project]
   library.tasks = [task]
+  let phoneRequestID = UUID()
+  let phoneFeedback = "Preserve this exact feedback.\nUse a concise checklist."
 
   library = try BoardReducer.apply(
     .runTaskNow(
       task.id, expectedRevision: task.revision, kind: .planning,
-      configuration: fixtureModelConfiguration),
+      configuration: fixtureModelConfiguration, phoneRequestID: phoneRequestID,
+      phoneRequestDigest: "fixture-digest", handoffContext: phoneFeedback),
     to: library)
 
   task = library.tasks[0]
@@ -188,7 +212,16 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.runs[0].status == .queued)
   #expect(library.runs[0].usesWorktrees == true)
   #expect(library.runs[0].executionProfile == .fullAccessNoPrompts)
+  #expect(library.runs[0].phoneRequestID == phoneRequestID)
+  #expect(library.runs[0].phoneRequestDigest == "fixture-digest")
+  #expect(library.runs[0].handoffContext == phoneFeedback)
   #expect(library.runs[0].modelConfiguration == fixtureModelConfiguration)
+
+  let restored = try JSONDecoder().decode(
+    Library.self, from: JSONEncoder().encode(library))
+  #expect(restored.runs.first?.phoneRequestID == phoneRequestID)
+  #expect(restored.runs.first?.phoneRequestDigest == "fixture-digest")
+  #expect(restored.runs.first?.handoffContext == phoneFeedback)
 
   #expect(!library.projects[0].automationEnabled)
   #expect(library.runs[0].status == .queued)
@@ -526,7 +559,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 14)
+  #expect(decoded.version == 15)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -835,7 +868,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 14)
+  #expect(snapshot.version == 15)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }

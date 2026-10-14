@@ -730,9 +730,7 @@ struct TaskDetail: View {
     @State private var selectedPhoto: PhotosPickerItem?
   #endif
   #if os(iOS)
-    @State private var planMarkdown: String?
-    @State private var planLoadError: String?
-    @State private var planLoading = false
+    @State private var showingPlanReader = false
     @State private var codexActionLoading = false
     @State private var phoneContextCopied = false
   #endif
@@ -903,30 +901,19 @@ struct TaskDetail: View {
                     }
                     #if os(iOS)
                       if model.isConnectedPhone {
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 8) {
                           HStack {
                             Text("SAVED PLAN").stageFont(.caption, weight: .semibold)
                               .foregroundStyle(.secondary)
                             Spacer()
-                            Button(
-                              planMarkdown == nil ? "Open plan" : "Reload", systemImage: "doc.text"
-                            ) {
-                              loadPlanFromMac(item)
+                            Button("Open plan", systemImage: "doc.text") {
+                              showingPlanReader = true
                             }
-                            .disabled(planLoading)
-                          }
-                          if planLoading { ProgressView("Loading plan from Mac…") }
-                          if let planLoadError {
-                            Text(planLoadError).stageFont(.callout).foregroundStyle(.orange)
-                          }
-                          if let planMarkdown {
-                            PlanMarkdownView(markdown: planMarkdown)
                           }
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
-                        .id("saved-plan-preview")
                       }
                     #endif
                     #if os(macOS)
@@ -953,22 +940,17 @@ struct TaskDetail: View {
                 }
               }.padding(16).tint(.primary)
             }
-            #if os(iOS)
-              .onChange(of: planMarkdown) { _, value in
-                guard value != nil else { return }
-                withAnimation { proxy.scrollTo("saved-plan-preview", anchor: .top) }
-              }
-              .onChange(of: planLoadError) { _, error in
-                guard error != nil else { return }
-                withAnimation { proxy.scrollTo("saved-plan-preview", anchor: .top) }
-              }
-            #endif
           }
         }
       } else {
         ContentUnavailableView("Task unavailable", systemImage: "doc.questionmark")
       }
     }.background(Palette.card)
+      #if os(iOS)
+        .fullScreenCover(isPresented: $showingPlanReader) {
+          if let item { PlanReaderView(item: item) }
+        }
+      #endif
       .task(id: taskID) {
         draft = item
         contextExpanded = false
@@ -979,8 +961,7 @@ struct TaskDetail: View {
         promptCopied = false
         planPromptCopied = false
         #if os(iOS)
-          planMarkdown = nil
-          planLoadError = nil
+          showingPlanReader = false
           phoneContextCopied = false
           model.phoneCodexActionMessage = nil
         #endif
@@ -1508,17 +1489,6 @@ struct TaskDetail: View {
       phoneContextCopied = true
     }
 
-    private func loadPlanFromMac(_ item: WorkItem) {
-      guard !planLoading else { return }
-      planLoading = true
-      planLoadError = nil
-      Task {
-        do { planMarkdown = try await model.readPlanFromMac(item) } catch {
-          planLoadError = error.localizedDescription
-        }
-        planLoading = false
-      }
-    }
   #endif
 
   private func draftBinding(_ keyPath: WritableKeyPath<WorkItem, String>) -> Binding<String> {
@@ -1680,17 +1650,416 @@ private struct AttachmentPreview: View {
 }
 
 #if os(iOS)
-  private struct PlanMarkdownView: View {
-    let markdown: String
-    private var rendered: AttributedString {
-      (try? AttributedString(markdown: markdown)) ?? AttributedString(markdown)
-    }
+  private struct PlanReaderView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let item: WorkItem
+    @State private var markdown = ""
+    @State private var feedback = ""
+    @State private var loading = true
+    @State private var submitting = false
+    @State private var loadError: String?
+    @State private var message: String?
+    @State private var requestID: UUID?
+    @State private var runID: UUID?
+    @FocusState private var feedbackFocused: Bool
     var body: some View {
-      Text(rendered)
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
+      NavigationStack {
+        ScrollView {
+          Group {
+            if loading {
+              ProgressView("Loading plan from Mac…").frame(maxWidth: .infinity, minHeight: 180)
+            } else if let loadError {
+              ContentUnavailableView {
+                Label("Plan unavailable", systemImage: "doc.text.magnifyingglass")
+              } description: {
+                Text(loadError)
+              } actions: {
+                Button("Retry") { loadPlan() }
+              }
+            } else {
+              PlanMarkdownDocument(markdown: markdown)
+            }
+          }
+        }
+        .background(Palette.canvas)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+          VStack(alignment: .leading, spacing: 8) {
+            TextEditor(text: $feedback)
+              .focused($feedbackFocused)
+              .frame(minHeight: 96, maxHeight: 150)
+              .scrollContentBackground(.hidden)
+              .padding(4)
+              .background(Palette.card, in: RoundedRectangle(cornerRadius: 10))
+              .accessibilityLabel("Plan feedback")
+              .accessibilityHint("Type or dictate feedback, then save to replan the task.")
+            if let message {
+              Text(message).font(.footnote).foregroundStyle(
+                message.localizedCaseInsensitiveContains("could not")
+                  || message.localizedCaseInsensitiveContains("changed") ? .orange : .secondary
+              )
+              .textSelection(.enabled)
+            }
+            Button {
+              submitFeedback()
+            } label: {
+              if submitting {
+                ProgressView().frame(maxWidth: .infinity)
+              } else {
+                Label("Save & replan", systemImage: "sparkles")
+                  .frame(maxWidth: .infinity)
+              }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(
+              submitting || runID != nil
+                || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
+            .accessibilityHint("Submits this feedback and starts a planning run on the paired Mac.")
+          }
+          .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
+          .background(.regularMaterial)
+        }
+        .navigationTitle("Saved plan")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .topBarLeading) {
+            Button("Done") { dismiss() }
+          }
+        }
+      }
+      .task { loadPlan() }
+      .task(id: runID) { await followRun() }
+      .onChange(of: feedback) { _, _ in
+        if !submitting && runID == nil { requestID = nil }
+      }
+    }
+
+    private func loadPlan() {
+      guard !submitting else { return }
+      loading = true
+      loadError = nil
+      Task {
+        do { markdown = try await model.readPlanFromMac(item) } catch {
+          loadError = error.localizedDescription
+        }
+        loading = false
+      }
+    }
+
+    private func submitFeedback() {
+      guard !submitting, runID == nil,
+        !feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else { return }
+      submitting = true
+      feedbackFocused = false
+      message = "Sending feedback to the Mac…"
+      let id = requestID ?? UUID()
+      requestID = id
+      Task {
+        do {
+          runID = try await model.requestPlanRevisionFromMac(
+            item, feedback: feedback, requestID: id)
+          message = "Feedback saved. The plan is being revised on the Mac."
+        } catch {
+          message = error.localizedDescription
+        }
+        submitting = false
+      }
+    }
+
+    private func followRun() async {
+      guard let runID else { return }
+      while !Task.isCancelled {
+        await model.refreshFromMac(manual: true)
+        guard let run = model.library.runs.first(where: { $0.id == runID }) else {
+          message = "Waiting for the Mac to report planning progress…"
+          try? await Task.sleep(for: .seconds(2))
+          continue
+        }
+        switch run.status {
+        case .succeeded:
+          if let latest = model.library.tasks.first(where: { $0.id == item.id }) {
+            do {
+              markdown = try await model.readPlanFromMac(latest)
+              feedback = ""
+              requestID = nil
+              message = "Plan updated."
+            } catch {
+              message =
+                "Plan revision finished, but the updated plan could not be loaded: \(error.localizedDescription)"
+            }
+          }
+          return
+        case .failed, .cancelled, .interrupted, .stale, .superseded:
+          message =
+            run.error
+            ?? "The plan revision did not finish. Your feedback is still here; save again to retry."
+          self.runID = nil
+          requestID = nil
+          return
+        case .needsInput:
+          message =
+            "The Mac needs your attention before this plan revision can continue. Your feedback is still here."
+          return
+        default:
+          message =
+            run.status == .queued
+            ? "Plan revision queued on the Mac…" : "Plan revision running on the Mac…"
+          try? await Task.sleep(for: .seconds(2))
+        }
+      }
+    }
+  }
+
+  private struct PlanMarkdownDocument: View {
+    let markdown: String
+
+    private var blocks: [PlanMarkdownBlock] {
+      PlanMarkdownParser.parse(markdown)
+    }
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 16) {
+        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+          blockView(block)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 18)
+      .padding(.vertical, 16)
+    }
+
+    @ViewBuilder private func blockView(_ block: PlanMarkdownBlock) -> some View {
+      switch block {
+      case .heading(let level, let text):
+        inlineText(text)
+          .font(headingFont(level))
+          .fixedSize(horizontal: false, vertical: true)
+      case .paragraph(let text):
+        inlineText(text)
+          .lineSpacing(5)
+          .fixedSize(horizontal: false, vertical: true)
+      case .list(let items, let ordered):
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+              Text(ordered ? "\(index + 1)." : "•")
+                .font(.body.weight(ordered ? .semibold : .regular))
+                .frame(minWidth: ordered ? 22 : 12, alignment: .leading)
+              inlineText(item)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+        }
+      case .quote(let text):
+        HStack(alignment: .top, spacing: 12) {
+          RoundedRectangle(cornerRadius: 1.5)
+            .fill(.secondary.opacity(0.55))
+            .frame(width: 3)
+          inlineText(text)
+            .foregroundStyle(.secondary)
+            .lineSpacing(4)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      case .code(let text):
+        ScrollView(.horizontal) {
+          Text(text)
+            .font(.system(.footnote, design: .monospaced))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+        }
         .background(Palette.card, in: RoundedRectangle(cornerRadius: 8))
+      case .divider:
+        Divider()
+      }
+    }
+
+    private func inlineText(_ text: String) -> Text {
+      let options = AttributedString.MarkdownParsingOptions(
+        interpretedSyntax: .inlineOnlyPreservingWhitespace)
+      let attributed =
+        (try? AttributedString(markdown: text, options: options))
+        ?? AttributedString(text)
+      return Text(attributed)
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+      switch level {
+      case 1: .largeTitle.weight(.bold)
+      case 2: .title2.weight(.bold)
+      case 3: .title3.weight(.bold)
+      case 4: .headline.weight(.bold)
+      case 5: .subheadline.weight(.bold)
+      default: .callout.weight(.bold)
+      }
+    }
+  }
+
+  private enum PlanMarkdownBlock {
+    case heading(Int, String)
+    case paragraph(String)
+    case list([String], ordered: Bool)
+    case quote(String)
+    case code(String)
+    case divider
+  }
+
+  private enum PlanMarkdownParser {
+    private struct ListMarker {
+      let ordered: Bool
+      let content: String
+    }
+
+    static func parse(_ markdown: String) -> [PlanMarkdownBlock] {
+      let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+        .components(separatedBy: "\n")
+      var blocks: [PlanMarkdownBlock] = []
+      var index = 0
+
+      while index < lines.count {
+        let line = lines[index]
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+          index += 1
+          continue
+        }
+
+        if let fence = codeFence(in: trimmed) {
+          index += 1
+          var code: [String] = []
+          while index < lines.count {
+            let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+            if candidate.hasPrefix(fence) { break }
+            code.append(lines[index])
+            index += 1
+          }
+          if index < lines.count { index += 1 }
+          blocks.append(.code(code.joined(separator: "\n")))
+          continue
+        }
+
+        if let heading = heading(in: trimmed) {
+          blocks.append(.heading(heading.level, heading.text))
+          index += 1
+          continue
+        }
+
+        if isThematicBreak(trimmed) {
+          blocks.append(.divider)
+          index += 1
+          continue
+        }
+
+        if isQuoteLine(trimmed) {
+          var quote: [String] = []
+          while index < lines.count {
+            let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+            guard isQuoteLine(candidate) else { break }
+            quote.append(String(candidate.dropFirst().drop(while: { $0 == " " || $0 == "\t" })))
+            index += 1
+          }
+          blocks.append(.quote(quote.joined(separator: "\n")))
+          continue
+        }
+
+        if let marker = listMarker(in: trimmed) {
+          let ordered = marker.ordered
+          var items: [String] = []
+          while index < lines.count {
+            let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+            guard let next = listMarker(in: candidate), next.ordered == ordered else { break }
+            items.append(next.content)
+            index += 1
+            while index < lines.count {
+              let continuation = lines[index]
+              let continuationTrimmed = continuation.trimmingCharacters(in: .whitespaces)
+              if continuationTrimmed.isEmpty || startsBlock(continuationTrimmed) { break }
+              let indentation = continuation.prefix(while: { $0 == " " || $0 == "\t" }).count
+              guard indentation >= 2 else { break }
+              items[items.count - 1] += " " + continuationTrimmed
+              index += 1
+            }
+          }
+          blocks.append(.list(items, ordered: ordered))
+          continue
+        }
+
+        var paragraph = [trimmed]
+        index += 1
+        if index < lines.count,
+          let setextLevel = setextHeadingLevel(
+            in: lines[index].trimmingCharacters(in: .whitespaces))
+        {
+          blocks.append(.heading(setextLevel, paragraph.joined(separator: " ")))
+          index += 1
+          continue
+        }
+        while index < lines.count {
+          let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+          if candidate.isEmpty || startsBlock(candidate) { break }
+          paragraph.append(candidate)
+          index += 1
+        }
+        blocks.append(.paragraph(paragraph.joined(separator: " ")))
+      }
+
+      return blocks
+    }
+
+    private static func heading(in line: String) -> (level: Int, text: String)? {
+      let count = line.prefix(while: { $0 == "#" }).count
+      guard (1...6).contains(count), line.dropFirst(count).first?.isWhitespace == true else {
+        return nil
+      }
+      let text = line.dropFirst(count).trimmingCharacters(in: .whitespaces)
+      return text.isEmpty ? nil : (count, text)
+    }
+
+    private static func listMarker(in line: String) -> ListMarker? {
+      guard let first = line.first else { return nil }
+      if ["-", "*", "+"].contains(first), line.dropFirst().first?.isWhitespace == true {
+        let content = line.dropFirst().drop(while: { $0 == " " || $0 == "\t" })
+        return ListMarker(ordered: false, content: String(content))
+      }
+
+      guard let markerIndex = line.firstIndex(where: { $0 == "." || $0 == ")" }),
+        markerIndex > line.startIndex,
+        line[..<markerIndex].allSatisfy(\.isNumber),
+        line[line.index(after: markerIndex)...].first?.isWhitespace == true
+      else { return nil }
+      let content = line[line.index(after: markerIndex)...]
+        .drop(while: { $0 == " " || $0 == "\t" })
+      return ListMarker(ordered: true, content: String(content))
+    }
+
+    private static func codeFence(in line: String) -> String? {
+      for fence in ["```", "~~~"] where line.hasPrefix(fence) { return fence }
+      return nil
+    }
+
+    private static func isQuoteLine(_ line: String) -> Bool {
+      line == ">" || line.hasPrefix("> ") || line.hasPrefix(">\t")
+    }
+
+    private static func isThematicBreak(_ line: String) -> Bool {
+      ["---", "***", "___"].contains { marker in
+        line.count >= 3 && line.allSatisfy { $0 == marker.first }
+      }
+    }
+
+    private static func setextHeadingLevel(in line: String) -> Int? {
+      guard line.count >= 1 else { return nil }
+      if line.allSatisfy({ $0 == "=" }) { return 1 }
+      if line.allSatisfy({ $0 == "-" }) { return 2 }
+      return nil
+    }
+
+    private static func startsBlock(_ line: String) -> Bool {
+      heading(in: line) != nil || codeFence(in: line) != nil || isThematicBreak(line)
+        || isQuoteLine(line) || listMarker(in: line) != nil
     }
   }
 #endif

@@ -10,19 +10,7 @@ struct RootView: View {
     @Bindable var model = model
     Group {
       if let error = model.loadError {
-        ContentUnavailableView {
-          Label(
-            "Your library couldn’t be opened", systemImage: "externaldrive.badge.exclamationmark")
-        } description: {
-          Text(error + "\nYour existing files have not been replaced.")
-        } actions: {
-          Button("Try again") {
-            Task {
-              model.loadError = nil
-              await model.load()
-            }
-          }
-        }
+        libraryUnavailable(error: error)
       } else if !model.ready {
         ProgressView("Opening your projects…").frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
@@ -87,6 +75,7 @@ struct RootView: View {
         #else
           NavigationStack(path: $phonePath) {
             ProjectSidebar(
+              settingsInitialTab: $settingsInitialTab,
               onOpen: { phonePath.append(.board) },
               onOpenWorkspace: { phonePath.append(.workspaceTasks($0)) }
             )
@@ -96,97 +85,7 @@ struct RootView: View {
                 Button("New project", systemImage: "plus") { model.sheet = .newProject }
               }
             }
-            .navigationDestination(for: PhoneDestination.self) { destination in
-              switch destination {
-              case .board:
-                BoardView(onOpenTask: { phonePath.append(.task($0)) })
-                  .navigationBarTitleDisplayMode(.inline)
-                  .toolbar {
-                    ToolbarItem(placement: .principal) {
-                      phoneProjectPicker
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                      Button("Add task", systemImage: "plus") {
-                        model.sheet = .newTask(model.boardFocusedStage)
-                      }
-                      .buttonStyle(.borderedProminent).tint(.blue)
-                      .disabled(model.selectedProject == nil)
-                      .accessibilityIdentifier("phone-add-task")
-                    }
-                    ToolbarItem(placement: .secondaryAction) {
-                      Menu {
-                        Toggle("Show completed", isOn: $model.showCompleted)
-                        Button(
-                          model.syncClient.isSyncing ? "Refreshing…" : "Refresh from Mac",
-                          systemImage: "arrow.clockwise"
-                        ) {
-                          Task { await model.refreshFromMac(manual: true) }
-                        }
-                        .disabled(
-                          !model.isConnectedPhone || model.syncClient.isSyncing
-                            || model.syncClient.hasUnsavedEndpoint
-                        )
-                        Button("Connection", systemImage: "network") {
-                          phonePath.append(.connection)
-                        }
-                        Button("Activity", systemImage: "waveform.path.ecg") {
-                          phonePath.append(.activity)
-                        }
-                        Button("Settings", systemImage: "gearshape") {
-                          phonePath.append(.settings)
-                        }
-                        if let project = model.selectedProject {
-                          Divider()
-                          Button(
-                            "Project Git", systemImage: "chevron.left.forwardslash.chevron.right"
-                          ) {
-                            phonePath.append(.projectGit(project.id))
-                          }
-                          .disabled(!model.isConnectedPhone)
-                          Button("Project settings", systemImage: "slider.horizontal.3") {
-                            model.sheet = .editProject(project)
-                          }
-                          Button(role: .destructive) {
-                            model.projectPendingDeletion = project
-                          } label: {
-                            Label("Delete project", systemImage: "trash")
-                          }
-                        }
-                      } label: {
-                        Image(systemName: "ellipsis.circle")
-                      }
-                      .accessibilityLabel("More project actions")
-                    }
-                  }
-              case .workspaceTasks(let preset):
-                WorkspaceTasksView(preset: preset, onOpenTask: { phonePath.append(.task($0)) })
-                  .navigationTitle(preset.title)
-                  .navigationBarTitleDisplayMode(.inline)
-              case .activity:
-                ActivityPanel().navigationTitle("Activity")
-              case .connection:
-                SyncConnectionView().navigationTitle("Connection")
-              case .settings:
-                AppSettings().navigationTitle("Settings")
-              case .task(let id):
-                TaskDetail(taskID: id).id(id)
-                  .navigationTitle("")
-                  .navigationBarTitleDisplayMode(.inline)
-              case .projectGit(let id):
-                if let project = model.library.activeProjects.first(where: { $0.id == id }) {
-                  ScrollView {
-                    PhoneGitControls(project: project, taskID: nil).padding(16)
-                  }
-                  .navigationTitle("Project Git")
-                  .navigationBarTitleDisplayMode(.inline)
-                } else {
-                  ContentUnavailableView(
-                    "Project unavailable", systemImage: "folder.questionmark"
-                  )
-                  .navigationTitle("Project Git")
-                }
-              }
-            }
+            .navigationDestination(for: PhoneDestination.self, destination: phoneDestination)
           }
         #endif
       }
@@ -298,28 +197,7 @@ struct RootView: View {
       }
     } message: {
       if let move = model.pendingMove {
-        Text(
-          [
-            move.loading ? "Loading model settings…" : nil,
-            move.configuration?.summary,
-            move.runOnly
-              ? model.library.projects.first(where: { $0.id == move.item.projectID })?
-                .executionProfile.title
-              : nil,
-            move.runOnly
-              ? "StageChase will run a \(move.runKind == .planning ? "planning" : "implementation") session here. Codex Desktop will not open, and the task will stay in \(move.item.section.title)."
-              : move.retryRunID == nil
-                ? "The task is already in \(move.stage.title). Cancel to leave it there without starting Codex."
-                : nil,
-            move.error == nil || move.retryRunID != nil
-              ? nil
-              : move.runOnly
-                ? "The task remains in its current section; Codex did not start."
-                : "The move is saved; Codex did not start.",
-            move.error,
-          ].compactMap { $0 }.joined(separator: "\n")
-            + "\nUsage may be billed. Quota, sign-in or device unlock, service errors, and genuine requests for input may still need your attention. Watch progress or stop the run in Activity."
-        )
+        Text(moveConfirmationMessage(move))
       } else {
         Text("Codex starts only after confirmation.")
       }
@@ -365,6 +243,146 @@ struct RootView: View {
           try? await Task.sleep(for: .seconds(3))
         }
       #endif
+    }
+  }
+
+  private func moveConfirmationMessage(_ move: PendingMove) -> String {
+    var lines: [String] = []
+    if move.loading { lines.append("Loading model settings…") }
+    if let summary = move.configuration?.summary { lines.append(summary) }
+    if move.runOnly,
+      let project = model.library.projects.first(where: { $0.id == move.item.projectID })
+    {
+      lines.append(project.executionProfile.title)
+    }
+    if move.runOnly {
+      let kind = move.runKind == .planning ? "planning" : "implementation"
+      lines.append(
+        "StageChase will run a \(kind) session here. Codex Desktop will not open, and the task will stay in \(move.item.section.title)."
+      )
+    } else if move.retryRunID == nil {
+      lines.append(
+        "The task is already in \(move.stage.title). Cancel to leave it there without starting Codex."
+      )
+    }
+    if move.error != nil, move.retryRunID == nil {
+      lines.append(
+        move.runOnly
+          ? "The task remains in its current section; Codex did not start."
+          : "The move is saved; Codex did not start.")
+    }
+    if let error = move.error { lines.append(error) }
+    lines.append(
+      "Usage may be billed. Quota, sign-in or device unlock, service errors, and genuine requests for input may still need your attention. Watch progress or stop the run in Activity."
+    )
+    return lines.joined(separator: "\n")
+  }
+
+  #if os(iOS)
+    @ViewBuilder private func phoneDestination(_ destination: PhoneDestination) -> some View {
+      switch destination {
+      case .board:
+        BoardView(onOpenTask: { id in phonePath.append(.task(id)) })
+          .navigationBarTitleDisplayMode(.inline)
+          .toolbar {
+            ToolbarItem(placement: .principal) { phoneProjectPicker }
+            ToolbarItem(placement: .topBarTrailing) {
+              Button("Add task", systemImage: "plus") {
+                model.sheet = .newTask(model.boardFocusedStage)
+              }
+              .buttonStyle(.borderedProminent).tint(.blue)
+              .disabled(model.selectedProject == nil)
+              .accessibilityIdentifier("phone-add-task")
+            }
+            ToolbarItem(placement: .secondaryAction) { phoneBoardMoreMenu }
+          }
+      case .workspaceTasks(let preset):
+        WorkspaceTasksView(preset: preset) { id in phonePath.append(.task(id)) }
+          .navigationTitle(preset.title)
+          .navigationBarTitleDisplayMode(.inline)
+      case .activity:
+        ActivityPanel().navigationTitle("Activity")
+      case .connection:
+        SyncConnectionView().navigationTitle("Connection")
+      case .settings:
+        AppSettings().navigationTitle("Settings")
+      case .task(let id):
+        TaskDetail(taskID: id).id(id)
+          .navigationTitle("")
+          .navigationBarTitleDisplayMode(.inline)
+      case .projectGit(let id):
+        projectGitDestination(id)
+      }
+    }
+
+    private var phoneBoardMoreMenu: some View {
+      Menu {
+        Toggle(
+          "Show completed",
+          isOn: Binding(get: { model.showCompleted }, set: { model.showCompleted = $0 }))
+        Button(
+          model.syncClient.isSyncing ? "Refreshing…" : "Refresh from Mac",
+          systemImage: "arrow.clockwise"
+        ) {
+          Task { await model.refreshFromMac(manual: true) }
+        }
+        .disabled(
+          !model.isConnectedPhone || model.syncClient.isSyncing
+            || model.syncClient.hasUnsavedEndpoint
+        )
+        Button("Connection", systemImage: "network") { phonePath.append(.connection) }
+        Button("Activity", systemImage: "waveform.path.ecg") { phonePath.append(.activity) }
+        Button("Settings", systemImage: "gearshape") { phonePath.append(.settings) }
+        if let project = model.selectedProject {
+          Divider()
+          Button("Project Git", systemImage: "chevron.left.forwardslash.chevron.right") {
+            phonePath.append(.projectGit(project.id))
+          }
+          .disabled(!model.isConnectedPhone)
+          Button("Project settings", systemImage: "slider.horizontal.3") {
+            model.sheet = .editProject(project)
+          }
+          Button(role: .destructive) {
+            model.projectPendingDeletion = project
+          } label: {
+            Label("Delete project", systemImage: "trash")
+          }
+        }
+      } label: {
+        Image(systemName: "ellipsis.circle")
+      }
+      .accessibilityLabel("More project actions")
+    }
+
+    @ViewBuilder private func projectGitDestination(_ id: UUID) -> some View {
+      if let project = model.library.activeProjects.first(where: { $0.id == id }) {
+        ScrollView {
+          PhoneGitControls(project: project, taskID: nil).padding(16)
+        }
+        .navigationTitle("Project Git")
+        .navigationBarTitleDisplayMode(.inline)
+      } else {
+        ContentUnavailableView("Project unavailable", systemImage: "folder.questionmark")
+          .navigationTitle("Project Git")
+      }
+    }
+  #endif
+
+  private func libraryUnavailable(error: String) -> some View {
+    ContentUnavailableView {
+      Label("Your library couldn’t be opened", systemImage: "externaldrive.badge.exclamationmark")
+    } description: {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(error)
+        Text("Your existing files have not been replaced.")
+      }
+    } actions: {
+      Button("Try again") {
+        Task {
+          model.loadError = nil
+          await model.load()
+        }
+      }
     }
   }
 

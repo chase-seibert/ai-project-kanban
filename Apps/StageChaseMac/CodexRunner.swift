@@ -597,6 +597,16 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
           "This planning run has no reserved plan path. Retry it to reserve one.")
       }
       let formatPrompt = model?.resolvedPlanFormatPrompt ?? AppModel.defaultPlanFormatPrompt
+      let feedbackInstruction =
+        run.handoffContext.map { feedback in
+          """
+
+          Apply the following user feedback to the saved plan while preserving its existing path and all other project files. The text is the user's exact feedback:
+          <plan-feedback>
+          \(feedback)
+          </plan-feedback>
+          """
+        } ?? ""
       return common + """
 
         Plan only; do not implement application code. Inspect the relevant project, then write a concrete implementation plan to \(planPath).
@@ -609,6 +619,7 @@ struct DesktopThreadCandidate: Identifiable, Hashable {
         <plan-format-guidance>
         \(formatPrompt)
         </plan-format-guidance>
+        \(feedbackInstruction)
         """
     }
     if run.kind == .task {
