@@ -38,8 +38,9 @@ struct BoardView: View {
         BoardHeader()
       #else
         TaskQuickFilterBar()
-          .padding(.horizontal, 16)
+          .padding(.horizontal, 20)
           .padding(.top, 8)
+          .padding(.bottom, 8)
       #endif
       #if os(macOS)
         GeometryReader { geometry in
@@ -68,8 +69,8 @@ struct BoardView: View {
             ForEach(WorkflowSection.allCases) { section in
               BoardLane(section: section, editingTaskID: $editingTaskID, onOpenTask: onOpenTask)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
+                .padding(.top, 4)
+                .background(Palette.canvas)
                 .tabItem { Label(section.title, systemImage: section.symbol) }
                 .tag(section)
                 .accessibilityIdentifier("board-section-\(section.rawValue)")
@@ -77,6 +78,7 @@ struct BoardView: View {
           }
           .onChange(of: model.boardFocusedStage) { _, value in focusedStage = value }
           .toolbarBackground(.visible, for: .tabBar)
+          .background(Palette.canvas.ignoresSafeArea())
         }
       #endif
     }
@@ -233,14 +235,29 @@ struct TaskQuickFilterBar: View {
           Button {
             model.boardFilter = filter
           } label: {
-            if let symbol = filter.symbol {
-              Label(filter.title, systemImage: symbol)
-            } else {
-              Text(filter.title)
+            Group {
+              if let symbol = filter.symbol {
+                Label(filter.title, systemImage: symbol)
+              } else {
+                Text(filter.title)
+              }
             }
+            #if os(iOS)
+              .font(.subheadline.weight(model.boardFilter == filter ? .semibold : .regular))
+              .padding(.horizontal, 14)
+              .frame(minHeight: 44)
+              .foregroundStyle(model.boardFilter == filter ? Color.accentColor : .secondary)
+              .background(
+                model.boardFilter == filter ? Color.accentColor.opacity(0.12) : Palette.card,
+                in: Capsule())
+            #endif
           }
-          .buttonStyle(.bordered)
-          .tint(model.boardFilter == filter ? .accentColor : .secondary)
+          #if os(macOS)
+            .buttonStyle(.bordered)
+            .tint(model.boardFilter == filter ? .accentColor : .secondary)
+          #else
+            .buttonStyle(.plain)
+          #endif
           .accessibilityAddTraits(model.boardFilter == filter ? .isSelected : [])
           .accessibilityIdentifier("board-filter-\(filter.rawValue)")
         }
@@ -321,8 +338,10 @@ struct BoardLane: View {
             "Add task to \(section.title)")
         #endif
       }
-      Text(section.subtitle).stageFont(.caption).foregroundStyle(.secondary)
-      Rectangle().fill(section.color.opacity(0.5)).frame(height: 2)
+      #if os(macOS)
+        Text(section.subtitle).stageFont(.caption).foregroundStyle(.secondary)
+        Rectangle().fill(section.color.opacity(0.5)).frame(height: 2)
+      #endif
       ScrollView(.vertical) {
         LazyVStack(alignment: .leading, spacing: 10) {
           ForEach(visibleItems) { item in
@@ -332,12 +351,31 @@ struct BoardLane: View {
             VStack(spacing: 8) {
               Image(systemName: section.symbol).stageFont(.title2).foregroundStyle(
                 section.color.opacity(0.65))
-              Text(model.search.isEmpty ? "Room for what’s next" : "No matching tasks").stageFont(
-                .subheadline)
-              Text(
-                model.search.isEmpty
-                  ? "Use Add task to add a task to this section." : "Try another search."
-              ).stageFont(.caption).foregroundStyle(.secondary)
+              #if os(macOS)
+                Text(model.search.isEmpty ? "Room for what’s next" : "No matching tasks").stageFont(
+                  .subheadline)
+                Text(
+                  model.search.isEmpty
+                    ? "Use Add task to add a task to this section." : "Try another search."
+                )
+                .stageFont(.caption).foregroundStyle(.secondary)
+              #else
+                Text(hasActiveFilter ? "No matching tasks" : "Room for what’s next").font(.headline)
+                Text(hasActiveFilter ? "Try clearing your filters." : section.subtitle)
+                  .font(.subheadline).foregroundStyle(.secondary)
+              #endif
+              #if os(iOS)
+                Button(hasActiveFilter ? "Clear filters" : "Add task") {
+                  if hasActiveFilter {
+                    model.boardFilter = .all
+                    model.search = ""
+                  } else {
+                    model.sheet = .newTask(section)
+                  }
+                }
+                .buttonStyle(.bordered).frame(minHeight: 44)
+                .accessibilityIdentifier("board-empty-action")
+              #endif
             }.frame(maxWidth: .infinity).padding(.vertical, 30)
           }
           #if os(macOS)
@@ -379,19 +417,31 @@ struct BoardLane: View {
       }
       #if os(iOS)
         .refreshable { await model.refreshFromMac(manual: true) }
+        .contentMargins(.bottom, 88, for: .scrollContent)
       #endif
       .scrollIndicators(.hidden)
     }
-    .padding(14)
+    #if os(iOS)
+      .padding(.horizontal, 16)
+    #else
+      .padding(14)
+    #endif
     .frame(maxHeight: .infinity, alignment: .top)
-    .background(
-      targeted ? section.color.opacity(0.12) : Palette.card.opacity(0.34),
-      in: RoundedRectangle(cornerRadius: 16)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 16).strokeBorder(
-        targeted ? section.color : .primary.opacity(0.055), lineWidth: targeted ? 2 : 1)
-    )
+    #if os(iOS)
+      .background(Palette.canvas)
+      .overlay {
+        if targeted { RoundedRectangle(cornerRadius: 16).stroke(section.color, lineWidth: 2) }
+      }
+    #else
+      .background(
+        targeted ? section.color.opacity(0.12) : Palette.card.opacity(0.34),
+        in: RoundedRectangle(cornerRadius: 16)
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 16).strokeBorder(
+          targeted ? section.color : .primary.opacity(0.055), lineWidth: targeted ? 2 : 1)
+      )
+    #endif
     .dropDestination(for: String.self) { values, _ in
       guard let value = values.first, value.hasPrefix("stagechase-task:"),
         let id = UUID(uuidString: String(value.dropFirst("stagechase-task:".count))),
@@ -405,6 +455,8 @@ struct BoardLane: View {
       targeted = $0
     }
   }
+  private var hasActiveFilter: Bool { !model.search.isEmpty || model.boardFilter != .all }
+
   private var checklistTitles: [String]? {
     let lines = draft.split(whereSeparator: \.isNewline).map {
       String($0).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -509,7 +561,7 @@ struct TaskCard: View {
 
   @ViewBuilder private var interactiveContents: some View {
     if scope == .board {
-      cardContents
+      displayContents
         .draggable("stagechase-task:\(item.id.uuidString)")
         .dropDestination(for: String.self) { values, _ in
           guard let value = values.first, value.hasPrefix("stagechase-task:"),
@@ -529,9 +581,100 @@ struct TaskCard: View {
           return true
         }
     } else {
-      cardContents
+      displayContents
     }
   }
+
+  @ViewBuilder private var displayContents: some View {
+    #if os(iOS)
+      phoneCardContents
+    #else
+      cardContents
+    #endif
+  }
+
+  #if os(iOS)
+    private var phoneCardContents: some View {
+      VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 12) {
+          VStack(alignment: .leading, spacing: 4) {
+            if let projectName {
+              Text(projectName).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(item.title).font(.body.weight(.semibold)).foregroundStyle(.primary)
+              .strikethrough(item.completed)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary).padding(.top, 4).accessibilityHidden(true)
+        }
+        .frame(minHeight: 44, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .gesture(
+          TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
+            switch result {
+            case .first: beginTitleEditing()
+            case .second: openDetails()
+            }
+          }
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(item.title)
+        .accessibilityHint("Opens task details")
+        .accessibilityAction { openDetails() }
+        .accessibilityAction(named: "Edit title") { beginTitleEditing() }
+        .accessibilityIdentifier("task-open-\(item.id.uuidString)")
+
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 12) {
+            phoneCardStatus
+            phoneCardMetadata
+          }
+          VStack(alignment: .leading, spacing: 0) {
+            phoneCardStatus
+            phoneCardMetadata
+          }
+        }
+        if showsLiveActivity, let run = latestRun {
+          HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text(run.latestMessage ?? run.summary).font(.caption).lineLimit(1)
+          }
+          .foregroundStyle(.secondary)
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel("Codex is running. \(run.latestMessage ?? run.summary)")
+        }
+      }
+      .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Palette.card, in: RoundedRectangle(cornerRadius: 16))
+      .accessibilityIdentifier("task-card-\(item.id.uuidString)")
+    }
+
+    private var phoneCardStatus: some View {
+      TaskStatusMenu(item: item).frame(minHeight: 44, alignment: .leading)
+    }
+
+    private var phoneCardMetadata: some View {
+      HStack(spacing: 8) {
+        Text(item.shortID.map { "#\($0)" } ?? "ID pending")
+        if item.isFavorite {
+          Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Favorite")
+        }
+        if let tag = item.modelTag { Text(tag.title).accessibilityLabel("Model tag: \(tag.title)") }
+        planIndicator
+        if item.completed {
+          Image(systemName: "checkmark.circle").accessibilityLabel("Completed by you")
+        }
+      }
+      .font(.caption).foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, minHeight: 28, alignment: .trailing)
+      .contentShape(Rectangle())
+      .onTapGesture { openDetails() }
+    }
+  #endif
 
   @ViewBuilder private var taskContextMenu: some View {
     Button("Edit title", systemImage: "pencil") { beginTitleEditing() }
@@ -899,7 +1042,12 @@ struct TaskStatusMenu: View {
       }
     } label: {
       TaskStatusBadge(status: item.status)
-        .contentShape(Capsule())
+        #if os(iOS)
+          .padding(.vertical, 8)
+          .contentShape(Rectangle())
+        #else
+          .contentShape(Capsule())
+        #endif
     }
     .buttonStyle(.plain)
     .accessibilityLabel("Change status, currently \(item.status.title)")

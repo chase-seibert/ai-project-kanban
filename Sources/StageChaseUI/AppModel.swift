@@ -41,23 +41,27 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
 }
 
 enum TaskBoardFilter: String, CaseIterable, Identifiable {
-  case all, favorites, high, medium
+  case all, favorites, planApproved
   var id: String { rawValue }
-  var title: String { rawValue == "all" ? "All" : rawValue.capitalized }
+  var title: String {
+    switch self {
+    case .all: "All"
+    case .favorites: "Favorites"
+    case .planApproved: "Plan approved"
+    }
+  }
   var symbol: String? {
     switch self {
     case .all: nil
     case .favorites: "star.fill"
-    case .high: "bolt.fill"
-    case .medium: "bolt"
+    case .planApproved: "checkmark.seal.fill"
     }
   }
   func includes(_ item: WorkItem) -> Bool {
     switch self {
     case .all: true
     case .favorites: item.isFavorite
-    case .high: item.modelTag == .high
-    case .medium: item.modelTag == .medium
+    case .planApproved: item.status == .planApproved
     }
   }
 }

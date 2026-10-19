@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-19
+
+- Refine the iPhone task-list and task-detail hierarchy from screenshot review:
+  expose the board overflow directly in the toolbar, remove the project dropdown,
+  add spacing around filters and above the floating section bar, and reduce task
+  detail to one primary Codex action with grouped secondary actions. Show
+  favorites as a star and expand context and More details by default.
+- Refine the iPhone board filters to All, Favorites, and Plan Approved, keep the
+  lane canvas consistent through the filter gap, collapse task context by
+  default, expand attached images with inline previews, and move large Complete/Reopen and
+  separate Delete actions to the bottom of task detail.
+
+## 2026-10-18
+
+- Redesign the iPhone board with wider title-first task cards, compact section
+  headers, larger filter/status touch targets, and useful filtered empty states.
+  Make task detail a single scrolling page with a status/completion row, one
+  primary Codex action, a context preview, a visible saved-plan entry, and grouped
+  images and secondary details. Preserve existing task and sync operations.
+
 ## 2026-10-14
 
 - Open saved plans on iPhone in a dedicated full-screen Markdown reader with a

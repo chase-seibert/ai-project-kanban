@@ -31,7 +31,7 @@
   Mac or iPhone, so that I can identify important tasks and the expected model
   capability on either device. These tags do not change task priority or the
   model and reasoning effort selected for a Codex run.
-- As a user, I want board quick filters for All, Favorites, High, and Medium
+- As a user, I want board quick filters for All, Favorites, and Plan Approved
   that combine with search, project, section, and completed-task controls, so I
   can quickly narrow the current board without changing task data.
 - As a user, I want High, Medium, and Favorites workspace views across projects
@@ -92,8 +92,9 @@
 - As a user, I want Mac and iPhone to show concise run status and progress
   instead of a long event timeline, so task detail and Activity stay readable
   and I can open the associated Codex session for its full history.
-- As a user, I want to switch projects by tapping the selected project name on
-  iPhone, so I can move between boards without returning to the project list.
+- As a user, I want the iPhone board to show the selected project name and use
+  the navigation back button to return to the project list, so project switching
+  has one clear route instead of a redundant dropdown.
 - As a user, I want the iPhone board's bottom controls to select Inbox,
   Planning, and Implementing using the standard iOS tab bar, so I get familiar
   navigation and the system's native tab-bar material.
@@ -121,8 +122,8 @@
   preview it, and remove it, so visual context stays with the task.
 - On Mac, users can also paste an image from the clipboard into task attachments.
 - As a user, I want paired devices to share attachment metadata during normal
-  sync and transfer each image only when attaching or opening its preview, so
-  snapshots stay small and previews work on demand.
+  sync and transfer image bytes only when attaching or expanding the Images
+  section, so snapshots stay small while task details show inline previews.
 - Image bytes live in separate durable files. Task records, SQLite rows, and
   snapshots contain stable IDs, media type, size, checksum, and display name
   only. Accept JPEG, PNG, and HEIC up to 4 MB and 8,192 pixels per dimension.
@@ -180,13 +181,17 @@ Phone confirmation for automated transitions remains open.
 - Add task has a dedicated blue project-header button and uses the focused section.
 - Task title comes first. Launch in Codex and Review plan in Codex (or Plan in Codex
   without a readable plan) use blue primary styling. Review is plan-only.
-- Reopen is a blue action beside status for completed tasks. Complete stays visible
-  for open tasks. Neither task completion nor reopening is inferred from a run.
+- On Mac, Reopen sits beside status for completed tasks and Complete stays
+  visible for open tasks. On iPhone, a large Complete/Reopen action and a separate
+  Delete task action sit at the bottom of task detail. Neither completion nor
+  reopening is inferred from a run.
 - One chronological run history initially expands only the newest run. Older runs
   expand on demand, with failures and required input discoverable from attention rows.
-- Context/feedback, StageChase controls, and additional metadata start collapsed.
-  Save errors reveal the editor and retain its draft. Priority is hidden on cards
-  and in the normal detail form without altering its stored values or ordering.
+- Context/feedback, StageChase controls, and additional metadata start collapsed
+  on Mac. On iPhone, task context starts collapsed and More details starts
+  expanded. Save errors reveal the editor and retain its draft.
+  Priority is hidden on cards and in the normal detail form without altering its
+  stored values or ordering.
 
 ## Favorite Make targets
 
@@ -355,12 +360,18 @@ Phone confirmation for automated transitions remains open.
   reads Git status and requests a confirmed project-wide commit through the
   authenticated paired-Mac connection; it never runs Git against a phone-local
   path. Task detail has no Git action.
-- On phone task detail, keep the title first and show Reopen, **Launch in
-  Codex**, **Plan in Codex**, and **Copy prompt** before optional details.
-  Launch and Plan are explicit revision-checked requests to start the task or
-  planning run on the paired Mac; the user's tap is confirmation. Copy prompt
-  provides a StageChase-aware prompt for another Codex chat. Keep task context
-  collapsed initially and saved-plan reading under More details.
+- On phone task detail, keep the title first, show a star icon for favorites,
+  and emphasize one section-appropriate primary action: **Plan in Codex** for
+  Inbox and unapproved Planning tasks, or **Launch in Codex** for approved and
+  Implementing tasks. Put a large Complete/Reopen action and a separate Delete
+  task action at the bottom. Group Copy prompt, the alternate Codex action,
+  model-tag changes, and section movement in one **More** menu. Collapse empty
+  task context by default so it does not intercept scrolling; expand it when the
+  user opens the disclosure. Expand attached Images by default and show inline
+  previews that open full-screen. Launch and Plan are explicit revision-checked
+  requests to start the task or planning run on the paired Mac; the user's tap
+  is confirmation. Expand task context and More details by default, with saved
+  plan reading under More details.
 - As a user, I want to change a project's Codex execution profile and model from
   paired iPhone Project settings, so future confirmed Mac runs use my choices.
   Existing run snapshots remain unchanged, and the full-access profile keeps its

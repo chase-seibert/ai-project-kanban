@@ -51,3 +51,13 @@
   documented SwiftData macro sandbox failure although allowed Make targets passed.
   Approved host compilation produced an isolated in-memory preview, allowing UI
   checks without restarting the main app during unrelated active work.
+
+## 2026-10-18
+
+- The desktop UI tool returned `cgWindowNotFound` for Device Hub and StageChase
+  while `simctl` could still build, launch, and capture a booted simulator.
+  Isolated `--preview-library` launch fixtures support screenshot review in this
+  state, but do not establish taps, navigation gestures, editing, or VoiceOver
+  acceptance. Do not treat those captures as interactive verification or
+  relaunch the Mac app without checking Activity. Preview task routing also
+  needs to ignore the asynchronous project-selection path reset.

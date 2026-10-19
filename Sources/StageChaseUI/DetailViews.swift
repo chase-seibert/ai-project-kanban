@@ -716,7 +716,9 @@ struct TaskDetail: View {
   @State private var deleting = false
   @State private var approvingPlan = false
   @State private var contextExpanded = false
-  @State private var moreDetailsExpanded = false
+  @State private var moreDetailsExpanded = true
+  @State private var imagesExpanded = false
+  @State private var attachmentThumbnailData: [UUID: Data] = [:]
   @State private var titleExpanded = false
   @State private var runDisclosure = TaskRunDisclosureState()
   @State private var feedbackSubmitting = false
@@ -781,11 +783,17 @@ struct TaskDetail: View {
     Group {
       if let item {
         VStack(alignment: .leading, spacing: 0) {
-          taskHeader(item)
-          Divider()
+          #if os(macOS)
+            taskHeader(item)
+            Divider()
+          #endif
           ScrollViewReader { proxy in
             ScrollView {
               VStack(alignment: .leading, spacing: 20) {
+                #if os(iOS)
+                  phoneTaskHeader(item)
+                  phoneCodexActions(item)
+                #endif
                 if !attentionRuns.isEmpty {
                   Menu {
                     ForEach(attentionRuns) { run in
@@ -802,10 +810,14 @@ struct TaskDetail: View {
                       systemImage: "exclamationmark.circle")
                   }.foregroundStyle(.orange)
                 }
-                runHistory(item)
-                taskAttachments(item)
+                #if os(macOS)
+                  runHistory(item)
+                  taskAttachments(item)
+                #endif
                 DisclosureGroup(isExpanded: $contextExpanded) {
-                  TextEditor(text: contextBinding).frame(minHeight: 110).scrollContentBackground(
+                  TextEditor(text: contextBinding).frame(minHeight: 110).accessibilityLabel(
+                    "Task context"
+                  ).scrollContentBackground(
                     .hidden
                   )
                   #if os(macOS)
@@ -840,9 +852,38 @@ struct TaskDetail: View {
                 } label: {
                   VStack(alignment: .leading, spacing: 3) {
                     Text(usesPlanFeedbackField ? "Context & plan feedback" : "Task context")
-                    Text(contextSummary).stageFont(.caption).foregroundStyle(.secondary)
+                    #if os(macOS)
+                      Text(contextSummary).stageFont(.caption).foregroundStyle(.secondary)
+                    #else
+                      if item.notes.isEmpty || notesSaveMessage != nil {
+                        Text(contextSummary).font(.caption).foregroundStyle(.secondary)
+                      }
+                    #endif
+                    #if os(iOS)
+                      if !contextExpanded, !item.notes.isEmpty {
+                        Text(item.notes).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                          .fixedSize(horizontal: false, vertical: true)
+                          .multilineTextAlignment(.leading)
+                      }
+                    #endif
                   }
+                  #if os(iOS)
+                    .frame(minHeight: 44, alignment: .leading)
+                  #endif
                 }
+                .accessibilityIdentifier("task-context")
+                #if os(iOS)
+                  .phoneDetailCard()
+                #endif
+                #if os(iOS)
+                  runHistory(item).phoneDetailCard()
+                  DisclosureGroup(isExpanded: $imagesExpanded) {
+                    taskAttachments(item).padding(.top, 8)
+                  } label: {
+                    Label("Images · \(item.attachments.count)", systemImage: "photo")
+                      .font(.headline).frame(minHeight: 44)
+                  }.phoneDetailCard()
+                #endif
                 #if os(macOS)
                   DisclosureGroup("StageChase runs") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -885,35 +926,32 @@ struct TaskDetail: View {
                 #endif
                 DisclosureGroup(isExpanded: $moreDetailsExpanded) {
                   VStack(alignment: .leading, spacing: 12) {
-                    if !model.isConnectedPhone {
-                      VStack(alignment: .leading, spacing: 8) {
-                        Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(
-                          .secondary)
-                        Text(
-                          item.planPath
-                            ?? (item.hasSavedPlan ? "Saved plan available on Mac" : "No saved plan")
-                        ).stageFont(.callout).foregroundStyle(
-                          .secondary
-                        )
-                        .disabled(model.planFeedbackInFlight.contains(taskID))
-
-                      }
-                    }
                     #if os(iOS)
-                      if model.isConnectedPhone {
-                        VStack(alignment: .leading, spacing: 8) {
-                          HStack {
-                            Text("SAVED PLAN").stageFont(.caption, weight: .semibold)
-                              .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Open plan", systemImage: "doc.text") {
-                              showingPlanReader = true
-                            }
-                          }
+                      if item.hasSavedPlan {
+                        Button {
+                          showingPlanReader = true
+                        } label: {
+                          Label("Open plan", systemImage: "doc.text")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("task-open-plan")
+                      } else {
+                        Text("No saved plan").font(.subheadline).foregroundStyle(.secondary)
+                      }
+                    #else
+                      if !model.isConnectedPhone {
+                        VStack(alignment: .leading, spacing: 8) {
+                          Text("SAVED PLAN").stageFont(.caption, weight: .semibold).foregroundStyle(
+                            .secondary)
+                          Text(
+                            item.planPath
+                              ?? (item.hasSavedPlan
+                                ? "Saved plan available on Mac" : "No saved plan")
+                          )
+                          .stageFont(.callout).foregroundStyle(.secondary)
+                          .disabled(model.planFeedbackInFlight.contains(taskID))
+                        }
                       }
                     #endif
                     #if os(macOS)
@@ -931,13 +969,31 @@ struct TaskDetail: View {
                       }
                     #endif
 
-                    Button("Delete task", role: .destructive) { deleting = true }
-                      .buttonStyle(.borderless)
-                      .disabled(model.planFeedbackInFlight.contains(taskID))
+                    #if os(macOS)
+                      Button("Delete task", role: .destructive) { deleting = true }
+                        .buttonStyle(.borderless)
+                        .disabled(model.planFeedbackInFlight.contains(taskID))
+                    #endif
                   }.padding(.top, 8)
                 } label: {
                   Text("More details")
+                    #if os(iOS)
+                      .frame(minHeight: 44, alignment: .leading)
+                    #endif
                 }
+                #if os(iOS)
+                  .phoneDetailCard()
+                #endif
+                #if os(iOS)
+                  VStack(spacing: 10) {
+                    phoneCompletion(item)
+                    Button("Delete task", role: .destructive) { deleting = true }
+                      .frame(maxWidth: .infinity, minHeight: 44)
+                      .disabled(model.planFeedbackInFlight.contains(taskID))
+                  }
+                  .padding(.top, 4)
+                  .accessibilityIdentifier("task-detail-bottom-actions")
+                #endif
               }.padding(16).tint(.primary)
             }
           }
@@ -945,7 +1001,7 @@ struct TaskDetail: View {
       } else {
         ContentUnavailableView("Task unavailable", systemImage: "doc.questionmark")
       }
-    }.background(Palette.card)
+    }.background(taskBackground)
       #if os(iOS)
         .fullScreenCover(isPresented: $showingPlanReader) {
           if let item { PlanReaderView(item: item) }
@@ -954,7 +1010,9 @@ struct TaskDetail: View {
       .task(id: taskID) {
         draft = item
         contextExpanded = false
-        moreDetailsExpanded = false
+        moreDetailsExpanded = true
+        imagesExpanded = !(item?.attachments.isEmpty ?? true)
+        attachmentThumbnailData = [:]
         titleExpanded = false
         runDisclosure.select(taskID: taskID, runs: taskRuns)
         edited = false
@@ -976,6 +1034,14 @@ struct TaskDetail: View {
       }
       .onChange(of: taskRuns.map(\.id)) { _, _ in
         runDisclosure.select(taskID: taskID, runs: taskRuns)
+      }
+      .onChange(of: item?.attachments.map(\.id)) { _, attachmentIDs in
+        imagesExpanded = !(attachmentIDs?.isEmpty ?? true)
+      }
+      .onChange(of: item?.notes) { _, notes in
+        if notes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+          contextExpanded = false
+        }
       }
       .onChange(of: contextExpanded) { _, expanded in
         #if os(macOS)
@@ -1089,6 +1155,62 @@ struct TaskDetail: View {
         Text("No images attached.").stageFont(.callout).foregroundStyle(.secondary)
       }
       ForEach(item.attachments) { attachment in
+        #if os(iOS)
+          VStack(alignment: .leading, spacing: 8) {
+            if let data = attachmentThumbnailData[attachment.id], let image = UIImage(data: data) {
+              Button {
+                attachmentPreviewData = data
+                showingAttachmentPreview = true
+              } label: {
+                Image(uiImage: image)
+                  .resizable()
+                  .scaledToFill()
+                  .frame(maxWidth: .infinity)
+                  .frame(height: 156)
+                  .clipped()
+                  .clipShape(RoundedRectangle(cornerRadius: 12))
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Preview \(attachment.displayName)")
+            } else {
+              Button {
+                Task { await loadAttachmentThumbnail(attachment, item: item) }
+              } label: {
+                Label(
+                  attachment.transferState == .pendingUpload ? "Waiting for upload" : "Retry preview",
+                  systemImage: attachment.transferState == .pendingUpload
+                    ? "arrow.up.circle" : "arrow.clockwise"
+                )
+                .frame(maxWidth: .infinity, minHeight: 88)
+                .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 12))
+              }
+              .buttonStyle(.plain)
+              .task(id: attachment.id) {
+                await loadAttachmentThumbnail(attachment, item: item)
+              }
+            }
+            HStack {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.displayName).lineLimit(1)
+                Text(
+                  attachment.transferState == .pendingUpload
+                    ? "Pending upload"
+                    : "Available · \(ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file))"
+                )
+                .stageFont(.caption).foregroundStyle(.secondary)
+              }
+              Spacer()
+              Button(role: .destructive) {
+                Task {
+                  _ = await model.removeTaskAttachment(taskID: item.id, attachmentID: attachment.id)
+                  attachmentThumbnailData[attachment.id] = nil
+                }
+              } label: {
+                Image(systemName: "trash")
+              }.buttonStyle(.borderless).accessibilityLabel("Remove \(attachment.displayName)")
+            }
+          }
+        #else
         HStack(spacing: 8) {
           Button {
             Task {
@@ -1119,14 +1241,33 @@ struct TaskDetail: View {
             Image(systemName: "trash")
           }.buttonStyle(.borderless).accessibilityLabel("Remove \(attachment.displayName)")
         }
+        #endif
       }
       if let attachmentError {
         Text(attachmentError).stageFont(.caption).foregroundStyle(.orange).textSelection(.enabled)
       }
-      Text("Images stay in separate files. Previews download only when opened.")
-        .stageFont(.caption).foregroundStyle(.secondary)
+      #if os(iOS)
+        Text("Images stay in separate files. Previews load while this section is expanded.")
+          .stageFont(.caption).foregroundStyle(.secondary)
+      #else
+        Text("Images stay in separate files. Previews download only when opened.")
+          .stageFont(.caption).foregroundStyle(.secondary)
+      #endif
     }
   }
+
+  #if os(iOS)
+    private func loadAttachmentThumbnail(_ attachment: TaskAttachment, item: WorkItem) async {
+      guard attachmentThumbnailData[attachment.id] == nil else { return }
+      do {
+        attachmentThumbnailData[attachment.id] = try await model.taskAttachmentData(
+          taskID: item.id, attachmentID: attachment.id)
+        attachmentError = nil
+      } catch {
+        attachmentError = error.localizedDescription
+      }
+    }
+  #endif
 
   private func addAttachment(_ bytes: Data, name: String, mediaType: String) async {
     let saved = await model.addTaskAttachment(
@@ -1162,6 +1303,168 @@ struct TaskDetail: View {
         return
       }
       attachmentError = "The clipboard does not contain a supported image."
+    }
+  #endif
+
+  private var taskBackground: Color {
+    #if os(macOS)
+      Palette.card
+    #else
+      Palette.canvas
+    #endif
+  }
+
+  #if os(iOS)
+    private func phoneTaskHeader(_ item: WorkItem) -> some View {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
+          VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+              Text("\(item.section.title) · \(item.shortID.map { "Task #\($0)" } ?? "ID pending sync")")
+                .font(.subheadline).foregroundStyle(.secondary)
+              if let tag = item.modelTag {
+                Text(tag.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                  .padding(.horizontal, 8).padding(.vertical, 4)
+                  .background(.quaternary, in: Capsule())
+              }
+            }
+            TextField("Task title", text: draftBinding(\.title), axis: .vertical)
+              .font(.title2.bold()).textFieldStyle(.plain)
+              .fixedSize(horizontal: false, vertical: true)
+              .disabled(model.planFeedbackInFlight.contains(taskID))
+              .accessibilityLabel("Task title")
+              .accessibilityIdentifier("task-detail-title")
+          }
+          phoneFavoriteButton(item)
+        }
+        if edited {
+          Button("Save title") { saveTaskEdits() }
+            .buttonStyle(.borderedProminent).frame(minHeight: 44)
+            .accessibilityIdentifier("task-save-title")
+        }
+        TaskStatusMenu(item: item).frame(minHeight: 44, alignment: .leading)
+        if canApprovePlan {
+          Button("Mark plan approved", systemImage: "checkmark.circle.fill") { approvePlan(item) }
+            .buttonStyle(.borderedProminent).tint(.blue).frame(minHeight: 44)
+            .disabled(approvingPlan)
+            .accessibilityHint("Approves the saved plan without moving the task or starting Codex.")
+        }
+      }
+      .accessibilityIdentifier("task-detail-header")
+    }
+
+    private func phoneCompletion(_ item: WorkItem) -> some View {
+      Button {
+        setTaskCompleted(!item.completed)
+      } label: {
+        Label(
+          item.completed ? "Reopen task" : "Complete task",
+          systemImage: item.completed ? "arrow.uturn.backward.circle" : "checkmark.circle.fill"
+        )
+        .font(.headline)
+        .frame(maxWidth: .infinity, minHeight: 56)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(item.completed ? Color.blue : Color.accentColor)
+      .accessibilityLabel(item.completed ? "Reopen task" : "Complete task")
+      .accessibilityHint("Changes whether this task is complete.")
+      .accessibilityIdentifier("task-completion")
+    }
+
+    private func phoneFavoriteButton(_ item: WorkItem) -> some View {
+      Button {
+        Task { await model.setFavorite(!item.isFavorite, for: item.id) }
+      } label: {
+        Image(systemName: item.isFavorite ? "star.fill" : "star")
+          .font(.title3)
+          .foregroundStyle(item.isFavorite ? Color.yellow : Color.secondary)
+          .frame(width: 44, height: 44).contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(item.isFavorite ? "Remove from favorites" : "Add to favorites")
+      .accessibilityIdentifier("task-favorite")
+    }
+
+    private func phoneCodexActions(_ item: WorkItem) -> some View {
+      let planning =
+        item.section == .inbox
+        || (item.section == .planning && item.status != .planApproved)
+      return VStack(alignment: .leading, spacing: 8) {
+        if !item.completed {
+          Button {
+            requestCodexAction(planning ? .plan : .run, item: item)
+          } label: {
+            Label(
+              planning ? "Plan in Codex" : "Launch in Codex",
+              systemImage: planning ? "sparkles" : "arrow.up.right.square"
+            )
+            .frame(maxWidth: .infinity, minHeight: 44)
+          }
+          .buttonStyle(.borderedProminent).tint(.blue)
+          .disabled(phoneCodexActionDisabled(item, planning: planning))
+          .accessibilityHint("Starts this task with Codex on the paired Mac.")
+          .accessibilityIdentifier("task-primary-codex-action")
+        }
+        phoneSecondaryActions(item, planning: planning)
+          .font(.subheadline).tint(.accentColor)
+        Text(
+          model.isConnectedPhone
+            ? "Codex runs on your paired Mac." : "Connect to your Mac to launch Codex."
+        )
+        .font(.caption).foregroundStyle(.secondary)
+        if phoneContextCopied {
+          Label("Prompt copied", systemImage: "checkmark.circle.fill")
+            .font(.caption).foregroundStyle(.green)
+        }
+        if let message = model.phoneCodexActionMessage {
+          Text(message).font(.caption)
+            .foregroundStyle(
+              message.localizedCaseInsensitiveContains("could not")
+                || message.localizedCaseInsensitiveContains("pair") ? .orange : .secondary
+            )
+            .textSelection(.enabled)
+        }
+      }
+    }
+
+    private func phoneSecondaryActions(_ item: WorkItem, planning: Bool) -> some View {
+      Menu {
+        Button("Copy prompt", systemImage: "doc.on.doc") { copyPhonePrompt(for: item) }
+        Button(
+          planning ? "Launch in Codex" : "Plan in Codex",
+          systemImage: planning ? "arrow.up.right.square" : "sparkles"
+        ) {
+          requestCodexAction(planning ? .run : .plan, item: item)
+        }
+        .disabled(phoneCodexActionDisabled(item, planning: !planning))
+        Section("Model tag") {
+          Button("None") { Task { await model.setModelTag(nil, for: item.id) } }
+          ForEach(TaskModelTag.allCases) { tag in
+            Button(tag.title) { Task { await model.setModelTag(tag, for: item.id) } }
+          }
+        }
+        Section("Move to section") {
+          ForEach(WorkflowSection.allCases.filter { $0 != item.section }) { section in
+            Button(section.title, systemImage: section.symbol) {
+              model.requestMove(item, to: section)
+            }
+          }
+        }
+        Divider()
+        Button(role: .destructive) { deleting = true } label: {
+          Label("Delete task", systemImage: "trash")
+        }
+      } label: {
+        Label("More", systemImage: "ellipsis")
+          .frame(minHeight: 44)
+      }
+      .accessibilityLabel("More task actions")
+    }
+
+    private func phoneCodexActionDisabled(_ item: WorkItem, planning: Bool) -> Bool {
+      codexActionLoading || item.completed
+        || (!planning && ![.planning, .implementing].contains(item.section))
+        || model.library.runs.contains { $0.taskID == item.id && $0.status.isActive }
     }
   #endif
 
@@ -1221,59 +1524,6 @@ struct TaskDetail: View {
         .disabled(approvingPlan)
         .accessibilityHint("Approves the saved plan without moving the task or starting Codex.")
       }
-      #if os(iOS)
-        VStack(alignment: .leading, spacing: 8) {
-          Button {
-            requestCodexAction(.run, item: item)
-          } label: {
-            Label("Launch in Codex", systemImage: "arrow.up.right.square")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(.borderedProminent).tint(.blue)
-          .disabled(
-            codexActionLoading || item.completed
-              || ![.planning, .implementing].contains(item.section)
-              || model.library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive })
-          )
-          .accessibilityHint("Starts this task with Codex on the paired Mac.")
-
-          Button {
-            requestCodexAction(.plan, item: item)
-          } label: {
-            Label("Plan in Codex", systemImage: "sparkles")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(.borderedProminent).tint(.blue)
-          .disabled(
-            codexActionLoading || item.completed
-              || model.library.runs.contains(where: { $0.taskID == item.id && $0.status.isActive })
-          )
-          .accessibilityHint("Starts a planning run with Codex on the paired Mac.")
-
-          Button {
-            copyPhonePrompt(for: item)
-          } label: {
-            Label("Copy prompt", systemImage: "doc.on.doc")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(.bordered)
-
-          if phoneContextCopied {
-            Label("Prompt copied", systemImage: "checkmark.circle.fill")
-              .stageFont(.caption).foregroundStyle(.green)
-          }
-          if let message = model.phoneCodexActionMessage {
-            Text(message).stageFont(.caption)
-              .foregroundStyle(
-                message.localizedCaseInsensitiveContains("could not")
-                  || message.localizedCaseInsensitiveContains("pair") ? .orange : .secondary
-              )
-              .textSelection(.enabled)
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 8)
-      #endif
       if edited {
         Button("Save changes (⌘Return)") { saveTaskEdits() }
           .buttonStyle(.borderedProminent).tint(.blue)
@@ -2338,3 +2588,14 @@ struct ActivityPanel: View {
     }.background(Palette.canvas)
   }
 }
+
+#if os(iOS)
+  extension View {
+    fileprivate func phoneDetailCard() -> some View {
+      padding(16)
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.card, in: RoundedRectangle(cornerRadius: 16))
+    }
+  }
+#endif

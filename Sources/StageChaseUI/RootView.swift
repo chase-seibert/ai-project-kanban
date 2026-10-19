@@ -153,7 +153,7 @@ struct RootView: View {
         // change both in the same transaction.
         Task { @MainActor in
           await Task.yield()
-          guard model.selectedProjectID == newProjectID else { return }
+          guard model.selectedProjectID == newProjectID, !model.isPreview else { return }
           if model.selectedProject == nil {
             phonePath = []
           } else if !phonePath.isEmpty {
@@ -216,7 +216,12 @@ struct RootView: View {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--preview-task"), var task = model.library.tasks.first {
           let completedPreview = !arguments.contains("--preview-active-task")
-          task.section = .implementing
+          if arguments.contains("--preview-long-title") {
+            task.title =
+              "Make it easier to review a task with a very long title, understand what changed in the latest implementation, and decide what to do next without losing the supporting context"
+          }
+          task.section = arguments.contains("--preview-inbox-task") ? .inbox : .implementing
+          task.planAvailable = arguments.contains("--preview-saved-plan")
           task.status = completedPreview ? .reviewing : .planApproved
           task.completed = completedPreview
           task.completedAt = completedPreview ? .now : nil
@@ -231,8 +236,26 @@ struct RootView: View {
             run.updatedAt = run.createdAt
             return run
           }
+          if arguments.contains("--preview-attention") {
+            task.status = .waiting
+            model.library.tasks[0] = task
+            model.library.runs[0].status = .needsInput
+            model.library.runs[0].summary =
+              "Please review the simulator screenshots before continuing."
+          }
           phonePath = [.board, .task(task.id)]
         } else if arguments.contains("--preview-board") {
+          if arguments.contains("--preview-planning"), var task = model.library.tasks.first {
+            task.section = .planning
+            task.status = .planApproved
+            task.isFavorite = true
+            task.modelTag = .high
+            model.library.tasks[0] = task
+            model.boardFocusedStage = .planning
+          } else if arguments.contains("--preview-implementing") {
+            model.boardFocusedStage = .implementing
+          }
+          if arguments.contains("--preview-empty") { model.boardFilter = .favorites }
           phonePath = [.board]
         }
       }
@@ -285,7 +308,9 @@ struct RootView: View {
         BoardView(onOpenTask: { id in phonePath.append(.task(id)) })
           .navigationBarTitleDisplayMode(.inline)
           .toolbar {
-            ToolbarItem(placement: .principal) { phoneProjectPicker }
+            ToolbarItem(placement: .principal) {
+              Text(phoneProjectTitle).lineLimit(1).accessibilityLabel("Project \(phoneProjectTitle)")
+            }
             ToolbarItem(placement: .topBarTrailing) {
               Button("Add task", systemImage: "plus") {
                 model.sheet = .newTask(model.boardFocusedStage)
@@ -294,7 +319,7 @@ struct RootView: View {
               .disabled(model.selectedProject == nil)
               .accessibilityIdentifier("phone-add-task")
             }
-            ToolbarItem(placement: .secondaryAction) { phoneBoardMoreMenu }
+            ToolbarItem(placement: .topBarTrailing) { phoneBoardMoreMenu }
           }
       case .workspaceTasks(let preset):
         WorkspaceTasksView(preset: preset) { id in phonePath.append(.task(id)) }
@@ -386,37 +411,8 @@ struct RootView: View {
     }
   }
 
-  private var phoneProjectPicker: some View {
-    Menu {
-      if model.library.activeProjects.isEmpty {
-        Button("No projects available") {}.disabled(true)
-      } else {
-        ForEach(model.library.activeProjects) { project in
-          Button {
-            model.select(project.id)
-          } label: {
-            if project.id == model.selectedProjectID {
-              Label(project.name, systemImage: "checkmark")
-            } else {
-              Text(project.name)
-            }
-          }
-        }
-      }
-    } label: {
-      HStack(spacing: 6) {
-        Text(phoneProjectTitle).lineLimit(1)
-        Image(systemName: "chevron.down").font(.caption.weight(.semibold))
-      }
-      .foregroundStyle(.primary)
-      .frame(maxWidth: 220)
-      .contentShape(Rectangle())
-    }
-    .accessibilityLabel("Choose project, current project \(phoneProjectTitle)")
-  }
-
   private var phoneProjectTitle: String {
-    model.selectedProject?.name ?? "Choose project"
+    model.selectedProject?.name ?? "Projects"
   }
 }
 

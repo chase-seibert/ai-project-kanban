@@ -63,7 +63,7 @@ that order, followed by Plan Approved and then other statuses. Tasks within a
 status group sort by most recent update, with task ID breaking timestamp ties.
 Priority labels and the normal detail picker are hidden; stored priority and
 menu/keyboard commands remain available.
-Board filters for All, Favorites, High, and Medium compose with search and the
+Board filters for All, Favorites, and Plan Approved compose with search and the
 existing project, section, and completion controls. Favorite and model-tag
 controls are available on task cards and in task detail. High and Medium are
 organizational tags only; they do not change task priority or the selected
@@ -98,13 +98,26 @@ Implementing, with one readable lane per tab rather than five squeezed desktop
 columns. The system tab bar supplies the current iOS material and appearance.
 Generated launch configuration enables the full display rather than iOS
 compatibility framing.
-On iPhone, the selected project name in the navigation bar opens a project
-switcher. The native bottom tabs select Inbox, Planning, or Implementing and
-stay in sync with the focused section used by Add task. The overflow menu contains
-completed items, **Refresh from Mac**, Connection, Activity, Settings, and
-Project Git and Project settings. Project Git status and the confirmed project
-commit action route through the paired Mac. Pull-to-refresh also remains
-available. Task details have no Git or deployment controls on either platform.
+The phone lane has no enclosing panel or repeated subtitle. Its canvas continues
+behind the lane header so the gap below the filter row does not flash a different
+light-mode color. Full-width rounded
+cards prioritize the complete title and a navigation chevron, with status and
+compact ID/favorite/model/plan indicators below. Notes stay in detail rather than
+repeating on every card. Filter and status controls provide at least 44-point
+hit regions. VoiceOver gets an explicit Open task action and a separate Edit
+title action, preserving physical single/double-tap title behavior. Filtered
+empty lanes explain the empty result and offer Clear filters; unfiltered empty
+lanes offer Add task.
+On iPhone, the selected project name is shown in the navigation bar; the back
+button returns to the project list for switching boards. The native bottom tabs
+select Inbox, Planning, or Implementing and stay in sync with the focused section
+used by Add task. The board overflow menu is a direct toolbar action and contains
+completed items, **Refresh from Mac**, Connection, Activity, Settings, Project
+Git, and Project settings. Filter pills have clear insets from the lane content,
+and lane scroll content has enough bottom margin to remain above the floating
+section bar. Project Git status and the confirmed project commit action route
+through the paired Mac. Pull-to-refresh also remains available. Task details
+have no Git or deployment controls on either platform.
 
 Mac task detail is an inspector; iPhone pushes a task screen in its navigation
 stack. The system back button and edge-swipe gesture return to the board. Title, task context, saved
@@ -126,13 +139,23 @@ On Mac, the section also accepts clipboard images through Paste. Previewing on a
 phone downloads only that selected file. An uncached preview
 that cannot reach the Mac reports a retryable error, while a cached preview
 remains available offline.
-On iPhone, the title stays first. **Reopen**, **Launch in Codex**, **Plan in
-Codex**, and **Copy prompt** appear before secondary details. Launch and Plan
+On iPhone, task detail is one scrolling page, so a long title or larger Dynamic
+Type does not pin supporting content below a fixed header. A star icon toggles
+favorite without a text button; the model tag is shown as compact metadata.
+Status sits below the title. Task context starts collapsed so the page can be
+scrolled without the editor intercepting gestures. The Images section expands when attachments exist and
+shows inline previews that open full-screen when tapped. Complete/Reopen is a
+large primary action at the bottom, beside a separate Delete task action.
+Inbox and unapproved Planning tasks give **Plan in Codex** primary emphasis;
+approved plans and Implementing tasks give **Launch in Codex** primary emphasis.
+Copy prompt, the alternate Codex action, model-tag changes, section movement,
+and deletion are grouped under one **More** menu. Context and **More details**
+start expanded; the latter contains the saved-plan action when available.
+Run history and Images remain below the Codex actions. Launch and Plan
 are explicit, revision-checked requests to start the selected Codex action on
 the paired Mac; a tap is the user's confirmation. Copy prompt produces a
 StageChase-aware task prompt for pasting into another Codex chat. Saved-plan
-review remains available inside collapsed details. Task context and other
-details start collapsed.
+review opens from More details. Users can collapse context and details again.
 The Activity screen lists active runs. Task detail merges planning, implementation,
 and external runs into one newest-first history. Only the latest run starts
 expanded; older runs are individually expandable. A new run expands and collapses
