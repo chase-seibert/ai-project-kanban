@@ -2260,3 +2260,108 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(oldProject.deletedAt == nil)
   #expect(oldProject.deletionRevision == nil)
 }
+
+@Test(arguments: [RunKind.implementation, .task, .planning])
+func externalStartMovesOnlyExecutionToBuilding(kind: RunKind) async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let project = Project(name: "Execution start")
+  _ = try await repository.apply(.createProject(project))
+  var task = WorkItem(projectID: project.id, title: "Start", stage: .planned)
+  task.planPath = "to-do/existing-plan.md"
+  _ = try await repository.apply(.createTask(task))
+  var run = AgentRun(task: task, kind: kind)
+  run.source = .codexDesktop
+  run.status = .running
+  let started = try await repository.applyMCP(
+    .beginExternalRun(run), operationID: run.id, fingerprint: "start")
+  let saved = try #require(started.library.tasks.first)
+  #expect(saved.stage == (kind == .planning ? .planned : .implementation))
+  #expect(saved.section == (kind == .planning ? .planning : .implementing))
+  #expect(saved.status == (kind == .planning ? .planApproved : .building))
+  #expect(saved.revision == (kind == .planning ? 0 : 1))
+  #expect(saved.planPath == task.planPath)
+  #expect(!saved.completed)
+  #expect(started.library.runs.count == 1)
+  let replay = try await repository.applyMCP(
+    .beginExternalRun(run), operationID: run.id, fingerprint: "start")
+  #expect(replay.replayed)
+  #expect(replay.library.tasks.first == saved)
+}
+
+@Test func ownedExecutionMovesWhenRunningAndDoesNotMoveAgainOnProgress() throws {
+  let project = Project(name: "Execution", directory: "/tmp/fixture")
+  let task = WorkItem(projectID: project.id, title: "Build", stage: .planned)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  library = try BoardReducer.apply(
+    .runTaskNow(
+      task.id, expectedRevision: 0, kind: .implementation,
+      configuration: fixtureModelConfiguration), to: library)
+  var run = try #require(library.runs.first)
+  library = try BoardReducer.apply(.updateRun(run), to: library)
+  #expect(library.tasks[0] == task)
+  run.status = .running
+  library = try BoardReducer.apply(.updateRun(run), to: library)
+  #expect(library.tasks[0].stage == .implementation)
+  #expect(library.tasks[0].section == .implementing)
+  #expect(library.tasks[0].status == .building)
+  #expect(library.tasks[0].revision == 1)
+  #expect(library.runs.count == 1)
+  library = try BoardReducer.apply(.move(task.id, .review, expectedRevision: 1), to: library)
+  let moved = library.tasks[0]
+  library = try BoardReducer.apply(.updateRun(run), to: library)
+  #expect(library.tasks[0] == moved)
+  run.status = .failed
+  run.error = "Service unavailable"
+  library = try BoardReducer.apply(.updateRun(run), to: library)
+  library = try BoardReducer.apply(.retry(run.id), to: library)
+  run = library.runs[0]
+  run.status = .running
+  library = try BoardReducer.apply(.updateRun(run), to: library)
+  #expect(library.tasks[0].stage == .implementation)
+  #expect(library.tasks[0].status == .building)
+}
+
+@Test func planningProgressNeverBecomesBuilding() throws {
+  let project = Project(name: "Planning", directory: "/tmp/fixture")
+  let task = WorkItem(projectID: project.id, title: "Plan", stage: .next)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  library = try BoardReducer.apply(
+    .runTaskNow(
+      task.id, expectedRevision: 0, kind: .planning,
+      configuration: fixtureModelConfiguration), to: library)
+  var run = library.runs[0]
+  run.status = .running
+  library = try BoardReducer.apply(.updateRun(run), to: library)
+  #expect(library.tasks[0].status == .planning)
+  #expect(library.tasks[0].stage == .next)
+  #expect(library.tasks[0].section == .planning)
+
+  var external = AgentRun(task: library.tasks[0], kind: .planning)
+  external.source = .codexDesktop
+  external.status = .running
+  library = try BoardReducer.apply(.beginExternalRun(external), to: library)
+  library = try BoardReducer.apply(
+    .reportExternalRun(
+      external.id, "Drafting plan", .running, expectedTaskRevision: library.tasks[0].revision),
+    to: library)
+  #expect(library.tasks[0].status == .planning)
+  #expect(library.tasks[0].stage == .next)
+}
+
+@Test func externalExecutionDoesNotReopenOrMoveCompletedTask() throws {
+  let project = Project(name: "Completed")
+  var task = WorkItem(projectID: project.id, title: "Done", stage: .review)
+  task.completed = true
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [task]
+  var run = AgentRun(task: task, kind: .task)
+  run.source = .codexDesktop
+  run.status = .running
+  library = try BoardReducer.apply(.beginExternalRun(run), to: library)
+  #expect(library.tasks[0] == task)
+}

@@ -11,6 +11,7 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
   case mediumPriorityModel
   case favorites
   case planApproved
+  case building
   case inProgress
   case reviewing
   case recentlyCompleted
@@ -22,6 +23,7 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
     case .mediumPriorityModel: "Medium"
     case .favorites: "Favorites"
     case .planApproved: "Plan Approved"
+    case .building: "Building"
     case .inProgress: "In Progress"
     case .reviewing: "Reviewing"
     case .recentlyCompleted: "Recently Completed"
@@ -33,6 +35,7 @@ enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
     case .mediumPriorityModel: "bolt"
     case .favorites: "star.fill"
     case .planApproved: "checkmark.seal"
+    case .building: "hammer.fill"
     case .inProgress: "hammer"
     case .reviewing: "eye"
     case .recentlyCompleted: "checkmark.circle"

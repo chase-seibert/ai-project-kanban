@@ -951,6 +951,31 @@ public enum BoardReducer {
         throw BoardError.busy
       }
     }
+    func markExecutionStarted(_ run: AgentRun) throws {
+      guard run.kind != .planning else { return }
+      let index = try taskIndex(run.taskID)
+      guard !state.tasks[index].completed else { return }
+      var item = state.tasks[index]
+      guard
+        item.section != .implementing || item.stage != .implementation
+          || item.status != .building
+      else { return }
+      if item.section != .implementing {
+        item.rank =
+          (state.tasks.filter { $0.projectID == item.projectID && $0.section == .implementing }
+            .map(\.rank).max() ?? -1) + 1
+      }
+      item.section = .implementing
+      item.stage = .implementation
+      item.status = .building
+      item.revision += 1
+      item.updatedAt = .now
+      state.tasks[index] = item
+      state.activity.append(
+        Activity(
+          "Codex execution started · Building", projectID: item.projectID, taskID: item.id,
+          runID: run.id))
+    }
     func enqueue(_ item: inout WorkItem, configuration: ResolvedCodexConfiguration?) throws {
       guard let project = state.projects.first(where: { $0.id == item.projectID }) else {
         throw BoardError.missing
@@ -1112,6 +1137,7 @@ public enum BoardReducer {
             "Tracking superseded by a new Codex Desktop execution.", projectID: run.projectID,
             taskID: run.taskID, runID: state.runs[index].id))
       }
+      try markExecutionStarted(run)
       state.runs.append(run)
       state.activity.append(
         Activity(
@@ -1279,7 +1305,7 @@ public enum BoardReducer {
         state.runs[runIndex].liveState = .idle
       }
       if !state.tasks[index].completed {
-        state.tasks[index].status = Self.taskStatus(for: status, message: trimmed)
+        state.tasks[index].status = Self.taskStatus(for: status, kind: run.kind, message: trimmed)
       }
       state.runs[runIndex].summary = trimmed
       state.runs[runIndex].latestMessage = trimmed
@@ -1395,13 +1421,17 @@ public enum BoardReducer {
         throw BoardError.missing
       }
       guard state.runs[index].status != .superseded else { break }
+      // Only an owned execution start moves placement. Later status/observer updates do not.
+      if run.source != .codexDesktop, state.runs[index].status == .queued, run.status == .running {
+        try markExecutionStarted(run)
+      }
       state.runs[index] = run
-      if let taskIndex = state.tasks.firstIndex(where: { $0.id == run.taskID }) {
+      if run.status != .queued,
+        let taskIndex = state.tasks.firstIndex(where: { $0.id == run.taskID })
+      {
         let task = state.tasks[taskIndex]
-        let status =
-          run.status == .succeeded && run.kind == .planning
-          ? TaskStatus.planning
-          : Self.taskStatus(for: run.status, message: run.error ?? run.summary)
+        let status = Self.taskStatus(
+          for: run.status, kind: run.kind, message: run.error ?? run.summary)
         if !task.completed && task.status != status {
           state.tasks[taskIndex].status = status
           state.tasks[taskIndex].updatedAt = .now
@@ -1454,13 +1484,15 @@ public enum BoardReducer {
     return state
   }
 
-  private static func taskStatus(for status: RunStatus, message: String) -> TaskStatus {
+  private static func taskStatus(
+    for status: RunStatus, kind: RunKind, message: String
+  ) -> TaskStatus {
     switch status {
-    case .queued, .running: .building
+    case .queued, .running: kind == .planning ? .planning : .building
     case .needsInput, .interrupted: .waiting
     case .failed:
       message.localizedCaseInsensitiveContains("quota") ? .quota : .error
-    case .succeeded: .reviewing
+    case .succeeded: kind == .planning ? .planning : .reviewing
     case .readyForHandoff: .planApproved
     case .cancelled, .stale, .superseded: .planApproved
     }

@@ -14,11 +14,11 @@ not yet verified.
 | Confirm adding/moving to Next with automatic invocation enabled globally and for the project | Atomically reserve `to-do/<normalized task-title>-<lowercase task UUID>.md` when no path was selected, persist one planning run, and invoke Codex |
 | Planning success | Require an explicit plain-text `Completed:` response plus a readable, nonempty file at the task's reserved path; update the run only, leaving the task column unchanged |
 | Confirm adding/moving to Implementation with automatic invocation enabled globally and for the project | Use the project folder, or create a managed worktree for a dirty repository when that project's worktree setting is on; then invoke Codex. A plan is optional context |
-| Confirm Execute Task from Mac task detail, or tap it on the paired phone | Queue and execute only that task in its current Planning or Implementing section, using the saved project profile; this explicit action works even when automatic invocation or project automation is off |
+| Confirm Execute Task from Mac task detail, or tap it on the paired phone | Queue only that task from Planning or Implementing, move it to Implementing with Building status when execution starts, using the saved project profile; this explicit action works even when automatic invocation or project automation is off |
 | Confirm Plan with StageChase from Mac task detail, or tap it on the paired phone | Queue a planning run from any section, reserve its plan path, and preserve the task's current section and completion state |
 | Implementation success | Require an explicit plain-text `Completed:` response; update the run only. The user chooses the task column and completion state |
 | Turn off Automatically invoke Codex | Stage changes no longer start turns. Existing active turns continue; task detail still offers Execute Task, Plan with StageChase, and the two Codex Desktop handoffs |
-| Execute Task from Mac task detail | Confirm the resolved model and effort, then execute the task in the Mac runner without opening Codex Desktop or moving the task |
+| Execute Task from Mac task detail | Confirm the resolved model and effort, then execute the task in the Mac runner; execution start moves it to Implementing with Building status |
 | Plan with StageChase from Mac task detail | Confirm the resolved model and effort, then start a planning run in the Mac runner without opening Codex Desktop or moving the task |
 | Execute Task or Plan with StageChase from paired phone | Treat the explicit phone tap as confirmation; resolve the Mac-local model and effort, then queue and start on Mac without a second desktop confirmation |
 | Copy prompt from task detail | Copy the same StageChase MCP task prompt used by Launch Codex, starting with the exact task title and including stable IDs and a readable project-relative plan path when available |
@@ -52,6 +52,13 @@ are available only through the user's StageChase controls.
 The repository commits an operation receipt with each MCP write so a retry with
 the same operation ID cannot duplicate the change. Moving a task through MCP
 never enters the automatic-run path.
+`begin_task` with `activity_kind: implementation` or the legacy default `task`
+atomically moves an unfinished task into Implementing with Building status when
+recording the already-started execution. Its response includes the new task revision.
+Planning starts preserve placement. Retries with the same operation ID do not
+repeat the transition. Merely opening Desktop or copying a prompt changes no task
+placement; later status updates do not repeat the start transition.
+
 `begin_task`, `report_task_update`, and `finish_task` record the session already
 open in Codex Desktop and a bounded latest message. They do not create or
 control a Desktop session; after a StageChase restart its external state is

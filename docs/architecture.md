@@ -176,8 +176,15 @@ but leaves the task in Planning. The user can explicitly mark a Planning task
 with a saved plan as Plan Approved from Mac or iPhone; this status also means
 ready for implementation and does not move its section or start Codex. A
 revision-checked phone command carries this status change to the Mac. Starting
-Codex derives Building from the run; a successful implementation sets Reviewing
-immediately. Waiting and Error represent blocked or failed runs; Quota is
+an implementation or generic task execution moves unfinished tasks into Implementing
+with Building status. This happens when a Mac-owned run first changes from queued
+to running, or atomically when MCP `begin_task` records execution in an already-open
+Desktop session. Planning starts preserve placement; planning progress stays
+Planning. Queuing, preparing a Desktop handoff, and later observer/progress updates
+do not move placement. Execution starts preserve completion, plan attachments,
+and identity, increment the task revision when changed, and add visible activity.
+A successful implementation sets Reviewing immediately. Waiting and Error represent
+blocked or failed runs; Quota is
 selected for quota-specific failure messages. The `completed` boolean is
 independent from status and section; completion and reopening do not replace the
 status. Legacy `done` status values decode as Reviewing while preserving the
@@ -217,7 +224,10 @@ Task status can be changed independently of section and completion from the
 task-card context menu or status badge menu. Waiting, Error, and Quota remain
 system-set and cannot be selected manually. Task detail omits section and status
 because the selected board column and card already show them. The Workspace
-sidebar provides fixed Reviewing, In Progress, and Recently Completed views.
+sidebar provides a Building view on Mac and iPhone, alongside the existing
+workspace views. Building includes unfinished tasks with Building status across
+active projects, regardless of whether run tracking is currently active. It uses
+the existing search, date grouping, desktop columns, and single-column phone layout.
 Reviewing combines saved, unapproved plans (Planning with no active run) with
 implementation changes ready for review (Reviewing). In Progress includes
 Planning and Building tasks only while their latest run is queued or running.

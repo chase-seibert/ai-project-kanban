@@ -309,7 +309,8 @@ struct RootView: View {
           .navigationBarTitleDisplayMode(.inline)
           .toolbar {
             ToolbarItem(placement: .principal) {
-              Text(phoneProjectTitle).lineLimit(1).accessibilityLabel("Project \(phoneProjectTitle)")
+              Text(phoneProjectTitle).lineLimit(1).accessibilityLabel(
+                "Project \(phoneProjectTitle)")
             }
             ToolbarItem(placement: .topBarTrailing) {
               Button("Add task", systemImage: "plus") {
@@ -495,6 +496,7 @@ struct ProjectSidebar: View {
           ForEach([
             WorkspaceTaskPreset.favorites,
             .planApproved,
+            .building,
             .reviewing,
             .recentlyCompleted,
           ]) { preset in
@@ -644,6 +646,8 @@ struct WorkspaceTasksView: View {
       model.library.tasks.filter { !$0.completed && $0.isFavorite }
     case .planApproved:
       model.library.recentTasks.filter { !$0.completed && $0.status == .planApproved }
+    case .building:
+      model.library.recentTasks.filter { !$0.completed && $0.status == .building }
     case .inProgress:
       model.library.recentTasks.filter { item in
         !item.completed && [.planning, .building].contains(item.status) && hasActiveRun(item)
@@ -853,6 +857,8 @@ struct WorkspaceTasksView: View {
     case .favorites: "No favorite tasks"
     case .planApproved:
       model.search.isEmpty ? "No approved plans ready to start" : "No matching tasks"
+    case .building:
+      model.search.isEmpty ? "No tasks being built" : "No matching tasks"
     case .inProgress:
       model.search.isEmpty ? "No active planning or build runs" : "No matching tasks"
     case .reviewing:
@@ -868,6 +874,7 @@ struct WorkspaceTasksView: View {
     case .mediumPriorityModel: "Tasks tagged Medium across your projects appear here."
     case .favorites: "Your favorite tasks across projects appear here."
     case .planApproved: "Plans approved for implementation across your projects appear here."
+    case .building: "Unfinished tasks with Building status across your projects appear here."
     case .inProgress: "Tasks with an active planning or implementation run appear here."
     case .reviewing: "Plans awaiting approval and finished code changes appear here."
     case .recentlyCompleted: "Completed tasks are grouped by the date they were completed."

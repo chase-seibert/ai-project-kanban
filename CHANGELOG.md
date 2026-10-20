@@ -2,6 +2,12 @@
 
 ## 2026-10-19
 
+- Add a Building workspace on Mac and iPhone for unfinished Building tasks across
+  projects. Move unfinished tasks into Implementing with Building status when
+  Codex execution starts, including Desktop MCP tracking and Mac-runner retries.
+  Preserve planning placement and completion; queued work and Desktop handoffs
+  do not trigger this transition.
+
 - Refine the iPhone task-list and task-detail hierarchy from screenshot review:
   expose the board overflow directly in the toolbar, remove the project dropdown,
   add spacing around filters and above the floating section bar, and reduce task
