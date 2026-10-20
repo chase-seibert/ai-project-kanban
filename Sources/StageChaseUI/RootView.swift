@@ -430,6 +430,7 @@ private enum PhoneDestination: Hashable {
 struct ProjectSidebar: View {
   @Environment(AppModel.self) private var model
   @Binding var settingsInitialTab: AppSettingsTab
+  @State private var dropTargetedProjectID: UUID?
   var onOpen: (() -> Void)?
   var onOpenWorkspace: ((WorkspaceTaskPreset) -> Void)?
   var body: some View {
@@ -450,12 +451,23 @@ struct ProjectSidebar: View {
         ForEach(model.library.activeProjects) { project in
           let counts = model.library.sidebarCounts(for: project.id)
           ProjectSidebarProjectRow(
-            project: project, counts: counts, isSelected: project.id == model.selectedProjectID
+            project: project, counts: counts, isSelected: project.id == model.selectedProjectID,
+            isDropTargeted: dropTargetedProjectID == project.id
           ) {
             model.select(project.id)
             onOpen?()
           }
           .contextMenu {
+            let orderedProjects = model.library.activeProjects
+            if let index = orderedProjects.firstIndex(where: { $0.id == project.id }) {
+              Button("Move project up") {
+                moveProject(project.id, by: -1)
+              }.disabled(index == 0)
+              Button("Move project down") {
+                moveProject(project.id, by: 1)
+              }.disabled(index == orderedProjects.count - 1)
+              Divider()
+            }
             #if os(macOS)
               Button("Project settings…") { model.sheet = .editProject(project) }
             #else
@@ -467,6 +479,16 @@ struct ProjectSidebar: View {
               model.projectPendingDeletion = project
             }
           }
+          .draggable(project.id.uuidString)
+          .dropDestination(
+            for: String.self,
+            action: { items, location in
+              acceptProjectDrop(items, on: project.id, after: location.y > 26)
+            },
+            isTargeted: { isTargeted in
+              dropTargetedProjectID = isTargeted ? project.id : nil
+            }
+          )
           #if os(iOS)
             .swipeActions {
               Button(role: .destructive) {
@@ -509,6 +531,18 @@ struct ProjectSidebar: View {
             .accessibilityIdentifier("workspace-\(preset.rawValue)-navigation")
           }
         }
+        // The final drop target lets a project move to the end without needing
+        // to drop precisely on the last row.
+        Color.clear
+          .frame(height: 24)
+          .contentShape(Rectangle())
+          .dropDestination(for: String.self) { items, _ in
+            guard let value = items.first, let draggedID = UUID(uuidString: value) else {
+              return false
+            }
+            moveProjectToEnd(draggedID)
+            return true
+          }
       #endif
       Section {
         Button {
@@ -558,7 +592,7 @@ struct ProjectSidebar: View {
       // SwiftUI's UICollectionView-backed List can apply a stale row diff when a
       // project is removed after a swipe action. Recreate the list on membership
       // changes so UIKit starts from the current active-project snapshot.
-      .id(model.library.activeProjects.map { $0.id.uuidString }.joined(separator: ","))
+      .id(model.library.activeProjects.map { $0.id.uuidString }.sorted().joined(separator: ","))
       .refreshable {
         await model.refreshFromMac(manual: true, forceFullSnapshot: true)
       }
@@ -578,6 +612,48 @@ struct ProjectSidebar: View {
     #else
       .listStyle(.insetGrouped)
     #endif
+  }
+
+  private func moveProject(_ id: UUID, by offset: Int) {
+    let projects = model.library.activeProjects
+    guard let source = projects.firstIndex(where: { $0.id == id }) else { return }
+    let target = source + offset
+    guard projects.indices.contains(target) else { return }
+    var ids = projects.map(\.id)
+    let moved = ids.remove(at: source)
+    ids.insert(moved, at: target)
+    Task { _ = await model.reorderProjects(ids) }
+  }
+
+  private func acceptProjectDrop(_ items: [String], on targetID: UUID, after: Bool) -> Bool {
+    guard let value = items.first, let draggedID = UUID(uuidString: value), draggedID != targetID
+    else { return false }
+    moveProject(draggedID, to: targetID, after: after)
+    return true
+  }
+
+  private func moveProject(_ id: UUID, to targetID: UUID) {
+    moveProject(id, to: targetID, after: true)
+  }
+
+  private func moveProject(_ id: UUID, to targetID: UUID, after: Bool) {
+    var ids = model.library.activeProjects.map(\.id)
+    guard let source = ids.firstIndex(of: id), let target = ids.firstIndex(of: targetID) else {
+      return
+    }
+    ids.remove(at: source)
+    guard let adjustedTarget = ids.firstIndex(of: targetID) else { return }
+    let insertion = adjustedTarget + (after ? 1 : 0)
+    ids.insert(id, at: min(insertion, ids.endIndex))
+    Task { _ = await model.reorderProjects(ids) }
+  }
+
+  private func moveProjectToEnd(_ id: UUID) {
+    var ids = model.library.activeProjects.map(\.id)
+    guard let source = ids.firstIndex(of: id), source != ids.endIndex - 1 else { return }
+    ids.remove(at: source)
+    ids.append(id)
+    Task { _ = await model.reorderProjects(ids) }
   }
 }
 
@@ -1080,6 +1156,7 @@ private struct ProjectSidebarProjectRow: View {
   let project: Project
   let counts: ProjectSidebarCounts
   let isSelected: Bool
+  let isDropTargeted: Bool
   let action: () -> Void
 
   var body: some View {
@@ -1117,7 +1194,11 @@ private struct ProjectSidebarProjectRow: View {
         + "\(counts.codeReview) ready for code review, "
         + "\(modelGitAccessibilityDescription)"
     )
-    .listRowBackground(isSelected ? Color.accentColor.opacity(0.1) : .clear)
+    .listRowBackground(
+      isDropTargeted
+        ? Color.accentColor.opacity(0.22)
+        : isSelected ? Color.accentColor.opacity(0.1) : .clear
+    )
   }
 
   private var modelGitAccessibilityDescription: String {

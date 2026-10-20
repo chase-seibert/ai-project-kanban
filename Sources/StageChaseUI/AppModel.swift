@@ -847,6 +847,11 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
           _ = try BoardReducer.apply(command, to: library)
           wireCommand = .setProjectDeleted(id: id, deleted: deleted)
           revision = expectedRevision
+        case .reorderProjects(let ids):
+          _ = try BoardReducer.apply(command, to: library)
+          wireCommand = .reorderProjects(
+            ids: ids, orderDigest: SyncCommandValidator.projectOrderDigest(in: library))
+          revision = nil
         case .createTask(let item, let configuration):
           guard configuration == nil else {
             throw BoardError.invalid("Confirm automated work on the Mac.")
@@ -1018,6 +1023,11 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
   func setProjectDeleted(_ project: Project, deleted: Bool) async -> Bool {
     await perform(
       .setProjectDeleted(project.id, deleted, expectedRevision: project.deletionRevision))
+  }
+
+  @discardableResult
+  func reorderProjects(_ ids: [UUID]) async -> Bool {
+    await perform(.reorderProjects(ids))
   }
 
   #if os(macOS)

@@ -144,7 +144,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.tasks.first?.id == task.id)
   #expect(replica.tasks.first?.shortID == 23)
   #expect(replica.taskShortIDHighWaterMark == 30)
-  #expect(SyncProtocol.version == 15)
+  #expect(SyncProtocol.version == 16)
 }
 
 @Test func phonePlanFeedbackDirectRequestPreservesExactFeedbackAndRequestID() throws {
@@ -395,11 +395,12 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let b = Project(name: "Second")
   var library = try BoardReducer.apply(.createProject(a), to: Library())
   library = try BoardReducer.apply(.createProject(b), to: library)
-  #expect(library.projects == [a, b])
+  #expect(library.projects.map(\.id) == [a.id, b.id])
+  #expect(library.projects.map(\.projectOrder) == [0, 1])
   var edited = b
   edited.name = "Renamed"
   library = try BoardReducer.apply(.editProject(edited), to: library)
-  #expect(library.projects[0] == a)
+  #expect(library.projects[0].id == a.id)
   #expect(library.projects[1].name == "Renamed")
 }
 
@@ -559,7 +560,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 15)
+  #expect(decoded.version == 16)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -868,7 +869,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 15)
+  #expect(snapshot.version == 16)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }
@@ -2104,6 +2105,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let store = root.appendingPathComponent("Library.sqlite")
   var repository: LibraryRepository? = try LibraryRepository(url: store)
   var project = Project(name: "Retained", directory: root.path)
+  project.projectOrder = 0
   project.automationEnabled = true
   project.favoriteMakeTargets = ["build"]
   _ = try await repository!.apply(.createProject(project))
@@ -2239,6 +2241,89 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(final.projects[0].directory == project.directory)
   #expect(!final.projects[0].isDeleted)
   #expect(final.projects[0].deletionRevision == 2)
+}
+
+@Test func projectReorderingPersistsAndLeavesDeletedProjectSlotsStable() throws {
+  var library = Library()
+  var first = Project(name: "First")
+  var deleted = Project(name: "Deleted")
+  var third = Project(name: "Third")
+  var second = Project(name: "Second")
+  first.projectOrder = 0
+  deleted.projectOrder = 1
+  deleted.deletedAt = Date(timeIntervalSince1970: 1)
+  third.projectOrder = 2
+  second.projectOrder = 3
+  library.projects = [first, deleted, third, second]
+
+  let reordered = try BoardReducer.apply(
+    .reorderProjects([third.id, first.id, second.id]), to: library)
+  #expect(reordered.activeProjects.map(\.id) == [third.id, first.id, second.id])
+  #expect(
+    ProjectOrdering.ordered(reordered.projects).map(\.id)
+      == [third.id, deleted.id, first.id, second.id])
+  #expect(reordered.projects.first(where: { $0.id == deleted.id })?.projectOrder == 1)
+
+  var staleSettingsDraft = first
+  staleSettingsDraft.name = "First renamed"
+  let edited = try BoardReducer.apply(.editProject(staleSettingsDraft), to: reordered)
+  #expect(edited.activeProjects.map(\.id) == [third.id, first.id, second.id])
+  #expect(edited.projects.first(where: { $0.id == first.id })?.projectOrder == 2)
+
+  let created = try BoardReducer.apply(.createProject(Project(name: "New")), to: edited)
+  #expect(created.activeProjects.map(\.name) == ["Third", "First renamed", "Second", "New"])
+  #expect(created.projects.first(where: { $0.name == "Deleted" })?.projectOrder == 1)
+}
+
+@Test func projectOrderingSnapshotRoundTripsAndNormalizesLegacyProjects() throws {
+  var first = Project(name: "First")
+  var second = Project(name: "Second")
+  first.projectOrder = 1
+  second.projectOrder = 0
+  var library = Library()
+  library.projects = [first, second]
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 2, library: library)
+  let decoded = try JSONDecoder.syncDecoder.decode(
+    SyncSnapshot.self, from: JSONEncoder.syncEncoder.encode(snapshot))
+  #expect(try decoded.replica().activeProjects.map(\.id) == [second.id, first.id])
+  #expect(decoded.projects.first(where: { $0.id == first.id })?.projectOrder == 1)
+
+  let legacyPayload =
+    #"{"id":"00000000-0000-0000-0000-000000000099","name":"Legacy","directory":"","automationEnabled":false,"createdAt":0}"#
+  let legacy = Data(legacyPayload.utf8)
+  let legacyProject = try JSONDecoder().decode(Project.self, from: legacy)
+  #expect(legacyProject.projectOrder == nil)
+  var legacyProjects = [legacyProject]
+  #expect(ProjectOrdering.normalize(&legacyProjects))
+  #expect(legacyProjects[0].projectOrder == 0)
+}
+
+@Test func phoneProjectReorderUsesOrderDigestAndRejectsStaleIntent() async throws {
+  let repository = try LibraryRepository(inMemory: true)
+  let first = Project(name: "First")
+  let second = Project(name: "Second")
+  let third = Project(name: "Third")
+  _ = try await repository.apply(.createProject(first))
+  _ = try await repository.apply(.createProject(second))
+  _ = try await repository.apply(.createProject(third))
+  let state = try await repository.syncStateSnapshot()
+  let digest = SyncCommandValidator.projectOrderDigest(in: state.library)
+  let valid = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
+    command: .reorderProjects(ids: [third.id, first.id, second.id], orderDigest: digest))
+  guard case .applied(_, let snapshot) = try await repository.applyRemote(valid) else {
+    Issue.record("Phone project reorder was not applied")
+    return
+  }
+  #expect(try snapshot.replica().activeProjects.map(\.id) == [third.id, first.id, second.id])
+
+  let stale = SyncEnvelope(
+    libraryID: state.libraryID, deviceID: UUID(), clientSequence: 1,
+    command: .reorderProjects(ids: [first.id, second.id, third.id], orderDigest: digest))
+  guard case .conflict = try await repository.applyRemote(stale) else {
+    Issue.record("A stale project reorder must not overwrite the current order")
+    return
+  }
 }
 
 @Test func legacyProjectsDecodeAsActiveAndDeletedStateSurvivesCodable() throws {

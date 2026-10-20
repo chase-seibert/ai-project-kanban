@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-20
+
+- Add persistent project ordering to the shared Mac and iPhone sidebar, including
+  direct drag-and-drop, accessible move actions, deterministic legacy ordering,
+  deleted-project position retention, and revision-checked phone sync. The web
+  integration remains pending identification of its existing client and data
+  source.
+
 ## 2026-10-19
 
 - Add a Building workspace on Mac and iPhone for unfinished Building tasks across

@@ -393,6 +393,9 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var deployedAt: Date?
   public var favoriteMakeTargets: [String] = []
   public var createdAt = Date()
+  /// User-selected position in the shared active and deleted project list.
+  /// Nil is accepted only for records written before project ordering existed.
+  public var projectOrder: Int?
   /// Soft deletion retains this project and all of its related records and files.
   public var deletedAt: Date?
   public var deletionRevision = 0
@@ -400,7 +403,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case id, name, directory, automationEnabled, usesWorktrees, modelOverride, executionProfile
-    case deployedCommitHash, deployedAt, favoriteMakeTargets, createdAt, deletedAt, deletionRevision
+    case deployedCommitHash, deployedAt, favoriteMakeTargets, createdAt, projectOrder, deletedAt,
+      deletionRevision
   }
 
   public init(name: String, directory: String = "") {
@@ -424,6 +428,7 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     favoriteMakeTargets =
       try values.decodeIfPresent([String].self, forKey: .favoriteMakeTargets) ?? []
     createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    projectOrder = try values.decodeIfPresent(Int.self, forKey: .projectOrder)
     deletedAt = try values.decodeIfPresent(Date.self, forKey: .deletedAt)
     deletionRevision = try values.decodeIfPresent(Int.self, forKey: .deletionRevision) ?? 0
   }
@@ -441,8 +446,63 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     try values.encodeIfPresent(deployedAt, forKey: .deployedAt)
     try values.encode(favoriteMakeTargets, forKey: .favoriteMakeTargets)
     try values.encode(createdAt, forKey: .createdAt)
+    try values.encodeIfPresent(projectOrder, forKey: .projectOrder)
     try values.encodeIfPresent(deletedAt, forKey: .deletedAt)
     try values.encode(deletionRevision, forKey: .deletionRevision)
+  }
+}
+
+/// Canonical order shared by the Mac library, phone replica, and future clients.
+public enum ProjectOrdering {
+  public static func ordered(_ projects: [Project]) -> [Project] {
+    projects.sorted {
+      switch ($0.projectOrder, $1.projectOrder) {
+      case (let left?, let right?) where left != right:
+        return left < right
+      case (_?, nil):
+        return true
+      case (nil, _?):
+        return false
+      default:
+        if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+        return $0.id.uuidString < $1.id.uuidString
+      }
+    }
+  }
+
+  /// Assigns stable positions to legacy records, using their historical creation order.
+  @discardableResult
+  public static func normalize(_ projects: inout [Project]) -> Bool {
+    let sorted = ordered(projects)
+    var changed = false
+    for (position, project) in sorted.enumerated() {
+      guard let index = projects.firstIndex(where: { $0.id == project.id }) else { continue }
+      if projects[index].projectOrder != position {
+        projects[index].projectOrder = position
+        changed = true
+      }
+    }
+    return changed
+  }
+
+  /// Reorders active projects in the slots they currently occupy, leaving deleted projects in
+  /// place so restoring one does not disturb the user's chosen order.
+  public static func reorderActive(_ activeIDs: [UUID], in projects: inout [Project]) throws {
+    let current = ordered(projects)
+    let active = current.filter { !$0.isDeleted }
+    guard activeIDs.count == active.count, Set(activeIDs) == Set(active.map(\.id)) else {
+      throw BoardError.invalid("The project list changed. Refresh and reorder again.")
+    }
+    let byID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
+    var next = current
+    let activeSlots = current.indices.filter { !current[$0].isDeleted }
+    for (slot, id) in zip(activeSlots, activeIDs) {
+      next[slot] = byID[id]!
+    }
+    for (position, project) in next.enumerated() {
+      guard let index = projects.firstIndex(where: { $0.id == project.id }) else { continue }
+      projects[index].projectOrder = position
+    }
   }
 }
 
@@ -806,8 +866,12 @@ public struct Library: Codable, Equatable, Sendable {
       return $0.id.uuidString < $1.id.uuidString
     }
   }
-  public var activeProjects: [Project] { projects.filter { !$0.isDeleted } }
-  public var deletedProjects: [Project] { projects.filter(\.isDeleted) }
+  public var activeProjects: [Project] {
+    ProjectOrdering.ordered(projects.filter { !$0.isDeleted })
+  }
+  public var deletedProjects: [Project] {
+    ProjectOrdering.ordered(projects.filter(\.isDeleted))
+  }
 
   /// All tasks in active projects, ordered by most recent update first.
   /// Equal timestamps use the task ID so the sidebar order stays stable.
@@ -895,6 +959,7 @@ public enum Mutation: Sendable {
   case createProject(Project)
   case editProject(Project)
   case setProjectDeleted(UUID, Bool, expectedRevision: Int)
+  case reorderProjects([UUID])
   case createTask(WorkItem, configuration: ResolvedCodexConfiguration? = nil)
   case runTaskNow(
     UUID, expectedRevision: Int, kind: RunKind, configuration: ResolvedCodexConfiguration,
@@ -1009,8 +1074,16 @@ public enum BoardReducer {
       guard !state.projects.contains(where: { $0.id == project.id }) else {
         throw BoardError.invalid("Project already exists.")
       }
+      ProjectOrdering.normalize(&state.projects)
+      let lastOrder = state.projects.compactMap(\.projectOrder).max() ?? -1
+      guard lastOrder < Int.max else {
+        throw BoardError.invalid("Project ordering limit reached.")
+      }
+      project.projectOrder = lastOrder + 1
       state.projects.append(project)
       state.activity.append(Activity("Created project “\(project.name)”.", projectID: project.id))
+    case .reorderProjects(let activeIDs):
+      try ProjectOrdering.reorderActive(activeIDs, in: &state.projects)
     case .setProjectDeleted(let id, let deleted, let revision):
       guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
         throw BoardError.missing
@@ -1043,9 +1116,10 @@ public enum BoardReducer {
       {
         throw BoardError.busy
       }
-      // A stale settings draft cannot restore a deleted project or rewind its lifecycle.
+      // A stale settings draft cannot rewind project lifecycle or sidebar ordering.
       project.deletedAt = state.projects[index].deletedAt
       project.deletionRevision = state.projects[index].deletionRevision
+      project.projectOrder = state.projects[index].projectOrder
       state.projects[index] = project
     case .createTask(var item, let configuration):
       try ensureActiveProject(item.projectID)

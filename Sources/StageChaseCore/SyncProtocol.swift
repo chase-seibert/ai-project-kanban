@@ -3,6 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 16 adds canonical project ordering and revision-checked phone reorder commands.
   // Version 15 adds explicit, revision-checked phone feedback requests for revising plans.
   // Version 14 adds revision-checked task favorite and model-tag edits.
   // Version 13 removes unread acknowledgments and snapshot read-marker state.
@@ -15,7 +16,7 @@ public enum SyncProtocol {
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 15
+  public static let version = 16
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -68,6 +69,7 @@ public struct SyncEnvelope: Codable, Equatable, Sendable {
 public enum SyncCommand: Codable, Equatable, Sendable {
   case createProject(id: UUID, name: String)
   case setProjectDeleted(id: UUID, deleted: Bool)
+  case reorderProjects(ids: [UUID], orderDigest: String)
   case createTask(id: UUID, projectID: UUID, title: String, notes: String, stage: WorkflowStage)
   case editTask(id: UUID, title: String, notes: String)
   case approvePlan(id: UUID)
@@ -156,6 +158,13 @@ public enum SyncCommandResult: Codable, Equatable, Sendable {
 }
 
 public enum SyncCommandValidator {
+  public static func projectOrderDigest(in library: Library) -> String {
+    let rows = ProjectOrdering.ordered(library.projects)
+      .map { "\($0.id.uuidString):\($0.isDeleted ? "deleted" : "active")" }
+      .joined(separator: "|")
+    return SHA256.hash(data: Data(rows.utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+
   public static func orderDigest(
     projectID: UUID, stage: WorkflowStage, in library: Library
   ) -> String {
@@ -182,6 +191,12 @@ public enum SyncCommandValidator {
         throw BoardError.invalid("A project deletion revision is required.")
       }
       return .setProjectDeleted(id, deleted, expectedRevision: revision)
+    case .reorderProjects(let ids, let digest):
+      guard envelope.expectedRevision == nil else {
+        throw BoardError.invalid("Project ordering uses the current order digest.")
+      }
+      guard digest == projectOrderDigest(in: library) else { throw BoardError.conflict }
+      return .reorderProjects(ids)
     case .createTask(let id, let projectID, let title, let notes, let stage):
       guard envelope.expectedRevision == nil,
         library.projects.contains(where: { $0.id == projectID })
@@ -351,6 +366,7 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
   public var deployedAt: Date?
   public var favoriteMakeTargets: [String]?
   public var createdAt: Date
+  public var projectOrder: Int?
   public var deletedAt: Date?
   public var deletionRevision: Int?
 
@@ -365,6 +381,7 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
     deployedAt = project.deployedAt
     favoriteMakeTargets = project.favoriteMakeTargets
     createdAt = project.createdAt
+    projectOrder = project.projectOrder
     deletedAt = project.deletedAt
     deletionRevision = project.deletionRevision
   }
@@ -412,7 +429,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     self.libraryID = libraryID
     self.sequence = sequence
     taskShortIDHighWaterMark = library.taskShortIDHighWaterMark
-    projects = library.projects.map(SyncProject.init)
+    projects = ProjectOrdering.ordered(library.projects).map(SyncProject.init)
     tasks = library.tasks.map(SyncTask.init)
     runs = library.runs.map(SyncRun.init)
     let privatePaths =
@@ -464,10 +481,12 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
       project.deployedAt = $0.deployedAt
       project.favoriteMakeTargets = $0.favoriteMakeTargets ?? []
       project.createdAt = $0.createdAt
+      project.projectOrder = $0.projectOrder
       project.deletedAt = $0.deletedAt
       project.deletionRevision = $0.deletionRevision ?? 0
       return project
     }
+    ProjectOrdering.normalize(&library.projects)
     library.tasks = tasks.map {
       var item = WorkItem(projectID: $0.projectID, title: $0.title, stage: $0.stage)
       item.section =

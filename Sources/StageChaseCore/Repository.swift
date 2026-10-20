@@ -166,7 +166,7 @@ public actor LibraryRepository {
       }
       try persist(library)
     }
-    library.projects.sort { $0.createdAt < $1.createdAt }
+    ProjectOrdering.normalize(&library.projects)
     library.activity.sort { $0.date < $1.date }
     library.taskShortIDHighWaterMark = max(
       library.taskShortIDHighWaterMark, syncState?.taskShortIDHighWaterMark ?? 0)
@@ -199,9 +199,8 @@ public actor LibraryRepository {
     return library
   }
 
-  /// Explicitly rereads the current persisted library without crash recovery or writes.
-  /// This is used by user-triggered refresh actions when another repository client may
-  /// have changed the shared SwiftData store since this actor last loaded it.
+  /// Explicitly rereads the persisted library without crash recovery. It writes back any
+  /// deterministic defaults needed to upgrade records created by an older build.
   public func refresh() throws -> Library {
     let context = ModelContext(container)
     let entries = try context.fetch(FetchDescriptor<StageSchemaV1.Entry>())
@@ -226,15 +225,19 @@ public actor LibraryRepository {
         throw BoardError.invalid("Unknown record in the library. Your data has not been changed.")
       }
     }
-    library.projects.sort { $0.createdAt < $1.createdAt }
+    ProjectOrdering.normalize(&library.projects)
     library.activity.sort { $0.date < $1.date }
     library.taskShortIDHighWaterMark = max(
       library.taskShortIDHighWaterMark, refreshedSyncState?.taskShortIDHighWaterMark ?? 0)
     library.reconcileTaskShortIDs()
     try library.validate()
-    cached = library
     syncState = refreshedSyncState
     mcpState = refreshedMCPState
+    // Persist any deterministic project-order defaults for records created by older builds.
+    // Refresh is an explicit user action and may be the first read after upgrading.
+    cached = nil
+    try persist(library, syncState: refreshedSyncState, mcpState: refreshedMCPState)
+    cached = library
     return library
   }
 

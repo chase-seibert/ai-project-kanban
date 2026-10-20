@@ -10,6 +10,26 @@ tasks, runs, attachments, read markers, settings, and repository files are retai
 and remain included in backups. A stale project-settings draft cannot overwrite
 the deletion state. Deletion is rejected while any project run is active.
 
+## Project ordering
+
+Each project record stores an optional `projectOrder` value in its existing
+per-record JSON payload. Older records receive a deterministic creation-date and
+UUID order on load, then that order is written back without a SwiftData schema
+migration. The shared sidebar uses this order on Mac and iPhone. New projects
+append after all active and deleted projects. Reordering changes the active
+project identities in their existing slots, so deleted projects retain their
+positions and restore predictably.
+
+Sync protocol v16 includes `projectOrder` in `SyncProject` snapshots and accepts
+an explicit phone reorder command carrying a digest of the current ordered
+project identities and deletion states. A stale digest conflicts; the phone
+reconciles to the authoritative Mac snapshot. Commands use the existing durable
+offline outbox, and snapshot polling never changes order by itself. Protocol
+v15 and earlier clients must update before syncing. This repository has no web
+client or web persistence service, and no web source of truth or API contract is
+documented here. Web synchronization remains dependent on identifying that
+existing system; this implementation does not add a backend.
+
 Active project lists, board selection, and Recent Tasks exclude deleted projects.
 The shared sidebar/projects list opens Deleted Projects, whose Restore controls
 return the original project. Local changes and incoming snapshots reconcile a
