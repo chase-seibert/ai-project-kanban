@@ -6,6 +6,9 @@ struct RootView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var phonePath: [PhoneDestination] = []
   @State private var settingsInitialTab: AppSettingsTab = .general
+  #if os(iOS)
+    @State private var phoneQuickActions = PhoneQuickActionCoordinator.shared
+  #endif
   var body: some View {
     @Bindable var model = model
     Group {
@@ -162,6 +165,14 @@ struct RootView: View {
         }
       #endif
     }
+    #if os(iOS)
+      .onChange(of: model.library.activeProjects) { _, projects in
+        phoneQuickActions.update(projects: projects)
+      }
+      .onChange(of: phoneQuickActions.pendingProjectID) { _, _ in
+        openPendingPhoneQuickAction()
+      }
+    #endif
     .confirmationDialog(
       model.pendingMove?.runOnly == true
         ? model.pendingMove?.runKind == .planning
@@ -205,6 +216,10 @@ struct RootView: View {
     .task(id: scenePhase) {
       model.undoManager = undoManager
       await model.load()
+      #if os(iOS)
+        phoneQuickActions.update(projects: model.library.activeProjects)
+        openPendingPhoneQuickAction()
+      #endif
       #if os(macOS)
         if scenePhase == .active {
           model.codexUsageService.start()
@@ -415,6 +430,20 @@ struct RootView: View {
   private var phoneProjectTitle: String {
     model.selectedProject?.name ?? "Projects"
   }
+
+  #if os(iOS)
+    private func openPendingPhoneQuickAction() {
+      guard model.ready, let projectID = phoneQuickActions.pendingProjectID else { return }
+      phoneQuickActions.pendingProjectID = nil
+      guard model.library.activeProjects.contains(where: { $0.id == projectID }) else {
+        model.select(nil)
+        phonePath = []
+        return
+      }
+      model.select(projectID)
+      phonePath = [.board]
+    }
+  #endif
 }
 
 private enum PhoneDestination: Hashable {

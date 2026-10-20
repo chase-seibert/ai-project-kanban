@@ -2,6 +2,9 @@
 
 ## 2026-10-20
 
+- Add iPhone Home Screen quick actions for the first four active projects in
+  saved order, routing launch and warm selections through the existing project
+  selection and board navigation flow.
 - Add persistent project ordering to the shared Mac and iPhone sidebar, including
   direct drag-and-drop, accessible move actions, deterministic legacy ordering,
   deleted-project position retention, and revision-checked phone sync. The web

@@ -119,6 +119,13 @@ section bar. Project Git status and the confirmed project commit action route
 through the paired Mac. Pull-to-refresh also remains available. Task details
 have no Git or deployment controls on either platform.
 
+Long-pressing the StageChase Home Screen icon offers up to four quick actions for
+the first active projects in the saved project order. Each action keeps the
+project UUID as its identity and opens that project's board through the same
+selection path as the Projects List. The action list refreshes when active
+projects or their order changes. A shortcut for a project that is no longer
+active returns to Projects without selecting a deleted project.
+
 Mac task detail is an inspector; iPhone pushes a task screen in its navigation
 stack. The system back button and edge-swipe gesture return to the board. Title, task context, saved
 plan, status, and manual completion share the model. Plans and Codex run state do
