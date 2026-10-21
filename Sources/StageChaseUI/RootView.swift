@@ -102,6 +102,7 @@ struct RootView: View {
         case .newTask(let stage): NewTaskEditor(stage: stage)
         #if os(macOS)
           case .makeOutput: MakeOutputSheet()
+          case .githubProjects: GitHubProjectsView()
         #endif
         case .settings:
           NavigationStack {
@@ -470,6 +471,13 @@ struct ProjectSidebar: View {
   @State private var dropTargetedProjectID: UUID?
   var onOpen: (() -> Void)?
   var onOpenWorkspace: ((WorkspaceTaskPreset) -> Void)?
+  #if os(macOS)
+    private var pendingGitPushCount: Int {
+      model.library.activeProjects.reduce(into: 0) { count, project in
+        if model.gitStatuses[project.id]?.canPush == true { count += 1 }
+      }
+    }
+  #endif
   var body: some View {
     List {
       Section {
@@ -536,8 +544,21 @@ struct ProjectSidebar: View {
             }
           #endif
         }
-        #if os(macOS)
-          if !model.isConnectedPhone {
+      } header: {
+        Text("YOUR PROJECTS")
+      }
+      #if os(macOS)
+        if !model.isConnectedPhone {
+          Section("PROJECT MANAGEMENT") {
+            ProjectManagementActions(
+              pendingGitPushCount: pendingGitPushCount,
+              onNewProject: { model.sheet = .newProject },
+              onGitHub: { model.sheet = .githubProjects },
+              onDeletedProjects: { model.sheet = .deletedProjects }
+            )
+          }
+        } else {
+          Section("YOUR PROJECTS") {
             Button {
               model.sheet = .newProject
             } label: {
@@ -546,10 +567,8 @@ struct ProjectSidebar: View {
             .buttonStyle(.plain).foregroundStyle(Color.accentColor).accessibilityIdentifier(
               "new-project")
           }
-        #endif
-      } header: {
-        Text("YOUR PROJECTS")
-      }
+        }
+      #endif
       #if os(iOS)
         Section("Workspace") {
           ForEach([
@@ -580,14 +599,16 @@ struct ProjectSidebar: View {
             return true
           }
       #endif
-      Section {
-        Button {
-          model.sheet = .deletedProjects
-        } label: {
-          Label("Deleted Projects", systemImage: "trash")
+      #if os(iOS)
+        Section {
+          Button {
+            model.sheet = .deletedProjects
+          } label: {
+            Label("Deleted Projects", systemImage: "trash")
+          }
+          .accessibilityIdentifier("deleted-projects-navigation")
         }
-        .accessibilityIdentifier("deleted-projects-navigation")
-      }
+      #endif
       #if os(macOS)
         Section("Workspace") {
           ForEach(WorkspaceTaskPreset.allCases) { preset in
@@ -635,6 +656,7 @@ struct ProjectSidebar: View {
     #endif
     #if os(macOS)
       .listStyle(.sidebar).navigationTitle("StageChase")
+      .task { await model.refreshAllGitStatuses() }
       .safeAreaInset(edge: .bottom) {
         VStack(alignment: .leading, spacing: 5) {
           Label("Your work, in motion", systemImage: "square.stack.3d.up").stageFont(
@@ -692,6 +714,148 @@ struct ProjectSidebar: View {
     Task { _ = await model.reorderProjects(ids) }
   }
 }
+
+#if os(macOS)
+  struct GitHubProjectsView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+
+    private var pushableProjects: [Project] {
+      model.library.activeProjects.filter { model.gitStatuses[$0.id]?.canPush == true }
+    }
+    private var isRefreshing: Bool { !model.gitStatusLoading.isEmpty }
+
+    var body: some View {
+      NavigationStack {
+        VStack(spacing: 0) {
+          HStack {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Push committed changes to each project’s configured upstream.")
+                .foregroundStyle(.secondary)
+              Text("Uncommitted files stay local.")
+                .font(.caption).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Button {
+              Task { await model.pushAllProjectChanges() }
+            } label: {
+              Label("Push All (\(pushableProjects.count))", systemImage: "arrow.up")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(pushableProjects.isEmpty || !model.gitBusyProjectIDs.isEmpty || isRefreshing)
+            .accessibilityIdentifier("github-push-all")
+          }
+          .padding()
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          if model.library.activeProjects.isEmpty {
+            ContentUnavailableView(
+              "No projects", systemImage: "folder",
+              description: Text("Create a project to manage its Git repository here."))
+          } else {
+            List(model.library.activeProjects) { project in
+              projectRow(project)
+            }
+            .listStyle(.inset)
+          }
+        }
+        .navigationTitle("GitHub")
+        .toolbar {
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") { dismiss() }
+          }
+          ToolbarItem(placement: .automatic) {
+            Button {
+              Task { await model.refreshAllGitStatuses() }
+            } label: {
+              if isRefreshing {
+                ProgressView().controlSize(.small)
+              } else {
+                Label("Refresh", systemImage: "arrow.clockwise")
+              }
+            }
+            .disabled(isRefreshing || !model.gitBusyProjectIDs.isEmpty)
+            .accessibilityIdentifier("github-refresh")
+          }
+        }
+        .task { await model.refreshAllGitStatuses() }
+      }
+      .frame(width: 700, height: 540)
+    }
+
+    @ViewBuilder private func projectRow(_ project: Project) -> some View {
+      let status = model.gitStatuses[project.id]
+      HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 5) {
+          Text(project.name).fontWeight(.medium)
+          if let error = model.gitStatusErrors[project.id] {
+            Label(error, systemImage: "exclamationmark.triangle")
+              .font(.caption).foregroundStyle(.orange)
+              .fixedSize(horizontal: false, vertical: true)
+          } else if model.gitStatusLoading.contains(project.id) {
+            Label("Checking repository…", systemImage: "arrow.triangle.2.circlepath")
+              .font(.caption).foregroundStyle(.secondary)
+          } else if let status {
+            Text(repositoryDescription(status))
+              .font(.caption)
+              .foregroundStyle(status.canPush ? Color.accentColor : Color.secondary)
+            if let message = model.gitActionMessages[project.id] {
+              Text(message)
+                .font(.caption)
+                .foregroundStyle(message == "Pushed successfully." ? Color.green : Color.orange)
+                .accessibilityIdentifier("github-result-\(project.id.uuidString)")
+            }
+          } else {
+            Text("Repository status has not been checked.")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        }
+        Spacer(minLength: 12)
+        if model.gitBusyProjectIDs.contains(project.id) {
+          ProgressView().controlSize(.small).accessibilityLabel("Pushing \(project.name)")
+        } else {
+          Button("Push") {
+            Task { await model.pushProjectChanges(projectID: project.id) }
+          }
+          .buttonStyle(.bordered)
+          .disabled(
+            status?.canPush != true || model.gitStatusLoading.contains(project.id)
+              || !model.gitBusyProjectIDs.isEmpty
+          )
+          .accessibilityLabel("Push \(project.name)")
+          .accessibilityIdentifier("github-push-\(project.id.uuidString)")
+        }
+      }
+      .padding(.vertical, 5)
+    }
+
+    private func repositoryDescription(_ status: GitRepositoryStatus) -> String {
+      let branch = status.branch ?? "Detached HEAD"
+      let changeCount = status.changedFileCount
+      let changeWord = changeCount == 1 ? "change" : "changes"
+      let changeNote: String
+      if status.hasChanges {
+        changeNote = " · \(changeCount) uncommitted \(changeWord) stay local"
+      } else {
+        changeNote = ""
+      }
+      guard status.upstream != nil else {
+        return "\(branch) · No upstream configured\(changeNote)"
+      }
+      if status.behindCount > 0 {
+        let ahead = status.aheadCount > 0 ? " · \(status.aheadCount) ahead" : ""
+        return
+          "\(branch) · \(status.behindCount) behind\(ahead) · Update before pushing\(changeNote)"
+      }
+      if status.aheadCount > 0 {
+        let commitWord = status.aheadCount == 1 ? "commit" : "commits"
+        return
+          "\(branch) · \(status.aheadCount) \(commitWord) waiting to push\(changeNote)"
+      }
+      return "\(branch) · Up to date\(changeNote)"
+    }
+  }
+#endif
 
 struct DeletedProjectsView: View {
   @Environment(AppModel.self) private var model
@@ -1333,6 +1497,90 @@ private struct PhoneSettingsForm: View {
   }
 
 }
+
+#if os(macOS)
+  private struct ProjectManagementActions: View {
+    let pendingGitPushCount: Int
+    let onNewProject: () -> Void
+    let onGitHub: () -> Void
+    let onDeletedProjects: () -> Void
+
+    var body: some View {
+      VStack(spacing: 4) {
+        ProjectManagementRow(
+          title: "New Project", systemImage: "plus.circle.fill", appearance: .prominent,
+          accessibilityIdentifier: "new-project", action: onNewProject)
+        ProjectManagementRow(
+          title: "GitHub", systemImage: "arrow.up.circle", appearance: .standard,
+          count: pendingGitPushCount,
+          accessibilityLabel: "GitHub, \(pendingGitPushCount) projects with commits waiting to push",
+          accessibilityIdentifier: "github-projects-navigation", action: onGitHub)
+        ProjectManagementRow(
+          title: "Deleted Projects", systemImage: "trash", appearance: .quiet,
+          accessibilityIdentifier: "deleted-projects-navigation", action: onDeletedProjects)
+      }
+    }
+  }
+
+  private struct ProjectManagementRow: View {
+    enum Appearance {
+      case prominent
+      case standard
+      case quiet
+    }
+
+    let title: String
+    let systemImage: String
+    let appearance: Appearance
+    var count: Int? = nil
+    var accessibilityLabel: String? = nil
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    private var foreground: Color {
+      switch appearance {
+      case .prominent: .white
+      case .standard: .primary
+      case .quiet: .secondary
+      }
+    }
+
+    var body: some View {
+      Button(action: action) {
+        HStack(spacing: 12) {
+          Image(systemName: systemImage)
+            .frame(width: 18)
+            .foregroundStyle(appearance == .prominent ? .white : Color.accentColor)
+          Text(title)
+            .fontWeight(appearance == .prominent ? .semibold : .regular)
+            .foregroundStyle(foreground)
+          Spacer(minLength: 8)
+          if let count {
+            Text("\(count)")
+              .font(.caption.monospacedDigit().weight(.semibold))
+              .foregroundStyle(count > 0 ? Color.accentColor : Color.secondary)
+              .padding(.horizontal, 7)
+              .padding(.vertical, 2)
+              .background(.quaternary, in: Capsule())
+          }
+        }
+        .padding(.horizontal, appearance == .prominent ? 12 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 36)
+        .background {
+          if appearance == .prominent {
+            RoundedRectangle(cornerRadius: 8).fill(Color.accentColor)
+          }
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(accessibilityLabel ?? title)
+      .accessibilityIdentifier(accessibilityIdentifier)
+      .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+    }
+  }
+#endif
 
 private struct ProjectSidebarProjectRow: View {
   @Environment(AppModel.self) private var model

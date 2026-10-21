@@ -4,6 +4,13 @@ Mac sidebar and iPhone Projects tab are the main entry points. New Project opens
 a blank form with a fresh identity; Project Settings edits the chosen project.
 Switching projects clears task selection and search.
 
+On Mac, New Project, GitHub, and Deleted Projects form one project-management
+group after the active project rows and before Workspace. New Project is the
+primary action, GitHub shows the count of repositories with commits ahead of
+their configured upstream, and Deleted Projects remains a quieter recovery
+destination. GitHub opens a focused list with per-project Push and Push All;
+uncommitted files are identified as local and are never committed by this flow.
+
 The Mac sidebar's Workspace section includes a **Recent Tasks** navigation
 item. It opens a unified center-pane view across all projects, including
 completed tasks. Task cards are grouped by local calendar day, newest day first;

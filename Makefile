@@ -13,7 +13,7 @@ DEVICE_ID ?= 00008150-000E41422E40401C
 DEVELOPMENT_TEAM ?= 96NAC4VTEN
 PHONE_DEVELOPMENT_TEAM ?= $(DEVELOPMENT_TEAM)
 
-.PHONY: setup format lint test runner-test sync-test codex-check build run relaunch clean sim-build sim-launch phone-verify phone-build phone-install phone-launch phone-deploy
+.PHONY: setup format lint test git-test runner-test sync-test codex-check build run relaunch clean sim-build sim-launch phone-verify phone-build phone-install phone-launch phone-deploy
 
 runner-test:
 	mkdir -p build/verification
@@ -39,6 +39,11 @@ lint:
 
 test:
 	swift test
+
+git-test:
+	mkdir -p build/verification
+	xcrun swiftc -swift-version 6 -module-cache-path build/verification/module-cache -parse-as-library Apps/StageChaseMac/GitService.swift Tests/Integration/GitServiceSmoke.swift -o build/verification/git-service-smoke
+	build/verification/git-service-smoke
 
 sync-test:
 	swift test --filter 'syncMessagesAreAuthenticatedEncryptedAndBounded|syncSnapshotPreservesSharedStateButOmitsMacOnlyConfiguration|remoteCommandsAreTransactionalRevisionCheckedAndIdempotent|newerPhoneTaskEditWinsAndEqualTimestampMacEditWinsDeterministically|forcedSnapshotRequestSurvivesWireEncoding|syncFramesAreLengthBoundedAndRejectMalformedMessages|remoteCommandReceiptSurvivesRepositoryRestart|syncNetworkJournalPersistsOnlyBoundedExchangeMetadata'

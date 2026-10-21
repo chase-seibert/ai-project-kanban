@@ -36,6 +36,16 @@ return the original project. Local changes and incoming snapshots reconcile a
 deleted selection to another active project, or to the no-project state. Deleted
 projects reject task edits, new tasks, run scheduling, and project Git/Make actions.
 
+## Mac GitHub push view
+
+The Mac-only GitHub destination uses each active project's existing directory
+and transient Git status. `GitRepositoryStatus` reads the configured upstream
+and ahead/behind counts from local tracking refs; only a branch with commits
+ahead and none behind can be pushed. Push names the configured remote and
+upstream branch explicitly. Status and action messages remain in `AppModel` and
+are not persisted or sent to the phone. Push All attempts eligible projects in
+turn and retains each project's success or error independently.
+
 Sync protocol v10 carries deletion timestamps and lifecycle revisions in
 `SyncProject` and permits explicit `setProjectDeleted` commands. The envelope's
 expected revision is the project's deletion revision for these commands; stale

@@ -3,12 +3,16 @@ import Foundation
 struct GitRepositoryStatus: Sendable {
   var branch: String?
   var head: String?
+  var upstream: String?
+  var aheadCount: Int
+  var behindCount: Int
   var changedFileCount: Int
   var stagedFileCount: Int
   var unstagedFileCount: Int
   var untrackedFileCount: Int
   var isEmptyRepository: Bool
   var hasChanges: Bool { changedFileCount > 0 }
+  var canPush: Bool { upstream != nil && aheadCount > 0 && behindCount == 0 }
 }
 
 struct GitCommitResult: Sendable {
@@ -85,10 +89,50 @@ struct GitService: Sendable {
         ? String(decoding: headResult!.output, as: UTF8.self).trimmingCharacters(
           in: .whitespacesAndNewlines)
         : nil
+      let upstreamResult = try? Self.runResult(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], at: folder)
+      let upstream =
+        upstreamResult?.status == 0
+        ? String(decoding: upstreamResult!.output, as: UTF8.self).trimmingCharacters(
+          in: .whitespacesAndNewlines)
+        : nil
+      var aheadCount = 0
+      var behindCount = 0
+      if upstream != nil, head != nil,
+        let counts = try? Self.run(
+          ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], at: folder)
+      {
+        let values = String(decoding: counts, as: UTF8.self)
+          .split(whereSeparator: \.isWhitespace).compactMap { Int($0) }
+        if values.count == 2 {
+          behindCount = values[0]
+          aheadCount = values[1]
+        }
+      }
       return GitRepositoryStatus(
-        branch: branch, head: head, changedFileCount: changedFiles,
+        branch: branch, head: head, upstream: upstream, aheadCount: aheadCount,
+        behindCount: behindCount, changedFileCount: changedFiles,
         stagedFileCount: staged, unstagedFileCount: unstaged,
         untrackedFileCount: untracked, isEmptyRepository: head == nil)
+    }.value
+  }
+
+  func push(in folder: URL) async throws {
+    try await Task.detached(priority: .userInitiated) {
+      let folder = try Self.validateFolder(folder)
+      let upstreamData = try Self.run(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], at: folder)
+      let upstream = String(decoding: upstreamData, as: UTF8.self).trimmingCharacters(
+        in: .whitespacesAndNewlines)
+      guard let separator = upstream.firstIndex(of: "/") else {
+        throw GitServiceError.command("The configured upstream could not be identified.")
+      }
+      let remote = String(upstream[..<separator])
+      let branch = String(upstream[upstream.index(after: separator)...])
+      guard !remote.isEmpty, !branch.isEmpty else {
+        throw GitServiceError.command("The configured upstream could not be identified.")
+      }
+      _ = try Self.run(["push", "--", remote, "HEAD:refs/heads/\(branch)"], at: folder)
     }.value
   }
 

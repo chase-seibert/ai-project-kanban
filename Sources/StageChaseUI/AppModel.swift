@@ -1112,6 +1112,56 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
       }
     }
 
+    func refreshAllGitStatuses() async {
+      for project in library.activeProjects {
+        await refreshGitStatus(projectID: project.id)
+      }
+    }
+
+    func pushProjectChanges(projectID: UUID) async {
+      guard let project = library.activeProjects.first(where: { $0.id == projectID }),
+        !gitBusyProjectIDs.contains(projectID)
+      else { return }
+      gitBusyProjectIDs.insert(projectID)
+      gitActionMessages[projectID] = nil
+      defer { gitBusyProjectIDs.remove(projectID) }
+      await refreshGitStatus(projectID: projectID)
+      guard gitStatuses[projectID]?.canPush == true else {
+        if gitStatusErrors[projectID] == nil {
+          gitActionMessages[projectID] = pushUnavailableMessage(for: gitStatuses[projectID])
+        }
+        return
+      }
+      do {
+        try await gitService.push(in: URL(fileURLWithPath: project.directory))
+        await refreshGitStatus(projectID: projectID)
+        gitActionMessages[projectID] = "Pushed successfully."
+      } catch {
+        gitActionMessages[projectID] = error.localizedDescription
+        await refreshGitStatus(projectID: projectID)
+      }
+    }
+
+    func pushAllProjectChanges() async {
+      await refreshAllGitStatuses()
+      let eligibleIDs = library.activeProjects.compactMap { project in
+        gitStatuses[project.id]?.canPush == true ? project.id : nil
+      }
+      guard !eligibleIDs.isEmpty else { return }
+      for projectID in eligibleIDs {
+        await pushProjectChanges(projectID: projectID)
+      }
+    }
+
+    private func pushUnavailableMessage(for status: GitRepositoryStatus?) -> String {
+      guard let status else { return "Repository status is unavailable." }
+      guard status.upstream != nil else { return "This branch has no configured upstream." }
+      if status.behindCount > 0 {
+        return "This branch is behind its upstream. Update it before pushing."
+      }
+      return "There are no committed changes waiting to push."
+    }
+
     func refreshTaskGitStatus(taskID: UUID) async {
       guard let folder = taskGitFolder(taskID: taskID) else {
         gitTaskStatuses[taskID] = nil
@@ -1806,6 +1856,7 @@ enum AppSheet: Identifiable {
   case settings
   #if os(macOS)
     case makeOutput
+    case githubProjects
   #endif
   var id: String {
     switch self {
@@ -1816,6 +1867,7 @@ enum AppSheet: Identifiable {
     case .settings: "settings"
     #if os(macOS)
       case .makeOutput: "make-output"
+      case .githubProjects: "github-projects"
     #endif
     }
   }

@@ -14,6 +14,19 @@
   old phone request cannot undo a newer restoration. Restore is required before
   changing tasks or starting new work in a deleted project.
 
+## Mac GitHub push view
+
+- As a user, I want New Project, GitHub, and Deleted Projects grouped in the Mac
+  sidebar, with New Project prominent and Deleted Projects visually quieter, so
+  creation, repository maintenance, and recovery are easy to distinguish.
+- As a user, I want GitHub to show which active project repositories have
+  committed changes ahead of their configured upstream, so I can see what can
+  be pushed without treating uncommitted files as commits.
+- As a user, I want to push one eligible project or all eligible projects and
+  see each result, so a failed remote does not hide successful pushes elsewhere.
+- Branches without an upstream, branches behind upstream, missing folders, and
+  Git errors must remain visible and must not be presented as pushable.
+
 ## Foundation
 
 - As a user, I want to create a board, so that different projects can have

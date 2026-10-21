@@ -2,6 +2,9 @@
 
 ## 2026-10-21
 
+- Add a Mac GitHub project-management view with upstream status, ahead counts,
+  per-project Push, and Push All with separate project results. Group it between
+  New Project and Deleted Projects in the sidebar.
 - Replace the High, Medium, Plan Approved, Building, In Progress, and Reviewing
   workspaces with All and Active. All includes every task in active projects;
   Active combines the previous status-based task collections. Keep Favorites and
