@@ -34,9 +34,14 @@
 - As a user, I want board quick filters for All, Favorites, and Plan Approved
   that combine with search, project, section, and completed-task controls, so I
   can quickly narrow the current board without changing task data.
-- As a user, I want High, Medium, and Favorites workspace views across projects
-  on Mac and iPhone, so I can open those task collections directly from
-  workspace navigation.
+- As a user, I want to search task titles and notes from the Mac board and from
+  the iPhone board and workspace views, so I can find tasks without scrolling
+  through each section or collection.
+- As a user, I want All, Active, Favorites, and Recently Completed workspace
+  views across projects on Mac and iPhone, so I can find tasks without opening
+  each project board. All includes tasks in every active project, including
+  completed tasks; Active combines the Plan Approved, Building, In Progress,
+  and Reviewing filters while excluding completed tasks.
 - As a user, I want to manually mark a Planning task with a saved plan as Plan
   Approved from Mac or iPhone, so that I can approve the plan on either device.
   Approval changes status only and does not move the task or start Codex.
@@ -46,14 +51,13 @@
 - As a user, I want to change task status from the card's status menu, its
   right-click or long-press menu, so that I can correct status without moving
   the task between board sections. Waiting, Error, and Quota remain system-set.
-- As a user, I want fixed workspace views for Plan Approved, In Progress,
-  Reviewing, and Recently Completed, so that common task filters are always one
-  click away. Plan Approved includes ready-to-execute tasks across projects.
-  Reviewing includes plans awaiting approval and implementation changes ready
-  for review. In Progress includes tasks with active planning or implementation
-  runs. Recently Completed is ordered and grouped by completion time. Workspace
-  views keep cards in three equal-width columns, leaving unused columns empty
-  when a day has fewer than three tasks.
+- As a user, I want the Active workspace to combine Plan Approved, Building,
+  In Progress, and Reviewing tasks, so common ready and running work appears in
+  one place. Reviewing includes plans awaiting approval and implementation
+  changes ready for review. In Progress includes tasks with active planning or
+  implementation runs. Recently Completed remains ordered and grouped by
+  completion time. Workspace views keep cards in three equal-width columns,
+  leaving unused columns empty when a day has fewer than three tasks.
 - As a user, I want Triage gray, Planning and Building bright purple, Plan
   Approved blue, Reviewing green, and Waiting/Quota/Error yellow/orange/red, so
   that workflow progress and exceptions are visually distinct.

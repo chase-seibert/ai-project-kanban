@@ -322,6 +322,10 @@ struct RootView: View {
       case .board:
         BoardView(onOpenTask: { id in phonePath.append(.task(id)) })
           .navigationBarTitleDisplayMode(.inline)
+          .searchable(
+            text: Binding(get: { model.search }, set: { model.search = $0 }),
+            prompt: "Find tasks"
+          )
           .toolbar {
             ToolbarItem(placement: .principal) {
               Text(phoneProjectTitle).lineLimit(1).accessibilityLabel(
@@ -341,6 +345,10 @@ struct RootView: View {
         WorkspaceTasksView(preset: preset) { id in phonePath.append(.task(id)) }
           .navigationTitle(preset.title)
           .navigationBarTitleDisplayMode(.inline)
+          .searchable(
+            text: Binding(get: { model.search }, set: { model.search = $0 }),
+            prompt: "Find tasks"
+          )
       case .activity:
         ActivityPanel().navigationTitle("Activity")
       case .connection:
@@ -545,10 +553,9 @@ struct ProjectSidebar: View {
       #if os(iOS)
         Section("Workspace") {
           ForEach([
+            WorkspaceTaskPreset.all,
+            .active,
             WorkspaceTaskPreset.favorites,
-            .planApproved,
-            .building,
-            .reviewing,
             .recentlyCompleted,
           ]) { preset in
             Button {
@@ -743,27 +750,19 @@ struct WorkspaceTasksView: View {
 
   private var sourceTasks: [WorkItem] {
     switch preset {
-    case .highPriorityModel:
-      model.library.tasks.filter { !$0.completed && $0.modelTag == .high }
-    case .mediumPriorityModel:
-      model.library.tasks.filter { !$0.completed && $0.modelTag == .medium }
+    case .all:
+      model.library.recentTasks
+    case .active:
+      model.library.recentTasks.filter { item in
+        guard !item.completed else { return false }
+        if item.status == .planApproved || item.status == .building || item.status == .reviewing {
+          return true
+        }
+        if item.status == .planning && item.hasSavedPlan && !hasActiveRun(item) { return true }
+        return [.planning, .building].contains(item.status) && hasActiveRun(item)
+      }
     case .favorites:
       model.library.tasks.filter { !$0.completed && $0.isFavorite }
-    case .planApproved:
-      model.library.recentTasks.filter { !$0.completed && $0.status == .planApproved }
-    case .building:
-      model.library.recentTasks.filter { !$0.completed && $0.status == .building }
-    case .inProgress:
-      model.library.recentTasks.filter { item in
-        !item.completed && [.planning, .building].contains(item.status) && hasActiveRun(item)
-      }
-    case .reviewing:
-      model.library.recentTasks.filter {
-        guard !$0.completed else { return false }
-        if $0.status == .reviewing { return true }
-        guard $0.status == .planning, $0.hasSavedPlan else { return false }
-        return !hasActiveRun($0)
-      }
     case .recentlyCompleted:
       model.library.recentlyCompletedTasks
     }
@@ -957,17 +956,11 @@ struct WorkspaceTasksView: View {
 
   private var emptyTitle: String {
     switch preset {
-    case .highPriorityModel: "No High model tasks"
-    case .mediumPriorityModel: "No Medium model tasks"
+    case .all:
+      model.search.isEmpty ? "No tasks yet" : "No matching tasks"
+    case .active:
+      model.search.isEmpty ? "No active tasks" : "No matching tasks"
     case .favorites: "No favorite tasks"
-    case .planApproved:
-      model.search.isEmpty ? "No approved plans ready to start" : "No matching tasks"
-    case .building:
-      model.search.isEmpty ? "No tasks being built" : "No matching tasks"
-    case .inProgress:
-      model.search.isEmpty ? "No active planning or build runs" : "No matching tasks"
-    case .reviewing:
-      model.search.isEmpty ? "Nothing to review" : "No matching tasks"
     case .recentlyCompleted:
       model.search.isEmpty ? "No recently completed tasks" : "No matching tasks"
     }
@@ -975,13 +968,10 @@ struct WorkspaceTasksView: View {
 
   private var emptyDescription: String {
     switch preset {
-    case .highPriorityModel: "Tasks tagged High across your projects appear here."
-    case .mediumPriorityModel: "Tasks tagged Medium across your projects appear here."
+    case .all: "Tasks from all active projects appear here."
+    case .active:
+      "Plan Approved, Building, In Progress, and Reviewing tasks across your projects appear here."
     case .favorites: "Your favorite tasks across projects appear here."
-    case .planApproved: "Plans approved for implementation across your projects appear here."
-    case .building: "Unfinished tasks with Building status across your projects appear here."
-    case .inProgress: "Tasks with an active planning or implementation run appear here."
-    case .reviewing: "Plans awaiting approval and finished code changes appear here."
     case .recentlyCompleted: "Completed tasks are grouped by the date they were completed."
     }
   }
@@ -1087,6 +1077,7 @@ private struct AppearanceSettingsForm: View {
   }
 }
 
+#if os(macOS)
 private struct CodexSettingsForm: View {
   @Environment(AppModel.self) private var model
   @AppStorage("codexExecutable") private var executable = ""
@@ -1134,7 +1125,9 @@ private struct CodexSettingsForm: View {
     }.formStyle(.grouped)
   }
 }
+#endif
 
+#if os(macOS)
 private struct PlanPromptSettingsForm: View {
   @Environment(AppModel.self) private var model
 
@@ -1165,6 +1158,7 @@ private struct PlanPromptSettingsForm: View {
     }.formStyle(.grouped)
   }
 }
+#endif
 
 private struct BackupSettingsForm: View {
   @Environment(AppModel.self) private var model

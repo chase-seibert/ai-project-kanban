@@ -67,8 +67,13 @@ Board filters for All, Favorites, and Plan Approved compose with search and the
 existing project, section, and completion controls. Favorite and model-tag
 controls are available on task cards and in task detail. High and Medium are
 organizational tags only; they do not change task priority or the selected
-Codex model and effort. Workspace navigation also provides cross-project High,
-Medium, and Favorites views on both devices.
+Codex model and effort. Workspace navigation on both devices is ordered All,
+Active, Favorites, and Recently Completed. All includes every task in active
+projects, including completed tasks. Active combines Plan Approved, Building,
+In Progress, and Reviewing tasks while excluding completed tasks.
+The Mac board exposes native task search in its toolbar. On iPhone, native
+search is available on the board and cross-project workspace task views. Search
+matches task titles and notes; workspace search also matches project names.
 Cards show only set favorite and model-tag indicators. Users edit these values
 from task detail or the card's Control-click/long-press context menu.
 Mac section headers keep named + buttons and inline multiline capture. On

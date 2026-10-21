@@ -7,37 +7,25 @@ import UniformTypeIdentifiers
 #endif
 
 enum WorkspaceTaskPreset: String, CaseIterable, Identifiable {
-  case highPriorityModel
-  case mediumPriorityModel
+  case all
+  case active
   case favorites
-  case planApproved
-  case building
-  case inProgress
-  case reviewing
   case recentlyCompleted
 
   var id: String { rawValue }
   var title: String {
     switch self {
-    case .highPriorityModel: "High"
-    case .mediumPriorityModel: "Medium"
+    case .all: "All"
+    case .active: "Active"
     case .favorites: "Favorites"
-    case .planApproved: "Plan Approved"
-    case .building: "Building"
-    case .inProgress: "In Progress"
-    case .reviewing: "Reviewing"
     case .recentlyCompleted: "Recently Completed"
     }
   }
   var symbol: String {
     switch self {
-    case .highPriorityModel: "bolt.fill"
-    case .mediumPriorityModel: "bolt"
+    case .all: "square.grid.2x2"
+    case .active: "bolt.fill"
     case .favorites: "star.fill"
-    case .planApproved: "checkmark.seal"
-    case .building: "hammer.fill"
-    case .inProgress: "hammer"
-    case .reviewing: "eye"
     case .recentlyCompleted: "checkmark.circle"
     }
   }

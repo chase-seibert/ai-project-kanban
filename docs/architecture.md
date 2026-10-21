@@ -243,16 +243,14 @@ vertical-scrolling task lists; iPhone keeps the three sections horizontally page
 Task status can be changed independently of section and completion from the
 task-card context menu or status badge menu. Waiting, Error, and Quota remain
 system-set and cannot be selected manually. Task detail omits section and status
-because the selected board column and card already show them. The Workspace
-sidebar provides a Building view on Mac and iPhone, alongside the existing
-workspace views. Building includes unfinished tasks with Building status across
-active projects, regardless of whether run tracking is currently active. It uses
-the existing search, date grouping, desktop columns, and single-column phone layout.
-Reviewing combines saved, unapproved plans (Planning with no active run) with
-implementation changes ready for review (Reviewing). In Progress includes
-Planning and Building tasks only while their latest run is queued or running.
-Recently Completed filters by the independent completion flag and groups by
-`completedAt`, newest first.
+because the selected board column and card already show them. Workspace
+navigation provides All, Active, Favorites, and Recently Completed on Mac and
+iPhone. All includes tasks from active projects, including completed tasks, and
+supports task and project-name search. Active unions unfinished Plan Approved
+tasks, Building tasks, Planning and Building tasks with queued or running work,
+and Reviewing tasks. Reviewing also includes saved, unapproved plans (Planning
+with no active run). Recently Completed filters by the independent completion
+flag and groups by `completedAt`, newest first.
 
 Mac task detail also has a task-scoped Refresh action. It rereads the authoritative
 SwiftData library without crash recovery or writes, then rechecks the attached

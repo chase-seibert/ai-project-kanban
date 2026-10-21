@@ -1,7 +1,16 @@
 # Changelog
 
+## 2026-10-21
+
+- Replace the High, Medium, Plan Approved, Building, In Progress, and Reviewing
+  workspaces with All and Active. All includes every task in active projects;
+  Active combines the previous status-based task collections. Keep Favorites and
+  Recently Completed, and use the same workspace order on Mac and iPhone.
+
 ## 2026-10-20
 
+- Add native task search to the iPhone board and workspace views, matching task
+  titles and notes and matching project names in cross-project workspaces.
 - Reorganize Mac Settings into Appearance, Codex, Prompts, Backup, Mobile, and
   MCP tabs; open local Wi-Fi exchange diagnostics from Mobile on demand.
 - Follow system Light and Dark appearance across Mac and iPhone, with a local
