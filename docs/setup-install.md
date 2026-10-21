@@ -98,7 +98,7 @@ that desktop continuation succeeded.
 ## Experimental iPhone pairing
 
 Both devices must be on the same trusted Wi-Fi network. On the Mac, open
-Settings → Connection → **Enable local Wi-Fi sync**. Copy the displayed
+Settings → Mobile → **Enable local Wi-Fi sync**. Copy the displayed
 `stagechase://` address and five-minute pairing code to the iPhone Connection tab,
 enter a device name, and request pairing. Entering the temporary code pairs the
 phone automatically; no desktop approval step is required. Anyone who obtains
@@ -109,7 +109,7 @@ refresh runs about every three seconds; each sync uses a short TCP connection,
 not an always-open socket. The app does not provide internet, background, or
 always-on delivery.
 
-The Mac Connection settings probe `127.0.0.1:47928` and verify a nonce plus a
+The Mac Mobile settings probe `127.0.0.1:47928` and verify a nonce plus a
 per-instance identifier before saying this StageChase instance receives its
 own port. A response from another service or another StageChase instance is
 reported as a registration mismatch. Use **Verify this instance owns the port**

@@ -1091,13 +1091,13 @@ extension TaskStatusBadgeColor {
   var swiftUIColor: Color {
     switch self {
     case .secondary: .secondary
-    case .purple: Color(red: 168.0 / 255, green: 85.0 / 255, blue: 247.0 / 255)
-    case .blue: Color(red: 59.0 / 255, green: 130.0 / 255, blue: 246.0 / 255)
+    case .purple: .purple
+    case .blue: .blue
     case .indigo: .indigo
-    case .orange: Color(red: 249.0 / 255, green: 115.0 / 255, blue: 22.0 / 255)
-    case .yellow: Color(red: 234.0 / 255, green: 179.0 / 255, blue: 8.0 / 255)
-    case .red: Color(red: 239.0 / 255, green: 68.0 / 255, blue: 68.0 / 255)
-    case .green: Color(red: 34.0 / 255, green: 197.0 / 255, blue: 94.0 / 255)
+    case .orange: .orange
+    case .yellow: .yellow
+    case .red: .red
+    case .green: .green
     }
   }
 }

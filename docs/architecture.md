@@ -523,7 +523,7 @@ unaccepted operations in the outbox. Version 3 clients fail clearly rather than
 exchanging a partial snapshot.
 
 The Mac app starts `NWListener` on port 47928 only after the user enables local
-sync from Settings → Connection. That explicit choice is remembered, so the
+sync from Settings → Mobile. That explicit choice is remembered, so the
 listener restarts when the Mac app opens; disabling sync clears the choice. The
 iPhone enters the Mac's local address and short-lived
 pairing code; entering the code automatically registers the phone without
@@ -539,15 +539,18 @@ message size are bounded.
 When the listener becomes ready (or reports a bind/network problem), the Mac
 opens a framed TCP connection to `127.0.0.1:47928`. The probe carries a fresh
 nonce; the listener returns that nonce and the `SyncServer` instance UUID. The
-Connection settings report successful port registration only when both values
+Mobile settings report successful port registration only when both values
 match, distinguishing this app instance from another service or StageChase
 instance responding on the port. A transient explicit verification state drives
 the Mac window toolbar's network icon beside the sidebar toggle: neutral while checking, green on
 success, and red on failure. The listener checks at startup and every five
 minutes while enabled, with one probe at a time and generation checks discarding
 stale callbacks after stop, failure, or restart. Selecting the sidebar icon
-opens Settings directly to Connection, and it remains available with the sidebar hidden; its full diagnostic remains the source
-for troubleshooting. The check can also be started manually from Settings.
+opens Settings directly to Mobile, and it remains available with the sidebar
+hidden; its full diagnostic remains the source for troubleshooting. The check
+can also be started manually from Settings. Recent local Wi-Fi exchange events
+are opened on demand from Mobile rather than shown inline. Codex Desktop MCP
+listener controls are in a separate MCP tab.
 
 Task images use a separate `TaskAttachment` metadata value and
 `TaskAttachmentFiles` store. Files are validated as single-frame JPEG, PNG, or

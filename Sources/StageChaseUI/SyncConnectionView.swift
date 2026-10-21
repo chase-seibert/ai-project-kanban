@@ -4,22 +4,52 @@ import SwiftUI
   import AppKit
 #endif
 
+enum SyncConnectionMode: Equatable {
+  case mobile
+  case mcp
+}
+
 struct SyncConnectionView: View {
   @Environment(AppModel.self) private var model
+  var mode: SyncConnectionMode = .mobile
+  @State private var showingRecentExchanges = false
 
   var body: some View {
     Form {
       #if os(macOS)
-        macConnection
+        if mode == .mobile {
+          macConnection
+          Section("Diagnostics") {
+            Button("Recent local Wi-Fi sync exchanges…") { showingRecentExchanges = true }
+          }
+        } else {
+          mcpConnection
+        }
       #else
         phoneConnection
+        SyncNetworkEventSection(
+          events: networkEvents, logError: eventLogError, clear: clearEvents)
       #endif
-      SyncNetworkEventSection(
-        events: networkEvents, logError: eventLogError, clear: clearEvents)
     }
     .formStyle(.grouped)
     #if os(macOS)
       .frame(minWidth: 640, minHeight: 680)
+      .sheet(isPresented: $showingRecentExchanges) {
+        NavigationStack {
+          Form {
+            SyncNetworkEventSection(
+              events: networkEvents, logError: eventLogError, clear: clearEvents)
+          }
+          .formStyle(.grouped)
+          .navigationTitle("Recent local Wi-Fi sync exchanges")
+          .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+              Button("Done") { showingRecentExchanges = false }
+            }
+          }
+        }
+        .frame(minWidth: 640, minHeight: 460)
+      }
     #endif
   }
 
@@ -27,7 +57,7 @@ struct SyncConnectionView: View {
     @ViewBuilder private var macConnection: some View {
       Section("Local Wi-Fi sync listener") {
         Text(
-          "Pairs the iPhone with this Mac for board synchronization. This listener is independent of the Codex Desktop MCP server below."
+          "Pairs the iPhone with this Mac for board synchronization. Codex Desktop MCP is managed separately in MCP settings."
         )
         .stageFont(.caption).foregroundStyle(.secondary)
         if let server = model.syncServer, server.status != "Off" {
@@ -100,6 +130,9 @@ struct SyncConnectionView: View {
             .buttonStyle(.borderedProminent)
         }
       }
+    }
+
+    @ViewBuilder private var mcpConnection: some View {
       Section("Codex Desktop MCP listener") {
         Text(
           "Exposes StageChase project and task tools to Codex Desktop over a separate loopback connection. The listener starts automatically when StageChase opens; stopping it here keeps it off on later launches."

@@ -403,7 +403,7 @@ Phone confirmation for automated transitions remains open.
 
 - While Mac local sync is enabled, show a network icon in the leading area of the Mac window toolbar beside the sidebar toggle. Keep it neutral while checking or before the first result, green after this app instance verifies the loopback port, and red after a failed verification. Keep this app-wide status available when the sidebar is hidden.
 - Verify at startup and every five minutes while enabled. Do not overlap probes, and discard callbacks from an earlier listener generation after stop, failure, or restart.
-- Clicking the icon opens Settings with Connection selected, where the detailed port-registration diagnostic and listener state remain available. Keep the phone Connection view and the separate Codex Desktop MCP listener unchanged.
+- Clicking the icon opens Settings with Mobile selected, where the detailed port-registration diagnostic and listener state remain available. Keep the phone Connection view and the separate MCP settings tab.
 
 ## Codex Desktop task tools
 
@@ -418,7 +418,7 @@ Phone confirmation for automated transitions remains open.
 - As a user, I want Codex to report a concise latest session update, so the
   task detail shows recent progress without copying a conversation transcript.
 - The Mac-only MCP listener starts automatically on app launch by default, can
-  be stopped persistently in Connection settings, and is loopback-only. Tool
+  be stopped persistently in the MCP settings tab, and is loopback-only. Tool
   calls never start, resume, retry, stop, or approve Codex work, and only an
   explicit user action can mark a task Done.
 

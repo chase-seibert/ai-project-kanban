@@ -2,6 +2,11 @@
 
 ## 2026-10-20
 
+- Reorganize Mac Settings into Appearance, Codex, Prompts, Backup, Mobile, and
+  MCP tabs; open local Wi-Fi exchange diagnostics from Mobile on demand.
+- Follow system Light and Dark appearance across Mac and iPhone, with a local
+  System / Light / Dark choice, semantic status colors, and adaptive shared
+  surfaces.
 - Add iPhone Home Screen quick actions for the first four active projects in
   saved order, routing launch and warm selections through the existing project
   selection and board navigation flow.

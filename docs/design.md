@@ -225,9 +225,11 @@ shares title-first detail and collapsible history/context, retaining its native
 phone-specific actions. Completion remains explicit and independent of run state.
 
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
-last successful refresh. A separate Connection tab on phone and in Mac Settings
-shows progress, the saved endpoint, and timestamped framed exchange sizes and
-results without recording payloads. It offers supported task edits, stage moves,
+last successful refresh. The phone's Connection screen and the Mac Settings'
+Mobile tab show sync progress, the saved endpoint, and listener status. Recent
+local Wi-Fi exchange sizes and results open from a button in the Mobile tab and
+do not expose payloads. The Mac Settings' MCP tab manages the independent Codex
+Desktop listener. The phone's Connection screen offers supported task edits, stage moves,
 ordering, and project Codex profile/model edits. Task detail can explicitly ask
 the Mac to prepare a planning or task run; both actions use the existing Mac
 confirmation before Codex starts. Background refresh remains read-only with
@@ -261,12 +263,15 @@ do not change which title is selected. It is disabled while another Git action
 for that project is running and reports the resulting commit or the reason it
 could not commit.
 
-Mac Settings also exposes a multiline **Plan format prompt** editor with a
-reset-to-default action. Its default asks plans to start with user-story
+Mac Settings has separate Appearance, Codex, Prompts, Backup, Mobile, and MCP
+tabs. The **Prompts** tab exposes the multiline **Plan format prompt** editor
+with a reset-to-default action. Its default asks plans to start with user-story
 requirements, then cover architecture and data-model changes, basic test cases,
 and high-level implementation details. The bounded preference is stored on
 this Mac and affects future planning runs only; it does not change existing
-plans or implementation prompts.
+plans or implementation prompts. Settings omits the introductory “A home for
+every project” section. The **Backup** tab keeps library export and restore
+separate from Codex and appearance preferences.
 
 Use native SwiftUI controls, SF Symbols, semantic colors/fonts, NSOpenPanel,
 NSPasteboard, NSUndoManager, and Settings. Cmd-N adds a task; Shift-Cmd-N adds a
@@ -275,6 +280,14 @@ size. Cmd-Z/Shift-Cmd-Z undo/redo manual task creation, edits, moves, completion
 and deletion without agent history. Agent side effects are never undone or
 restarted. Reordering currently has no undo action. Deletion requires confirmation.
 
+Both apps follow the system Light or Dark appearance and update while open. Shared
+boards and task detail use platform-adaptive canvas and card surfaces; status
+badges use semantic system colors so their meaning and contrast adapt with the
+appearance. Settings offers System, Light, and Dark choices, stored separately
+on each device. System is the default and follows the device setting. Native
+navigation, menus, toolbars, and text-entry controls retain their platform
+appearance.
+
 The macOS app uses one primary StageChase window. The project board, task detail,
 activity, project editors, and Settings remain in that window; transient editors,
 detail, and Settings use sheets or in-window inspectors. The standard Settings
@@ -282,8 +295,8 @@ menu command and Command-comma open the Settings sheet. The primary window remai
 resizable with its existing minimum and default sizes. The iPhone app retains its
 own navigation and scene behavior.
 
-Mac Settings → Connection also exposes the Codex Desktop MCP endpoint. It
-starts automatically when the app opens by default; stopping it in Connection
+Mac Settings → MCP exposes the Codex Desktop MCP endpoint. It
+starts automatically when the app opens by default; stopping it in MCP
 settings persists that choice, and the Start button re-enables startup. It lists
 and reads project tasks and supports task creation, explicit stage moves, and
 completion changes through the Mac library. The endpoint binds to loopback;

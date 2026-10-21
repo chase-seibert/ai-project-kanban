@@ -67,7 +67,12 @@ import UIKit
 @main struct StageChasePhoneApp: App {
   @UIApplicationDelegateAdaptor(StageChasePhoneAppDelegate.self) private var appDelegate
   @State private var model = AppModel()
+  @AppStorage("appearancePreference") private var appearancePreference =
+    AppAppearancePreference.system.rawValue
   var body: some Scene {
-    WindowGroup { RootView().environment(model).tint(.indigo) }
+    WindowGroup {
+      RootView().environment(model).tint(.indigo).preferredColorScheme(
+        AppAppearancePreference(rawValue: appearancePreference)?.colorScheme)
+    }
   }
 }

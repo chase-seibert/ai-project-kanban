@@ -6,7 +6,7 @@ agent instructions and then adapted only where marked.
 
 ## Requirements
 
-- StageChase must be running on the same Mac. Its **Settings → Connection →
+- StageChase must be running on the same Mac. Its **Settings → MCP →
   Codex Desktop MCP listener** starts automatically unless it was stopped there.
   The endpoint is loopback-only and works only while the listener is running.
 - The **Local Wi-Fi sync listener** is a separate service for phone pairing;
@@ -114,7 +114,7 @@ never start, stop, retry, or approve Codex work.
 
 ## Setup for a new Mac
 
-Start StageChase, open **Settings → Connection**, and start **Codex Desktop task
+Start StageChase, open **Settings → MCP**, and start **Codex Desktop task
 tools**. Use **Copy Codex setup command** in StageChase to register the
 loopback endpoint with Codex, then reload or restart Codex if the tools are not
 available in the current session. The URL contains a local secret path token;

@@ -5,7 +5,7 @@ struct RootView: View {
   @Environment(\.undoManager) private var undoManager
   @Environment(\.scenePhase) private var scenePhase
   @State private var phonePath: [PhoneDestination] = []
-  @State private var settingsInitialTab: AppSettingsTab = .general
+  @State private var settingsInitialTab: AppSettingsTab = .appearance
   #if os(iOS)
     @State private var phoneQuickActions = PhoneQuickActionCoordinator.shared
   #endif
@@ -42,14 +42,14 @@ struct RootView: View {
               if let server = model.syncServer, server.isEnabled {
                 ToolbarItem(placement: .navigation) {
                   Button {
-                    settingsInitialTab = .connection
+                    settingsInitialTab = .mobile
                     model.sheet = .settings
                   } label: {
                     Image(systemName: "network")
                       .foregroundStyle(loopbackVerificationColor(server.portRegistrationState))
                   }
                   .buttonStyle(.plain)
-                  .help("Open Connection settings to inspect local sync verification")
+                  .help("Open Mobile settings to inspect local sync verification")
                   .accessibilityLabel(loopbackVerificationLabel(server.portRegistrationState))
                   .accessibilityIdentifier("local-sync-verification-settings")
                 }
@@ -606,7 +606,7 @@ struct ProjectSidebar: View {
             Label("Agent activity", systemImage: "waveform.path.ecg")
           }.buttonStyle(.plain)
           Button {
-            settingsInitialTab = .general
+            settingsInitialTab = .appearance
             model.sheet = .settings
           } label: {
             Label("Settings & backups", systemImage: "gearshape")
@@ -1004,10 +1004,10 @@ struct WelcomeView: View {
 }
 
 struct AppSettings: View {
-  var initialTab: AppSettingsTab = .general
+  var initialTab: AppSettingsTab = .appearance
   @State private var selectedTab: AppSettingsTab
 
-  init(initialTab: AppSettingsTab = .general) {
+  init(initialTab: AppSettingsTab = .appearance) {
     self.initialTab = initialTab
     _selectedTab = State(initialValue: initialTab)
   }
@@ -1015,21 +1015,33 @@ struct AppSettings: View {
   var body: some View {
     #if os(macOS)
       TabView(selection: $selectedTab) {
-        GeneralSettingsForm().tabItem { Label("General", systemImage: "gearshape") }
-          .tag(AppSettingsTab.general)
-        SyncConnectionView().tabItem { Label("Connection", systemImage: "network") }
-          .tag(AppSettingsTab.connection)
+        AppearanceSettingsForm().tabItem { Label("Appearance", systemImage: "paintbrush") }
+          .tag(AppSettingsTab.appearance)
+        CodexSettingsForm().tabItem { Label("Codex", systemImage: "cpu") }
+          .tag(AppSettingsTab.codex)
+        PlanPromptSettingsForm().tabItem { Label("Prompts", systemImage: "text.alignleft") }
+          .tag(AppSettingsTab.prompts)
+        SyncConnectionView(mode: .mobile).tabItem { Label("Mobile", systemImage: "iphone") }
+          .tag(AppSettingsTab.mobile)
+        SyncConnectionView(mode: .mcp).tabItem { Label("MCP", systemImage: "network") }
+          .tag(AppSettingsTab.mcp)
+        BackupSettingsForm().tabItem { Label("Backup", systemImage: "externaldrive") }
+          .tag(AppSettingsTab.backup)
       }
-      .frame(minWidth: 640, minHeight: 680)
+      .frame(minWidth: 680, minHeight: 600)
     #else
-      GeneralSettingsForm()
+      PhoneSettingsForm()
     #endif
   }
 }
 
 enum AppSettingsTab: Hashable {
-  case general
-  case connection
+  case appearance
+  case codex
+  case prompts
+  case backup
+  case mobile
+  case mcp
 }
 
 #if os(macOS)
@@ -1044,37 +1056,185 @@ enum AppSettingsTab: Hashable {
   private func loopbackVerificationLabel(_ state: LoopbackVerificationState) -> String {
     switch state {
     case .inactive: "Local sync is off"
-    case .checking: "Checking local sync port; open Connection settings for details"
-    case .verified: "Local sync port verified; open Connection settings for details"
-    case .failed: "Local sync port verification failed; open Connection settings for details"
+    case .checking: "Checking local sync port; open Mobile settings for details"
+    case .verified: "Local sync port verified; open Mobile settings for details"
+    case .failed: "Local sync port verification failed; open Mobile settings for details"
     }
   }
 #endif
 
-private struct GeneralSettingsForm: View {
+private struct AppearanceSettingsForm: View {
+  @AppStorage("textScale") private var textScale = 1.0
+  @AppStorage("appearancePreference") private var appearancePreference =
+    AppAppearancePreference.system.rawValue
+
+  var body: some View {
+    Form {
+      Section("Appearance") {
+        Picker("Appearance", selection: $appearancePreference) {
+          ForEach(AppAppearancePreference.allCases) { preference in
+            Text(preference.title).tag(preference.rawValue)
+          }
+        }
+        Text("Choose System to follow this device. This preference is stored on this device only.")
+          .stageFont(.caption).foregroundStyle(.secondary)
+        Slider(value: $textScale, in: 0.85...1.4, step: 0.05) { Text("Text size") }
+        Button("Reset text size") { textScale = 1 }
+        Text("Keyboard: ⌘+ larger · ⌘− smaller · ⌘0 reset").stageFont(.caption).foregroundStyle(
+          .secondary)
+      }
+    }.formStyle(.grouped)
+  }
+}
+
+private struct CodexSettingsForm: View {
+  @Environment(AppModel.self) private var model
+  @AppStorage("codexExecutable") private var executable = ""
+
+  var body: some View {
+    Form {
+      Section("Codex runner") {
+        Toggle(
+          "Automatically invoke Codex",
+          isOn: Binding(
+            get: { model.autoInvokeCodex },
+            set: { model.setAutoInvokeCodex($0) })
+        )
+        Text(
+          model.autoInvokeCodex
+            ? "Confirmed moves into Planning or Implementing can start Codex automatically when project automation is also enabled. Task status stays separate from section."
+            : "Section changes never start Codex. Task details can launch a prompt in Codex Desktop."
+        ).stageFont(.caption).foregroundStyle(.secondary)
+        TextField("Codex executable (automatic if empty)", text: $executable)
+        Text(model.runnerMessage).stageFont(.callout).foregroundStyle(.secondary)
+        Button("Check Codex connection") { Task { await model.runner?.checkConnection() } }
+        Text(
+          "Uses a dedicated app-server connection and your existing Codex sign-in. Does not read or display authentication secrets."
+        ).stageFont(.caption).foregroundStyle(.secondary)
+      }
+      Section("Default Codex model") {
+        CodexModelFields(
+          configuration: Binding(
+            get: { model.globalModelConfiguration },
+            set: { model.setGlobalModelConfiguration($0) }),
+          catalog: model.modelCatalog)
+        if let error = model.modelConfigurationError ?? model.modelCatalogError {
+          Text(error).stageFont(.caption).foregroundStyle(.orange)
+        }
+        HStack {
+          if model.modelCatalogLoading { ProgressView().controlSize(.small) }
+          Spacer()
+          Button("Reset to Latest Luna · High") { model.resetGlobalModelConfiguration() }
+        }
+        Text(
+          "Applies to StageChase on this Mac. Project and task settings can override it. Global settings are not included in exported library backups."
+        )
+        .stageFont(.caption).foregroundStyle(.secondary)
+      }
+    }.formStyle(.grouped)
+  }
+}
+
+private struct PlanPromptSettingsForm: View {
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    Form {
+      Section("Plan format prompt") {
+        Text(
+          "StageChase adds this guidance to future planning runs on this Mac. It does not change saved plans or implementation runs."
+        ).stageFont(.callout).foregroundStyle(.secondary)
+        TextEditor(
+          text: Binding(
+            get: { model.planFormatPrompt },
+            set: { model.setPlanFormatPrompt($0) })
+        )
+        .font(.body)
+        .frame(minHeight: 220, maxHeight: 340)
+        .accessibilityLabel("Plan format prompt")
+        if let error = model.planFormatPromptError {
+          Text(error).stageFont(.caption).foregroundStyle(.orange)
+        }
+        HStack {
+          Text("Limited to \(AppModel.maximumPlanFormatPromptCharacters) characters.")
+            .stageFont(.caption).foregroundStyle(.secondary)
+          Spacer()
+          Button("Reset to default") { model.resetPlanFormatPrompt() }
+        }
+      }
+    }.formStyle(.grouped)
+  }
+}
+
+private struct BackupSettingsForm: View {
+  @Environment(AppModel.self) private var model
+  @State private var document: LibraryDocument?
+  @State private var exporting = false
+  @State private var importing = false
+
+  var body: some View {
+    Form {
+      Section("Backup") {
+        Button("Export library…", systemImage: "square.and.arrow.up") {
+          Task {
+            if let data = await model.exportData() {
+              document = LibraryDocument(data: data)
+              exporting = true
+            }
+          }
+        }
+        Button("Restore into an empty library…", systemImage: "square.and.arrow.down") {
+          importing = true
+        }
+        Text(
+          "Backups include attached images as separate files. Restore never overwrites existing projects, and older JSON-only backups remain supported."
+        ).stageFont(.caption).foregroundStyle(.secondary)
+      }
+    }
+    .formStyle(.grouped)
+    .fileExporter(
+      isPresented: $exporting, document: document, contentType: .stageChaseBackup,
+      defaultFilename: "StageChase-backup"
+    ) { result in
+      if case .failure(let error) = result { model.error = error.localizedDescription }
+    }
+    .fileImporter(isPresented: $importing, allowedContentTypes: [.stageChaseBackup, .json]) {
+      result in
+      switch result {
+      case .success(let url): Task { await model.restore(url) }
+      case .failure(let error): model.error = error.localizedDescription
+      }
+    }
+  }
+}
+
+private struct PhoneSettingsForm: View {
   @Environment(AppModel.self) private var model
   @AppStorage("textScale") private var textScale = 1.0
+  @AppStorage("appearancePreference") private var appearancePreference =
+    AppAppearancePreference.system.rawValue
   @AppStorage("codexExecutable") private var executable = ""
   @State private var document: LibraryDocument?
   @State private var exporting = false
   @State private var importing = false
   var body: some View {
     Form {
-      Section("StageChase") {
-        Text("A home for every project.").stageFont(.headline)
-        Text(
-          model.isConnectedPhone
-            ? "This phone is showing a cached copy of the paired Mac library. Changes sync while the Mac app is open on the same Wi-Fi network. Codex still runs only on Mac after confirmation."
-            : "Projects and tasks are saved in a versioned SQLite library on this device. Sections and task statuses stay separate from Codex run history."
-        ).foregroundStyle(.secondary)
-      }
-      #if os(macOS)
-        Section("Appearance") {
+      Section("Appearance") {
+        Picker("Appearance", selection: $appearancePreference) {
+          ForEach(AppAppearancePreference.allCases) { preference in
+            Text(preference.title).tag(preference.rawValue)
+          }
+        }
+        Text("Choose System to follow this device. This preference is stored on this device only.")
+          .stageFont(.caption).foregroundStyle(.secondary)
+        #if os(macOS)
           Slider(value: $textScale, in: 0.85...1.4, step: 0.05) { Text("Text size") }
           Button("Reset text size") { textScale = 1 }
           Text("Keyboard: ⌘+ larger · ⌘− smaller · ⌘0 reset").stageFont(.caption).foregroundStyle(
             .secondary)
-        }
+        #endif
+      }
+      #if os(macOS)
         Section("Codex runner") {
           Toggle(
             "Automatically invoke Codex",

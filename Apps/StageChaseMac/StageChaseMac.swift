@@ -5,6 +5,8 @@ import SwiftUI
   @State private var model = AppModel()
   @State private var showsCodexUsageMenuBarItem = true
   @AppStorage("textScale") private var textScale = 1.0
+  @AppStorage("appearancePreference") private var appearancePreference =
+    AppAppearancePreference.system.rawValue
   var body: some Scene {
     Window("StageChase", id: "main") {
       RootView().environment(model).environment(\.stageTextScale, textScale).font(
@@ -12,6 +14,8 @@ import SwiftUI
       )
       .frame(minWidth: 1050, minHeight: 620)
       .tint(.indigo)
+      .preferredColorScheme(
+        AppAppearancePreference(rawValue: appearancePreference)?.colorScheme)
     }.defaultSize(width: 1560, height: 900)
       .commands {
         CommandGroup(replacing: .appSettings) {
@@ -85,6 +89,8 @@ import SwiftUI
       }
     MenuBarExtra(isInserted: $showsCodexUsageMenuBarItem) {
       CodexUsageMenuBarPanel(service: model.codexUsageService)
+        .preferredColorScheme(
+          AppAppearancePreference(rawValue: appearancePreference)?.colorScheme)
     } label: {
       CodexUsageMenuBarLabel(service: model.codexUsageService)
     }
