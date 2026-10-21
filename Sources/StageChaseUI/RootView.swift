@@ -655,7 +655,7 @@ struct ProjectSidebar: View {
       }
     #endif
     #if os(macOS)
-      .listStyle(.sidebar).navigationTitle("StageChase")
+      .listStyle(.sidebar).navigationTitle("Build Chase")
       .task { await model.refreshAllGitStatuses() }
       .safeAreaInset(edge: .bottom) {
         VStack(alignment: .leading, spacing: 5) {

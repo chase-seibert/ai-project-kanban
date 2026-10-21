@@ -55,7 +55,7 @@ run: relaunch
 
 relaunch: build
 	swift scripts/relaunch-mac-app.swift
-	open "$(CURDIR)/$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)/StageChaseMac.app"
+	open "$(CURDIR)/$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)/Build Chase.app"
 
 clean:
 	xcodebuild -project $(PROJECT) -scheme $(MAC_SCHEME) -configuration $(CONFIGURATION) -derivedDataPath $(DERIVED_DATA) clean

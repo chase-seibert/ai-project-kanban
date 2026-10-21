@@ -8,7 +8,7 @@ import SwiftUI
   @AppStorage("appearancePreference") private var appearancePreference =
     AppAppearancePreference.system.rawValue
   var body: some Scene {
-    Window("StageChase", id: "main") {
+    Window("Build Chase", id: "main") {
       RootView().environment(model).environment(\.stageTextScale, textScale).font(
         .system(size: 13 * textScale)
       )
