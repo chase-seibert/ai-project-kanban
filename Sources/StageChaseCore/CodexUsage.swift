@@ -192,7 +192,9 @@ public struct CodexWeeklyUsageHistory: Codable, Equatable, Sendable {
   public func recentResetPattern(now: Date) -> CodexWeeklyResetPattern? {
     let window: TimeInterval = 60 * 24 * 60 * 60
     let cutoff = now.addingTimeInterval(-window)
-    let events = refills.filter { $0.observedBy >= cutoff }
+    let events = refills.filter {
+      $0.observedBy >= cutoff && $0.classification != .scheduled
+    }
     guard events.count >= 2 else { return nil }
     let midpoints = events.map {
       $0.observedAfter.addingTimeInterval($0.observedBy.timeIntervalSince($0.observedAfter) / 2)
@@ -212,7 +214,7 @@ public struct CodexWeeklyUsageHistory: Codable, Equatable, Sendable {
       earlyResetCount: earlyByDays.count,
       averageDaysEarly: earlyByDays.isEmpty
         ? nil : earlyByDays.reduce(0, +) / Double(earlyByDays.count),
-      nextReset: midpoints.last!.addingTimeInterval(averageInterval))
+      nextReset: midpoints[midpoints.count - 1].addingTimeInterval(averageInterval))
   }
 
   private mutating func compact(now: Date) {
