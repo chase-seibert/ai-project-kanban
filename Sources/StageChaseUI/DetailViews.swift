@@ -1339,7 +1339,7 @@ struct TaskDetail: View {
         }
         if edited {
           Button("Save title") { saveTaskEdits() }
-            .buttonStyle(.borderedProminent).frame(minHeight: 44)
+            .buttonStyle(.borderedProminent).tint(.blue).frame(minHeight: 44)
             .accessibilityIdentifier("task-save-title")
         }
         TaskStatusMenu(item: item).frame(minHeight: 44, alignment: .leading)
