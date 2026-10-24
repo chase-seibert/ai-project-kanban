@@ -1386,9 +1386,7 @@ struct TaskDetail: View {
     }
 
     private func phoneCodexActions(_ item: WorkItem) -> some View {
-      let planning =
-        item.section == .inbox
-        || (item.section == .planning && item.status != .planApproved)
+      let planning = MobileTaskHandoffPrompt.primaryIntent(for: item) == .planning
       return VStack(alignment: .leading, spacing: 8) {
         if !item.completed {
           Button {
@@ -1429,7 +1427,20 @@ struct TaskDetail: View {
 
     private func phoneSecondaryActions(_ item: WorkItem, planning: Bool) -> some View {
       Menu {
-        Button("Copy prompt", systemImage: "doc.on.doc") { copyPhonePrompt(for: item) }
+        Section("Copy for Codex") {
+          Button(
+            planning ? "Copy planning prompt" : "Copy implementation prompt",
+            systemImage: planning ? "sparkles" : "arrow.up.right.square"
+          ) {
+            copyPhonePrompt(for: item, planning: planning)
+          }
+          Button(
+            planning ? "Copy implementation prompt" : "Copy planning prompt",
+            systemImage: planning ? "arrow.up.right.square" : "sparkles"
+          ) {
+            copyPhonePrompt(for: item, planning: !planning)
+          }
+        }
         Button(
           planning ? "Launch in Codex" : "Plan in Codex",
           systemImage: planning ? "arrow.up.right.square" : "sparkles"
@@ -1723,19 +1734,10 @@ struct TaskDetail: View {
       }
     }
 
-    private func copyPhonePrompt(for item: WorkItem) {
-      let notes = item.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-      let projectName = handoffProject?.name ?? "Project"
-      UIPasteboard.general.string = """
-        Work on this existing StageChase task in the project repository. Follow the repository's AGENTS.md instructions. Read the task with the StageChase MCP server first and verify the returned project and task IDs match before making changes.
-
-        Project: \(projectName)
-        Project ID: \(item.projectID.uuidString.lowercased())
-        Task ID: \(item.id.uuidString.lowercased())
-        Task: \(item.shortID.map { "#\($0) · " } ?? "")\(item.title)
-        Notes:
-        \(notes.isEmpty ? "(No additional notes.)" : notes)
-        """
+    private func copyPhonePrompt(for item: WorkItem, planning: Bool) {
+      guard let project = handoffProject else { return }
+      UIPasteboard.general.string = MobileTaskHandoffPrompt.make(
+        for: item, project: project, intent: planning ? .planning : .implementation)
       phoneContextCopied = true
     }
 

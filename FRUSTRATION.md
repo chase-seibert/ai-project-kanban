@@ -61,3 +61,14 @@
   acceptance. Do not treat those captures as interactive verification or
   relaunch the Mac app without checking Activity. Preview task routing also
   needs to ignore the asynchronous project-selection path reset.
+
+## 2026-10-24
+
+- `make sim-launch` could not complete its simulator build/launch path after
+  CoreSimulatorService refused connections. A preceding `make sim-build` passed,
+  so retain the compile result but report Simulator launch and interaction as
+  unverified until the service is available.
+- `make relaunch` failed before launch because the requested `Mac Development`
+  certificate private key was unavailable, even though a preceding `make build`
+  completed with the configured Apple Development identity. Treat the relaunch
+  as unverified and do not infer launch from the successful build.

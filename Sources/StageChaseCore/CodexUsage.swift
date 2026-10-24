@@ -93,6 +93,22 @@ public struct CodexWeeklyRefillEstimate: Codable, Equatable, Sendable {
   }
 }
 
+public struct CodexWeeklyResetPattern: Codable, Equatable, Sendable {
+  public var averageIntervalDays: Double
+  public var earlyResetCount: Int
+  public var averageDaysEarly: Double?
+  public var nextReset: Date
+
+  public init(
+    averageIntervalDays: Double, earlyResetCount: Int, averageDaysEarly: Double?, nextReset: Date
+  ) {
+    self.averageIntervalDays = averageIntervalDays
+    self.earlyResetCount = earlyResetCount
+    self.averageDaysEarly = averageDaysEarly
+    self.nextReset = nextReset
+  }
+}
+
 /// Mac-local observations. This bounded raw history is never part of a sync payload.
 public struct CodexWeeklyUsageHistory: Codable, Equatable, Sendable {
   public static let currentVersion = 1
@@ -171,6 +187,32 @@ public struct CodexWeeklyUsageHistory: Codable, Equatable, Sendable {
     return CodexWeeklyRefillEstimate(
       earliest: nextMidpoint.addingTimeInterval(-uncertainty),
       latest: nextMidpoint.addingTimeInterval(uncertainty), basedOnEvents: events.count)
+  }
+
+  public func recentResetPattern(now: Date) -> CodexWeeklyResetPattern? {
+    let window: TimeInterval = 60 * 24 * 60 * 60
+    let cutoff = now.addingTimeInterval(-window)
+    let events = refills.filter { $0.observedBy >= cutoff }
+    guard events.count >= 2 else { return nil }
+    let midpoints = events.map {
+      $0.observedAfter.addingTimeInterval($0.observedBy.timeIntervalSince($0.observedAfter) / 2)
+    }
+    let intervals = zip(midpoints, midpoints.dropFirst()).map { $1.timeIntervalSince($0) }
+    guard !intervals.isEmpty else { return nil }
+    let averageInterval = intervals.reduce(0, +) / Double(intervals.count)
+    let earlyByDays = events.compactMap { event -> Double? in
+      guard let scheduled = event.scheduledResetAt else { return nil }
+      let midpoint = event.observedAfter.addingTimeInterval(
+        event.observedBy.timeIntervalSince(event.observedAfter) / 2)
+      let daysEarly = scheduled.timeIntervalSince(midpoint) / (24 * 60 * 60)
+      return daysEarly >= 1 ? daysEarly : nil
+    }
+    return CodexWeeklyResetPattern(
+      averageIntervalDays: averageInterval / (24 * 60 * 60),
+      earlyResetCount: earlyByDays.count,
+      averageDaysEarly: earlyByDays.isEmpty
+        ? nil : earlyByDays.reduce(0, +) / Double(earlyByDays.count),
+      nextReset: midpoints.last!.addingTimeInterval(averageInterval))
   }
 
   private mutating func compact(now: Date) {
@@ -344,6 +386,7 @@ public struct CodexUsageSnapshot: Codable, Equatable, Sendable {
   public var recentWeeklyRefills: [CodexWeeklyRefillEvent]?
   public var recentScheduledWeeklyResets: [CodexWeeklyScheduledReset]?
   public var nextUnscheduledWeeklyRefill: CodexWeeklyRefillEstimate?
+  public var recentWeeklyResetPattern: CodexWeeklyResetPattern?
   public var flexCreditUSDValue: Double? {
     remainingCredits.map { Double($0) * CodexUsageMapper.creditUSDRate }
   }
@@ -352,7 +395,8 @@ public struct CodexUsageSnapshot: Codable, Equatable, Sendable {
     planName: String?, windows: [CodexQuotaWindow], remainingCredits: Int?, fetchedAt: Date,
     recentWeeklyRefills: [CodexWeeklyRefillEvent]? = nil,
     recentScheduledWeeklyResets: [CodexWeeklyScheduledReset]? = nil,
-    nextUnscheduledWeeklyRefill: CodexWeeklyRefillEstimate? = nil
+    nextUnscheduledWeeklyRefill: CodexWeeklyRefillEstimate? = nil,
+    recentWeeklyResetPattern: CodexWeeklyResetPattern? = nil
   ) {
     self.planName = planName
     self.windows = windows
@@ -361,6 +405,7 @@ public struct CodexUsageSnapshot: Codable, Equatable, Sendable {
     self.recentWeeklyRefills = recentWeeklyRefills
     self.recentScheduledWeeklyResets = recentScheduledWeeklyResets
     self.nextUnscheduledWeeklyRefill = nextUnscheduledWeeklyRefill
+    self.recentWeeklyResetPattern = recentWeeklyResetPattern
   }
 }
 

@@ -521,11 +521,13 @@
         snapshot.recentScheduledWeeklyResets = history.latestScheduledResets
         snapshot.nextUnscheduledWeeklyRefill = history.nextUnscheduledRefillEstimate(
           now: snapshot.fetchedAt)
+        snapshot.recentWeeklyResetPattern = history.recentResetPattern(now: snapshot.fetchedAt)
       } catch {
         historyUnavailable = true
         snapshot.recentWeeklyRefills = nil
         snapshot.recentScheduledWeeklyResets = nil
         snapshot.nextUnscheduledWeeklyRefill = nil
+        snapshot.recentWeeklyResetPattern = nil
       }
     }
 

@@ -390,6 +390,64 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(unavailablePrompt.contains("No custom plan-format preference is set."))
 }
 
+@Test func mobileTaskHandoffPromptMakesPlanningAndImplementationIntentExplicit() throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("StageChaseMobilePrompt-\(UUID().uuidString)", isDirectory: true)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let project = Project(name: "Mobile prompt project", directory: root.path)
+  var task = WorkItem(projectID: project.id, title: "Plan a mobile task")
+  task.notes = "Keep the copied task context."
+
+  #expect(MobileTaskHandoffPrompt.primaryIntent(for: task) == .planning)
+  let planningPrompt = MobileTaskHandoffPrompt.make(
+    for: task, project: project, intent: .planning)
+  #expect(planningPrompt.contains("Create or revise only the plan"))
+  #expect(planningPrompt.contains("\(project.id.uuidString.lowercased())"))
+  #expect(planningPrompt.contains("\(task.id.uuidString.lowercased())"))
+  #expect(planningPrompt.contains("Keep the copied task context."))
+  #expect(!planningPrompt.contains("Execute this existing task"))
+
+  let implementationPrompt = MobileTaskHandoffPrompt.make(
+    for: task, project: project, intent: .implementation)
+  #expect(implementationPrompt.contains("Execute this existing task"))
+  #expect(implementationPrompt.contains("activity_kind: \"implementation\""))
+  #expect(implementationPrompt.contains("Keep the copied task context."))
+  #expect(!implementationPrompt.contains("Create or revise only the plan"))
+
+  task.section = .planning
+  task.status = .planning
+  #expect(MobileTaskHandoffPrompt.primaryIntent(for: task) == .planning)
+
+  task.section = .implementing
+  #expect(MobileTaskHandoffPrompt.primaryIntent(for: task) == .implementation)
+
+  task.section = .planning
+  task.status = .planApproved
+  #expect(MobileTaskHandoffPrompt.primaryIntent(for: task) == .implementation)
+
+  task.planPath = "custom/plans/mobile-task.md"
+  let planURL = root.appendingPathComponent(task.planPath!)
+  try FileManager.default.createDirectory(
+    at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+  try "## Saved plan\n\nUse this plan.".write(to: planURL, atomically: true, encoding: .utf8)
+  #expect(
+    MobileTaskHandoffPrompt.make(for: task, project: project, intent: .planning)
+      .contains("Review the existing plan"))
+  #expect(
+    MobileTaskHandoffPrompt.make(for: task, project: project, intent: .implementation)
+      .contains("Read and follow the existing task plan"))
+
+  try FileManager.default.removeItem(at: planURL)
+  #expect(
+    MobileTaskHandoffPrompt.make(for: task, project: project, intent: .planning)
+      .contains("If an attached path is present but its file is unreadable"))
+  #expect(
+    MobileTaskHandoffPrompt.make(for: task, project: project, intent: .implementation)
+      .contains("No readable saved plan is attached"))
+}
+
 @Test func creatingProjectsNeverEditsExistingProject() throws {
   let a = Project(name: "First")
   let b = Project(name: "Second")

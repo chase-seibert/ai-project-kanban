@@ -97,56 +97,23 @@ struct CodexUsageSummary: View {
   }
 
   @ViewBuilder private func weeklyHistory(_ snapshot: CodexUsageSnapshot) -> some View {
-    if snapshot.windows.contains(where: { $0.kind == .weekly }) {
+    if snapshot.windows.contains(where: { $0.kind == .weekly }),
+      let pattern = snapshot.recentWeeklyResetPattern
+    {
       VStack(alignment: .leading, spacing: 3) {
-        if let refills = snapshot.recentWeeklyRefills, !refills.isEmpty {
-          ForEach(refills) { event in
-            Text(refillDescription(event))
-              .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
-          }
-        } else {
-          Text("Collecting history for additional quota increases.")
-            .stageFont(.caption2).foregroundStyle(.secondary)
-        }
-        if let resets = snapshot.recentScheduledWeeklyResets?.filter({ $0.state != .upcoming }) {
-          ForEach(resets) { reset in
-            Text(scheduledResetDescription(reset))
-              .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
-          }
-        }
-        if let estimate = snapshot.nextUnscheduledWeeklyRefill {
+        Text(
+          "In the last 60 days, quota reset every \(pattern.averageIntervalDays.formatted(.number.precision(.fractionLength(0...1)))) days on average."
+        )
+        .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
+        if pattern.earlyResetCount > 0, let daysEarly = pattern.averageDaysEarly {
           Text(
-            "Likely next extra refill: \(estimate.earliest.formatted(date: .abbreviated, time: .shortened))–\(estimate.latest.formatted(date: .abbreviated, time: .shortened))"
+            "It reset early \(pattern.earlyResetCount) times, about \(daysEarly.formatted(.number.precision(.fractionLength(0...1)))) days ahead."
           )
           .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
-          Text("Estimate from \(estimate.basedOnEvents) observed refills; not an API schedule.")
-            .stageFont(.caption2).foregroundStyle(.tertiary)
-        } else {
-          Text("Extra refill estimate appears after three consistent observations.")
-            .stageFont(.caption2).foregroundStyle(.tertiary)
         }
+        Text("If that happens again, next reset would be \(pattern.nextReset.formatted(date: .complete, time: .omitted)).")
+          .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
       }
-    }
-  }
-
-  private func refillDescription(_ event: CodexWeeklyRefillEvent) -> String {
-    let start = event.observedAfter.formatted(date: .abbreviated, time: .shortened)
-    let end = event.observedBy.formatted(date: .abbreviated, time: .shortened)
-    let interval = "\(start)–\(end)"
-    switch event.classification {
-    case .scheduled: return "Scheduled refill observed between \(interval)."
-    case .unscheduled: return "Extra refill observed between \(interval)."
-    case .ambiguous: return "Refill near schedule observed between \(interval)."
-    }
-  }
-
-  private func scheduledResetDescription(_ reset: CodexWeeklyScheduledReset) -> String {
-    let date = reset.expectedAt.formatted(date: .complete, time: .shortened)
-    switch reset.state {
-    case .upcoming: return "Scheduled reset: \(date)."
-    case .observed: return "Scheduled reset \(date); refill observed."
-    case .notObserved: return "Scheduled reset \(date); no refill observed."
-    case .ambiguous: return "Scheduled reset \(date); refill timing is uncertain."
     }
   }
 

@@ -119,15 +119,13 @@ the schedule associated with the samples. An event is scheduled when its
 observation interval contains the API reset, ambiguous within two hours of it
 or when the observation gap exceeds 12 hours, and unscheduled otherwise.
 Expected scheduled reset dates are retained as upcoming, observed, not observed,
-or ambiguous, so a due schedule stays distinguishable from a refill. Only three
-recent scheduled/refill event summaries and a forecast are included in the shared
-snapshot; raw observations remain Mac-local. Forecasts require three consistent
-unscheduled events with 3-to-60-day cadence, low interval uncertainty, and a
-recent last event. Sparse, stale, irregular, or ambiguous histories show a
-collecting state. The estimate is a date range and is labeled as an inference,
-not an API-provided reset. Invalid or unsupported history is left untouched and
-suppresses the estimate. Optional snapshot fields preserve compatibility with
-older clients and do not change the strict sync protocol version.
+or ambiguous, so a due schedule stays distinguishable from a refill. Raw
+observations remain Mac-local. A compact pattern summary uses refill events from
+the latest 60 days to calculate the average gap, count events at least a day
+before their associated scheduled reset, average that lead time, and project the
+next date from the most recent event. It is an inference from observed quota
+changes, not an API schedule. Optional snapshot fields preserve compatibility
+with older clients and do not change the strict sync protocol version.
 Shared quota presentation keeps the session cutoffs at 30% red and 65% green.
 For weekly windows, green starts 10 percentage points below expected remaining
 capacity and red ends at 30% of that expected amount.

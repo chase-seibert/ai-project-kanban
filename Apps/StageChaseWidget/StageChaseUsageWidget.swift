@@ -138,29 +138,17 @@ private struct UsageWidgetView: View {
   }
 
   @ViewBuilder private var refillHistory: some View {
-    if let reset = entry.snapshot?.recentScheduledWeeklyResets?.first(where: {
-      $0.state != .upcoming
-    }) {
-      let stateText: String =
-        switch reset.state {
-        case .upcoming: "upcoming"
-        case .observed: "refill observed"
-        case .notObserved: "no refill observed"
-        case .ambiguous: "timing uncertain"
-        }
+    if let pattern = entry.snapshot?.recentWeeklyResetPattern {
       Text(
-        "Scheduled reset \(reset.expectedAt.formatted(date: .abbreviated, time: .omitted)): \(stateText)"
+        "Last 60 days: reset every \(pattern.averageIntervalDays.formatted(.number.precision(.fractionLength(0...1)))) days on average."
       )
-      .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-    }
-    if let estimate = entry.snapshot?.nextUnscheduledWeeklyRefill {
-      Text(
-        "Likely extra refill: \(estimate.earliest.formatted(date: .abbreviated, time: .omitted))–\(estimate.latest.formatted(date: .abbreviated, time: .omitted))"
-      )
-      .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-    } else if weekly != nil {
-      Text("Collecting history for extra refills")
-        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+      .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+      if pattern.earlyResetCount > 0, let daysEarly = pattern.averageDaysEarly {
+        Text("Early \(pattern.earlyResetCount) times, about \(daysEarly.formatted(.number.precision(.fractionLength(0...1)))) days ahead.")
+          .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+      }
+      Text("Next, if repeated: \(pattern.nextReset.formatted(date: .complete, time: .omitted))")
+        .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
     }
   }
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-24
+
+- Replace the verbose Codex quota refill history and confidence gate with a
+  concise recent-reset pattern: average interval, how often resets were early,
+  the typical lead time, and the next date if the pattern repeats.
+- Make iPhone task prompt copies explicit: the primary copy follows the task's
+  planning or implementation state, with a clearly labeled choice for the other
+  intent. Use the shared plan-only and implementation prompt builders.
+
 ## 2026-10-21
 
 - Add a Mac GitHub project-management view with upstream status, ahead counts,
