@@ -2,9 +2,8 @@
 
 ## 2026-10-24
 
-- Replace the verbose Codex quota refill history and confidence gate with a
-  concise recent-reset pattern: average interval, how often resets were early,
-  the typical lead time, and the next date if the pattern repeats.
+- Show only the possible next Codex quota reset date; remove the interval and
+  early-reset details from the Mac panel and widget.
 - Make iPhone task prompt copies explicit: the primary copy follows the task's
   planning or implementation state, with a clearly labeled choice for the other
   intent. Use the shared plan-only and implementation prompt builders.

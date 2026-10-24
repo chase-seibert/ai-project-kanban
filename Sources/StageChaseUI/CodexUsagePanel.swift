@@ -100,20 +100,8 @@ struct CodexUsageSummary: View {
     if snapshot.windows.contains(where: { $0.kind == .weekly }),
       let pattern = snapshot.recentWeeklyResetPattern
     {
-      VStack(alignment: .leading, spacing: 3) {
-        Text(
-          "In the last 60 days, quota reset every \(pattern.averageIntervalDays.formatted(.number.precision(.fractionLength(0...1)))) days on average."
-        )
+      Text("Possible reset: \(pattern.nextReset.formatted(.dateTime.weekday(.wide).month(.wide).day())).")
         .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
-        if pattern.earlyResetCount > 0, let daysEarly = pattern.averageDaysEarly {
-          Text(
-            "It reset early \(pattern.earlyResetCount) times, about \(daysEarly.formatted(.number.precision(.fractionLength(0...1)))) days ahead."
-          )
-          .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
-        }
-        Text("If that happens again, next reset would be \(pattern.nextReset.formatted(date: .complete, time: .omitted)).")
-          .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
-      }
     }
   }
 

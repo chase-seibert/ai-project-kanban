@@ -140,15 +140,9 @@ private struct UsageWidgetView: View {
   @ViewBuilder private var refillHistory: some View {
     if let pattern = entry.snapshot?.recentWeeklyResetPattern {
       Text(
-        "Last 60 days: reset every \(pattern.averageIntervalDays.formatted(.number.precision(.fractionLength(0...1)))) days on average."
+        "Possible reset: \(pattern.nextReset.formatted(.dateTime.weekday(.wide).month(.wide).day()))."
       )
       .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-      if pattern.earlyResetCount > 0, let daysEarly = pattern.averageDaysEarly {
-        Text("Early \(pattern.earlyResetCount) times, about \(daysEarly.formatted(.number.precision(.fractionLength(0...1)))) days ahead.")
-          .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-      }
-      Text("Next, if repeated: \(pattern.nextReset.formatted(date: .complete, time: .omitted))")
-        .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
     }
   }
 }
