@@ -1,7 +1,27 @@
 # Changelog
 
+## 2026-10-26
+
+- Keep iPhone sync incomplete when task-image uploads remain pending, including
+  full refreshes, and verify the Mac confirms the uploaded file in its snapshot.
+- Clear a stale missing-image warning on Mac when a later task update confirms
+  the attachment file is present.
+
 ## 2026-10-24
 
+- Add an iOS photo Share Extension with a project-aware new-task composer. Stage
+  the image and request in the App Group, then import it into the phone library
+  as an Inbox task with a stable ID and the existing attachment upload flow.
+  Enable the App Groups capability on the Share Extension target so its signing
+  profile can include the shared container entitlement.
+- Give the Share Extension a nonempty display name so iOS accepts its embedded
+  bundle during device installation.
+- Keep Cancel and Add task pinned at the top of the photo composer, place project,
+  title, and compact description controls first, and show the shared photo below.
+- Remove the redundant composer heading and ready hint, leaving only text Cancel
+  and primary Add task actions at the top.
+- Prefill the editable task title from the shared photo filename, with a Photo
+  task fallback, so Add task is available as soon as the photo loads.
 - Show only the possible next Codex quota reset date; remove the interval and
   early-reset details from the Mac panel and widget.
 - Make iPhone task prompt copies explicit: the primary copy follows the task's

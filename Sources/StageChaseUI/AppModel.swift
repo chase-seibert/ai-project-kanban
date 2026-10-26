@@ -310,6 +310,55 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
     }
   }
 
+  #if os(iOS)
+    @discardableResult
+    func importSharedPhotoTasks() async -> Int {
+      guard ready, !isPreview else { return 0 }
+      do {
+        let requests = try SharedPhotoIntake.pendingRequests()
+        var importedCount = 0
+        for (request, image) in requests {
+          let existing = library.tasks.first(where: { $0.id == request.id })
+          guard existing == nil || existing?.projectID == request.projectID else {
+            error = "This shared photo request conflicts with an existing task. Its staged image is kept."
+            return importedCount
+          }
+          guard library.activeProjects.contains(where: { $0.id == request.projectID }) else {
+            error = "The selected project is no longer available. Restore or refresh it, then reopen Build Chase to retry. The shared photo is kept."
+            return importedCount
+          }
+          try TaskAttachmentFiles.validate(image, mediaType: request.mediaType)
+          if existing == nil {
+            var item = WorkItem(projectID: request.projectID, title: request.title, stage: .inbox)
+            item.id = request.id
+            item.notes = request.description
+            guard await perform(.createTask(item)) else { return importedCount }
+          }
+          let hasAttachment = library.tasks.first(where: { $0.id == request.id })?
+            .attachments.contains(where: { $0.id == request.id }) == true
+          if !hasAttachment,
+            !(await addTaskAttachment(
+              taskID: request.id, bytes: image, displayName: request.displayName,
+              mediaType: request.mediaType, attachmentID: request.id))
+          { return importedCount }
+          guard library.tasks.contains(where: {
+            $0.id == request.id && $0.attachments.contains(where: { $0.id == request.id })
+          }) else {
+            error = "The task was saved, but its shared photo is not yet confirmed. The request will retry when Build Chase opens."
+            return importedCount
+          }
+          try SharedPhotoIntake.remove(request.id)
+          select(request.projectID)
+          importedCount += 1
+        }
+        return importedCount
+      } catch {
+        self.error = "The shared photo could not be imported. Its staged copy is kept for retry. \(error.localizedDescription)"
+        return 0
+      }
+    }
+  #endif
+
   #if os(macOS)
     func startLocalSync() async {
       guard !isPreview else {
@@ -710,6 +759,14 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
             syncClient.lastResultMessage =
               "Full snapshot received from Mac after resolving \(acceptedCount) queued change(s). No pending local changes remain."
             syncClient.recordDiagnostic(syncClient.lastResultMessage)
+            let pendingImageCount = await uploadPendingTaskAttachments(
+              to: replicaRepository, expectedLibraryID: credential.libraryID)
+            if pendingImageCount > 0 {
+              syncClient.status = "Full refresh incomplete · image upload pending"
+              syncClient.lastResultMessage =
+                "Full snapshot received, but \(pendingImageCount) image upload(s) remain pending."
+              syncClient.recordDiagnostic(syncClient.lastResultMessage)
+            }
             return
           }
           syncClient.status = "Refreshing project list…"
@@ -733,8 +790,14 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
           "Mac responded in \(Int(Date().timeIntervalSince(startedAt) * 1_000)) ms. \(acceptedCount) queued change(s) resolved. \(snapshotText)\(pendingText)"
         syncClient.error = nil
         syncClient.recordDiagnostic(syncClient.lastResultMessage)
-        await uploadPendingTaskAttachments(
+        let pendingImageCount = await uploadPendingTaskAttachments(
           to: replicaRepository, expectedLibraryID: credential.libraryID)
+        if pendingImageCount > 0 {
+          syncClient.status = "Reachable · image upload pending"
+          syncClient.lastResultMessage =
+            "Mac responded in \(Int(Date().timeIntervalSince(startedAt) * 1_000)) ms. \(acceptedCount) queued change(s) resolved, but \(pendingImageCount) image upload(s) remain pending."
+          syncClient.recordDiagnostic(syncClient.lastResultMessage)
+        }
       } catch {
         syncClient.status =
           forceFullSnapshot
@@ -787,7 +850,7 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
 
     private func uploadPendingTaskAttachments(
       to repository: LibraryRepository, expectedLibraryID: UUID
-    ) async {
+    ) async -> Int {
       for initialItem in library.tasks {
         for initialAttachment in initialItem.attachments
         where initialAttachment.transferState == .pendingUpload {
@@ -798,18 +861,30 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
               })
             else { continue }
             let bytes = try TaskAttachmentFiles.read(attachment)
-            _ = try await syncClient.requestDirect(
+            let response = try await syncClient.requestDirect(
               .uploadAttachment(
                 requestID: UUID(), taskID: item.id, expectedRevision: item.revision,
                 attachment: attachment, bytes: bytes))
-            if let snapshot = try await syncClient.snapshot(cursor: 0, force: true) {
-              try await apply(snapshot, to: repository, expectedLibraryID: expectedLibraryID)
+            guard case .accepted = response else {
+              throw BoardError.invalid("The Mac did not confirm the image upload.")
+            }
+            guard let snapshot = try await syncClient.snapshot(cursor: 0, force: true) else {
+              throw BoardError.invalid("The Mac accepted the image but did not confirm it in the refreshed library.")
+            }
+            try await apply(snapshot, to: repository, expectedLibraryID: expectedLibraryID)
+            guard library.tasks.first(where: { $0.id == item.id })?.attachments.contains(where: {
+              $0.id == attachment.id && $0.transferState == .available
+            }) == true else {
+              throw BoardError.invalid("The Mac accepted the image, but it is still marked as pending upload.")
             }
           } catch {
             // The image remains in the durable local store and can be retried on the next sync.
             syncClient.error = "Image upload is pending: \(error.localizedDescription)"
           }
         }
+      }
+      return library.tasks.reduce(0) { count, item in
+        count + item.attachments.filter { $0.transferState == .pendingUpload }.count
       }
     }
 
@@ -1757,7 +1832,7 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
   }
 
   func addTaskAttachment(
-    taskID: UUID, bytes: Data, displayName: String, mediaType: String
+    taskID: UUID, bytes: Data, displayName: String, mediaType: String, attachmentID: UUID = UUID()
   ) async -> Bool {
     guard let item = library.tasks.first(where: { $0.id == taskID }),
       item.attachments.count < TaskAttachmentFiles.maximumCount
@@ -1765,7 +1840,7 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
       error = "This task already has the maximum number of images."
       return false
     }
-    let id = UUID()
+    let id = attachmentID
     do {
       var attachment = try TaskAttachmentFiles.save(
         bytes, id: id, displayName: displayName, mediaType: mediaType)

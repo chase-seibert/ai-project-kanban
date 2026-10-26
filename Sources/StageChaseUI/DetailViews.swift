@@ -728,6 +728,7 @@ struct TaskDetail: View {
   @State private var showingAttachmentPreview = false
   @State private var attachmentPreviewData: Data?
   @State private var attachmentError: String?
+  @State private var attachmentErrorID: UUID?
   #if os(iOS)
     @State private var selectedPhoto: PhotosPickerItem?
   #endif
@@ -1038,6 +1039,11 @@ struct TaskDetail: View {
       .onChange(of: item?.attachments.map(\.id)) { _, attachmentIDs in
         imagesExpanded = !(attachmentIDs?.isEmpty ?? true)
       }
+      .onChange(of: item?.revision) { _, _ in
+        #if os(macOS)
+          Task { await clearRecoveredAttachmentError(in: item) }
+        #endif
+      }
       .onChange(of: item?.notes) { _, notes in
         if notes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
           contextExpanded = false
@@ -1219,7 +1225,11 @@ struct TaskDetail: View {
                   taskID: item.id, attachmentID: attachment.id)
                 showingAttachmentPreview = true
                 attachmentError = nil
-              } catch { attachmentError = error.localizedDescription }
+                attachmentErrorID = nil
+              } catch {
+                attachmentError = error.localizedDescription
+                attachmentErrorID = attachment.id
+              }
             }
           } label: {
             VStack(alignment: .leading, spacing: 2) {
@@ -1263,16 +1273,34 @@ struct TaskDetail: View {
         attachmentThumbnailData[attachment.id] = try await model.taskAttachmentData(
           taskID: item.id, attachmentID: attachment.id)
         attachmentError = nil
+        attachmentErrorID = nil
       } catch {
         attachmentError = error.localizedDescription
+        attachmentErrorID = attachment.id
       }
+    }
+  #endif
+
+  #if os(macOS)
+    private func clearRecoveredAttachmentError(in item: WorkItem?) async {
+      guard attachmentError == "The attached image file is missing from this Mac.",
+        let attachmentErrorID,
+        let attachment = item?.attachments.first(where: { $0.id == attachmentErrorID }),
+        attachment.transferState == .available,
+        (try? TaskAttachmentFiles.read(attachment)) != nil
+      else { return }
+      attachmentError = nil
+      self.attachmentErrorID = nil
     }
   #endif
 
   private func addAttachment(_ bytes: Data, name: String, mediaType: String) async {
     let saved = await model.addTaskAttachment(
       taskID: taskID, bytes: bytes, displayName: name, mediaType: mediaType)
-    if !saved { attachmentError = model.error ?? "Could not attach this image." }
+    if !saved {
+      attachmentError = model.error ?? "Could not attach this image."
+      attachmentErrorID = nil
+    }
   }
 
   #if os(macOS)

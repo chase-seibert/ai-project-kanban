@@ -10,6 +10,12 @@ import UIKit
   var pendingProjectID: UUID?
 
   func update(projects: [Project]) {
+    if let data = try? JSONEncoder().encode(projects.map {
+      SharedPhotoProject(id: $0.id, name: $0.name)
+    }) {
+      UserDefaults(suiteName: SharedPhotoIntake.appGroup)?.set(
+        data, forKey: SharedPhotoIntake.projectsKey)
+    }
     UIApplication.shared.shortcutItems = Array(projects.prefix(Self.maximumProjectActions)).map {
       project in
       UIApplicationShortcutItem(

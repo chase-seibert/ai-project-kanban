@@ -147,6 +147,15 @@
 - Backups package task/library JSON and separate image files in a versioned
   archive. Legacy JSON-only backups remain restorable when they contain no image
   references, and restore still requires an empty library.
+- As a user, I want to share a photo from another iPhone app into Build Chase and
+  compose an Inbox task with a project, title, description, and image, so visual
+  work context is captured without saving and attaching it later.
+- Sharing accepts one readable JPEG, PNG, or HEIC image within the existing size
+  and dimension limits. A submitted request is staged in the App Group and
+  imported when Build Chase becomes active; repeated activation must not create
+  duplicate tasks. Cancelling creates no task, and unavailable projects or
+  invalid images produce a clear message while preserving submitted data for
+  recovery.
 
 ## Experimental local Wi-Fi sync
 

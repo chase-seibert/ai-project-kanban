@@ -219,6 +219,9 @@ struct RootView: View {
       await model.load()
       #if os(iOS)
         phoneQuickActions.update(projects: model.library.activeProjects)
+        if scenePhase == .active, await model.importSharedPhotoTasks() > 0 {
+          phonePath = [.board]
+        }
         openPendingPhoneQuickAction()
       #endif
       #if os(macOS)

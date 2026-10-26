@@ -95,6 +95,7 @@ device behavior remains a separate acceptance check from builds and fixtures.
   JSONL `CodexConnection`, and `CodexRunner` coordinator. The standard Settings
   command routes to the Settings sheet rather than a separate scene.
 - `Apps/StageChasePhone/`: iPhone scene using the shared UI and repository.
+- `Apps/StageChaseShare/`: iOS Share Extension for composing a new task from one shared photo.
 - `Apps/StageChaseWidget/`: WidgetKit home- and Lock Screen usage widget. It
   reads only the latest phone App Group snapshot and never contacts Codex or the
   Mac directly.
@@ -569,6 +570,16 @@ uncached preview requests only that image. Snapshot refresh does not download
 image files. `BackupArchive` frames the library JSON and raw image files in a
 versioned container, while old JSON-only backups with no image references remain
 readable.
+
+The iOS Share Extension accepts one JPEG, PNG, or HEIC image and presents a
+new-task composer with active phone projects, a required title, and an optional
+description. It stages the validated photo and a stable-ID request in the phone
+App Group; it does not try to launch the containing app. When the phone app
+becomes active, it imports the request as an Inbox task with the staged file in
+`TaskAttachmentFiles`. The stable request ID is also used for the task and
+attachment, so a restart can recognize an already committed import. Staging is
+removed only after the task and image metadata are confirmed in the local
+library. Paired phones mark the image for the existing pending-upload path.
 
 Both apps have a Connection view with current request state, last result,
 pending count, saved endpoint, and a persistent, bounded exchange journal. The
