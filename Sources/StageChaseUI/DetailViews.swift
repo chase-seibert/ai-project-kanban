@@ -155,7 +155,7 @@ struct ProjectEditor: View {
           } header: {
             Text("Project icon")
           } footer: {
-            Text("Enter one emoji to identify this project. Clear it to use the default project icon.")
+            Text("Type or paste one emoji, or choose one from the emoji picker.")
           }
         #else
           if model.isConnectedPhone && !isNew {
@@ -164,7 +164,7 @@ struct ProjectEditor: View {
             } header: {
               Text("Project icon")
             } footer: {
-              Text("Enter one emoji to identify this project. Clear it to use the default project icon.")
+              Text("Enter one emoji with the keyboard or paste it here.")
             }
           }
         #endif
@@ -727,6 +727,7 @@ struct NewTaskEditor: View {
 
 private struct ProjectEmojiPicker: View {
   @Binding var selection: String?
+  @FocusState private var emojiFieldFocused: Bool
 
   private var emojiText: Binding<String> {
     Binding(
@@ -736,8 +737,8 @@ private struct ProjectEmojiPicker: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      TextField("Emoji", text: emojiText)
-        .frame(width: 72)
+      TextField("", text: emojiText)
+        .frame(width: 64)
         .accessibilityLabel("Project emoji")
       if let selection {
         Text(selection)
@@ -749,9 +750,18 @@ private struct ProjectEmojiPicker: View {
           .accessibilityHidden(true)
       }
       Spacer()
-      Button("Clear") { selection = nil }
-        .disabled(selection == nil)
+      #if os(macOS)
+        Button("Choose…") {
+          emojiFieldFocused = true
+          DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+        }
+        .help("Choose an emoji from Emoji & Symbols")
+      #endif
+      if selection != nil {
+        Button("Clear") { selection = nil }
+      }
     }
+    .focused($emojiFieldFocused)
   }
 }
 
