@@ -87,7 +87,6 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
   var taskPendingDeletionID: UUID?
   var projectPendingDeletion: Project?
   var launchTaskOnSelectionID: UUID?
-  var saveTaskEditRequestedID: UUID?
   var error: String?
   var phoneCodexActionMessage: String?
   var phoneGitStatuses: [String: SyncGitStatus] = [:]

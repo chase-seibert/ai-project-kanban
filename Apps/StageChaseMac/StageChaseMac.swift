@@ -45,9 +45,6 @@ import SwiftUI
               model.error = "The task context could not be copied to the clipboard."
             }
           }.disabled(selectedBoardTask(model, includeDetailSelection: true) == nil)
-          Button("Save changes (⌘Return)") {
-            model.saveTaskEditRequestedID = model.selectedTaskID
-          }.disabled(model.selectedTaskID == nil)
           Button("Launch Codex (⌘R)") {
             guard let item = selectedBoardTask(model, includeDetailSelection: true) else { return }
             model.selectedTaskID = item.id

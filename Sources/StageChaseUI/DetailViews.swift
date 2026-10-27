@@ -711,8 +711,10 @@ struct TaskDetail: View {
   let taskID: UUID
   @State private var draft: WorkItem?
   @State private var edited = false
-  @State private var notesSaveTask: Task<Void, Never>?
-  @State private var notesSaveMessage: String?
+  @State private var taskSaveTask: Task<Void, Never>?
+  @State private var taskSaveMessage: String?
+  @State private var taskSaveInFlight = false
+  @State private var feedbackSaveMessage: String?
   @State private var deleting = false
   @State private var approvingPlan = false
   @State private var contextExpanded = false
@@ -832,10 +834,6 @@ struct TaskDetail: View {
                       : "Changes save automatically."
                   )
                   .stageFont(.caption).foregroundStyle(.secondary)
-                  if let notesSaveMessage {
-                    Text(notesSaveMessage).stageFont(.caption)
-                      .foregroundStyle(notesSaveMessage.hasPrefix("Could") ? .red : .secondary)
-                  }
                   #if os(macOS)
                     if usesPlanFeedbackField, !model.planFeedbackDraft(for: taskID).isEmpty {
                       Button("Save feedback") { appendPlanFeedbackOnBlur() }
@@ -856,7 +854,7 @@ struct TaskDetail: View {
                     #if os(macOS)
                       Text(contextSummary).stageFont(.caption).foregroundStyle(.secondary)
                     #else
-                      if item.notes.isEmpty || notesSaveMessage != nil {
+                      if item.notes.isEmpty || feedbackSaveMessage != nil {
                         Text(contextSummary).font(.caption).foregroundStyle(.secondary)
                       }
                     #endif
@@ -963,6 +961,7 @@ struct TaskDetail: View {
                             set: {
                               draft?.modelOverride = $0
                               edited = true
+                              scheduleTaskSave()
                             }),
                           inherited: model.inheritedConfiguration(for: draft ?? item),
                           inheritLabel: "Use project model settings",
@@ -1017,6 +1016,9 @@ struct TaskDetail: View {
         titleExpanded = false
         runDisclosure.select(taskID: taskID, runs: taskRuns)
         edited = false
+        taskSaveTask?.cancel()
+        taskSaveMessage = nil
+        taskSaveInFlight = false
         promptCopied = false
         planPromptCopied = false
         #if os(iOS)
@@ -1066,7 +1068,10 @@ struct TaskDetail: View {
       }
       .onChange(of: draft?.notes) { _, value in
         guard !usesPlanFeedbackField, let value else { return }
-        scheduleNotesSave(value)
+        if item?.notes != value { scheduleTaskSave() }
+      }
+      .onChange(of: draft?.title) { _, value in
+        if let value, item?.title != value { scheduleTaskSave() }
       }
       #if os(macOS)
         .onChange(of: focusedEditor) { previous, current in
@@ -1074,14 +1079,11 @@ struct TaskDetail: View {
         }
       #endif
       .onDisappear {
+        taskSaveTask?.cancel()
+        if hasUnsavedTaskEdits { saveTaskEdits() }
         #if os(macOS)
           appendPlanFeedbackOnBlur()
         #endif
-      }
-      .onChange(of: model.saveTaskEditRequestedID) { _, requestedID in
-        guard requestedID == taskID else { return }
-        model.saveTaskEditRequestedID = nil
-        saveTaskEdits()
       }
       .confirmationDialog(
         "Delete this task and its run history?", isPresented: $deleting, titleVisibility: .visible
@@ -1365,11 +1367,7 @@ struct TaskDetail: View {
           }
           phoneFavoriteButton(item)
         }
-        if edited {
-          Button("Save title") { saveTaskEdits() }
-            .buttonStyle(.borderedProminent).tint(.blue).frame(minHeight: 44)
-            .accessibilityIdentifier("task-save-title")
-        }
+        taskSaveStatus
         TaskStatusMenu(item: item).frame(minHeight: 44, alignment: .leading)
         if canApprovePlan {
           Button("Mark plan approved", systemImage: "checkmark.circle.fill") { approvePlan(item) }
@@ -1563,11 +1561,7 @@ struct TaskDetail: View {
         .disabled(approvingPlan)
         .accessibilityHint("Approves the saved plan without moving the task or starting Codex.")
       }
-      if edited {
-        Button("Save changes (⌘Return)") { saveTaskEdits() }
-          .buttonStyle(.borderedProminent).tint(.blue)
-          .keyboardShortcut(.return, modifiers: [.command])
-      }
+      taskSaveStatus
       #if os(macOS)
         VStack(alignment: .leading, spacing: 8) {
           Button("Launch in Codex", systemImage: "arrow.up.right.square") {
@@ -1657,7 +1651,10 @@ struct TaskDetail: View {
       if let message = model.planFeedbackMessages[taskID], message.isError { return message.text }
       if !model.planFeedbackDraft(for: taskID).isEmpty { return "Unsaved feedback" }
     #endif
-    if let notesSaveMessage, notesSaveMessage.hasPrefix("Could") { return notesSaveMessage }
+    if let taskSaveMessage, taskSaveMessage.hasPrefix("Could") { return taskSaveMessage }
+    if let feedbackSaveMessage, feedbackSaveMessage.hasPrefix("Could") {
+      return feedbackSaveMessage
+    }
     return (draft?.notes.isEmpty == false) ? "Notes available" : "Add context when needed"
   }
 
@@ -1704,32 +1701,45 @@ struct TaskDetail: View {
     #if os(macOS)
       if usesPlanFeedbackField { return planFeedbackBinding }
     #endif
-    return Binding(get: { draft?.notes ?? "" }, set: { draft?.notes = $0 })
+    return Binding(
+      get: { draft?.notes ?? "" },
+      set: {
+        draft?.notes = $0
+        edited = true
+        scheduleTaskSave()
+      })
   }
 
-  private func scheduleNotesSave(_ value: String) {
-    guard item?.notes != value else { return }
-    notesSaveTask?.cancel()
-    notesSaveMessage = "Saving…"
-    let savingTaskID = taskID
-    notesSaveTask = Task { @MainActor in
-      try? await Task.sleep(for: .milliseconds(650))
-      guard !Task.isCancelled,
-        let currentItem = model.library.tasks.first(where: { $0.id == savingTaskID })
-      else { return }
-      if await model.perform(
-        .saveNotes(currentItem.id, value, expectedRevision: currentItem.revision))
-      {
-        notesSaveMessage = "Saved"
-        if var draft, let latest = self.item {
-          if draft.notes == value { draft.notes = value }
-          draft.revision = latest.revision
-          self.draft = draft
+  private var hasUnsavedTaskEdits: Bool {
+    guard let draft, let item else { return false }
+    return edited || draft.title != item.title || draft.notes != item.notes
+      || draft.modelOverride != item.modelOverride
+  }
+
+  @ViewBuilder private var taskSaveStatus: some View {
+    if let taskSaveMessage {
+      HStack(spacing: 8) {
+        Text(taskSaveMessage).stageFont(.caption)
+          .foregroundStyle(taskSaveMessage.hasPrefix("Could") ? .red : .secondary)
+          .accessibilityLabel(taskSaveMessage)
+        if taskSaveMessage.hasPrefix("Could") {
+          Button("Retry save") { saveTaskEdits() }
+            .buttonStyle(.borderless)
+            .disabled(taskSaveInFlight)
         }
-      } else {
-        notesSaveMessage = "Could not save context. Your draft is still here."
-        contextExpanded = true
       }
+      .accessibilityIdentifier("task-save-status")
+    }
+  }
+
+  private func scheduleTaskSave() {
+    guard hasUnsavedTaskEdits, !taskSaveInFlight else { return }
+    taskSaveTask?.cancel()
+    taskSaveMessage = "Saving…"
+    taskSaveTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(650))
+      guard !Task.isCancelled else { return }
+      saveTaskEdits()
     }
   }
 
@@ -1744,7 +1754,7 @@ struct TaskDetail: View {
         let saved = await model.appendPlanFeedback(
           taskID: taskID, expectedRevision: item.revision, text: text)
         if !saved { contextExpanded = true }
-        notesSaveMessage =
+        feedbackSaveMessage =
           saved
           ? "Feedback saved to plan."
           : "Could not append feedback. Your draft is still here."
@@ -1777,17 +1787,60 @@ struct TaskDetail: View {
       set: {
         draft?[keyPath: keyPath] = $0
         edited = true
+        scheduleTaskSave()
       })
   }
 
   private func saveTaskEdits() {
-    guard edited, let draft else { return }
-    notesSaveTask?.cancel()
-    notesSaveTask = nil
-    Task {
-      if await model.perform(.editTask(draft, expectedRevision: draft.revision)) {
-        self.draft = self.item
-        edited = false
+    guard hasUnsavedTaskEdits, !taskSaveInFlight, let snapshot = draft,
+      let currentItem = item
+    else { return }
+    taskSaveTask?.cancel()
+    taskSaveTask = nil
+    taskSaveInFlight = true
+    taskSaveMessage = "Saving…"
+    Task { @MainActor in
+      var submission = currentItem
+      submission.title = snapshot.title
+      submission.notes = snapshot.notes
+      submission.modelOverride = snapshot.modelOverride
+      let saved = await model.perform(
+        .editTask(submission, expectedRevision: snapshot.revision))
+      taskSaveInFlight = false
+      guard let latest = self.item else { return }
+      if saved {
+        var reconciled = latest
+        if let currentDraft = self.draft {
+          if currentDraft.title != snapshot.title { reconciled.title = currentDraft.title }
+          if currentDraft.notes != snapshot.notes { reconciled.notes = currentDraft.notes }
+          if currentDraft.modelOverride != snapshot.modelOverride {
+            reconciled.modelOverride = currentDraft.modelOverride
+          }
+        }
+        self.draft = reconciled
+        edited = reconciled.title != latest.title || reconciled.notes != latest.notes
+          || reconciled.modelOverride != latest.modelOverride
+        taskSaveMessage = edited ? "Saving…" : "Saved"
+        if edited { scheduleTaskSave() }
+      } else {
+        taskSaveMessage = "Could not save changes. Your draft is still here."
+        contextExpanded = true
+        #if os(macOS)
+          await model.refreshTask(taskID, preservingEdits: false)
+        #else
+          await model.refreshFromMac(manual: true)
+        #endif
+        if var currentDraft = self.draft, let refreshed = self.item {
+          let title = currentDraft.title
+          let notes = currentDraft.notes
+          let override = currentDraft.modelOverride
+          currentDraft = refreshed
+          currentDraft.title = title
+          currentDraft.notes = notes
+          currentDraft.modelOverride = override
+          self.draft = currentDraft
+          edited = true
+        }
       }
     }
   }

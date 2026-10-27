@@ -72,3 +72,20 @@
   certificate private key was unavailable, even though a preceding `make build`
   completed with the configured Apple Development identity. Treat the relaunch
   as unverified and do not infer launch from the successful build.
+
+## 2026-10-26
+
+- `make relaunch` again could not sign with the configured `Mac Development`
+  identity. `make build` succeeded with the available Apple Development
+  identity, and the rebuilt bundle launched directly. `make sim-build` passed,
+  but `make sim-launch` could not rebuild reliably after CoreSimulatorService
+  disconnected; SwiftData macro compilation then failed with
+  `sandbox_apply: Operation not permitted`. Treat Simulator interaction as
+  unverified when this environment failure recurs.
+
+## 2026-10-27
+
+- `make relaunch` again stopped while signing with the missing `Mac Development`
+  private key. `make build` succeeded with the available Apple Development
+  identity; a graceful UI quit followed by direct launch of the built app
+  bundle worked for interaction checks.

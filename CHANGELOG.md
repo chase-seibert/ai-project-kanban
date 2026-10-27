@@ -2,6 +2,11 @@
 
 ## 2026-10-26
 
+- Automatically save task title, notes, and task model edits on Mac and iPhone
+  with debounced revision checks, visible save status, and draft-preserving retry.
+- Keep Mac inline title edits local while typing, then save and close the
+  plain-text editor after focus leaves it or a click lands elsewhere on the
+  board, including another task.
 - Keep iPhone sync incomplete when task-image uploads remain pending, including
   full refreshes, and verify the Mac confirms the uploaded file in its snapshot.
 - Clear a stale missing-image warning on Mac when a later task update confirms

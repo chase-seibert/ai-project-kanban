@@ -27,11 +27,21 @@ enum Palette {
   }
 }
 
+private struct EditingTitleFramePreferenceKey: PreferenceKey {
+  static let defaultValue: CGRect = .null
+
+  static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+    let next = nextValue()
+    if !next.isNull { value = next }
+  }
+}
+
 struct BoardView: View {
   @Environment(AppModel.self) private var model
   var onOpenTask: ((UUID) -> Void)?
   @State private var focusedStage: WorkflowSection? = .inbox
   @State private var editingTaskID: UUID?
+  @State private var editingTitleFrame: CGRect = .null
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       #if os(macOS)
@@ -85,6 +95,16 @@ struct BoardView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Palette.canvas)
     .onAppear { focusedStage = model.boardFocusedStage }
+    #if os(macOS)
+      .coordinateSpace(name: "taskBoard")
+      .onPreferenceChange(EditingTitleFramePreferenceKey.self) { editingTitleFrame = $0 }
+      .simultaneousGesture(
+        SpatialTapGesture(coordinateSpace: .named("taskBoard")).onEnded { value in
+          guard editingTaskID != nil, !editingTitleFrame.contains(value.location) else { return }
+          editingTaskID = nil
+        }
+      )
+    #endif
     #if os(macOS)
       .background(BoardKeyboardMonitor(model: model))
       .confirmationDialog(
@@ -533,6 +553,7 @@ struct TaskCard: View {
   var projectName: String?
   @State private var titleDraft = ""
   @State private var savingTitle = false
+  @State private var titleSaveMessage: String?
   @FocusState private var titleFieldFocused: Bool
 
   private var isEditingTitle: Bool { editingTaskID == item.id }
@@ -556,6 +577,11 @@ struct TaskCard: View {
       } else if newValue == item.id {
         titleFieldFocused = true
       }
+    }
+    .onChange(of: titleFieldFocused) { _, isFocused in
+      #if os(macOS)
+        if !isFocused { resolveTitleEditing() }
+      #endif
     }
   }
 
@@ -789,6 +815,41 @@ struct TaskCard: View {
         Text(projectName).stageFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
       }
       if isEditingTitle {
+        #if os(macOS)
+          HStack(alignment: .top, spacing: 8) {
+            TextField("Task title", text: $titleDraft, axis: .vertical)
+              .textFieldStyle(.plain)
+              .stageFont(.body, weight: .semibold)
+              .foregroundStyle(.primary)
+              .focused($titleFieldFocused)
+              .disabled(savingTitle)
+              .accessibilityLabel("Task title")
+              .accessibilityHint("Changes save when focus leaves the title.")
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background {
+                GeometryReader { geometry in
+                  Color.clear.preference(
+                    key: EditingTitleFramePreferenceKey.self,
+                    value: geometry.frame(in: .named("taskBoard"))
+                  )
+                }
+              }
+            planIndicator
+          }
+          if let titleSaveMessage {
+            HStack(spacing: 6) {
+              Text(titleSaveMessage)
+                .stageFont(.caption)
+                .foregroundStyle(titleSaveMessage == "Couldn't save" ? .red : .secondary)
+              if titleSaveMessage == "Couldn't save" {
+                Button("Retry") { saveTitle() }
+                  .buttonStyle(.borderless)
+                  .disabled(savingTitle)
+              }
+            }
+            .accessibilityElement(children: .combine)
+          }
+        #else
         HStack(spacing: 6) {
           TextField("Task title", text: $titleDraft, axis: .vertical)
             .textFieldStyle(.roundedBorder)
@@ -797,7 +858,8 @@ struct TaskCard: View {
             .disabled(savingTitle)
             .onSubmit { saveTitle() }
             .accessibilityLabel("Task title")
-            .accessibilityHint("Press Return to save the title.")
+            .accessibilityHint("Changes save automatically. Press Return to finish editing.")
+          #if os(iOS)
           Button {
             saveTitle()
           } label: {
@@ -807,6 +869,7 @@ struct TaskCard: View {
           .help("Save title (Return)")
           .accessibilityLabel("Save title")
           .disabled(savingTitle)
+          #endif
           Button {
             cancelTitleEditing()
           } label: {
@@ -817,6 +880,7 @@ struct TaskCard: View {
           .accessibilityLabel("Cancel title edit")
           .disabled(savingTitle)
         }
+        #endif
       } else {
         #if os(iOS)
           HStack(alignment: .top, spacing: 8) {
@@ -916,6 +980,7 @@ struct TaskCard: View {
 
   private func openDetails() {
     #if os(macOS)
+      editingTaskID = nil
       model.selectedTaskID = item.id
       if scope == .board {
         model.boardSelectedTaskID = item.id
@@ -935,11 +1000,13 @@ struct TaskCard: View {
 
   private func beginTitleEditing() {
     titleDraft = item.title
+    titleSaveMessage = nil
     editingTaskID = item.id
   }
 
   private func cancelTitleEditing() {
     guard !savingTitle else { return }
+    titleSaveMessage = nil
     titleDraft = item.title
     if editingTaskID == item.id { editingTaskID = nil }
   }
@@ -947,8 +1014,15 @@ struct TaskCard: View {
   private func resolveTitleEditing() {
     guard !savingTitle else { return }
     let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !title.isEmpty, title != item.title else {
+    guard !title.isEmpty else {
+      titleFieldFocused = true
+      titleSaveMessage = "Give this task a title."
+      return
+    }
+    guard title != item.title else {
+      titleSaveMessage = nil
       titleDraft = item.title
+      if editingTaskID == item.id { editingTaskID = nil }
       return
     }
     saveTitle()
@@ -959,23 +1033,32 @@ struct TaskCard: View {
     let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !title.isEmpty else {
       model.error = "Give this task a title."
+      titleSaveMessage = "Give this task a title."
       titleFieldFocused = true
       return
     }
     guard title != item.title else {
+      titleSaveMessage = nil
       cancelTitleEditing()
       return
     }
     guard var updated = model.library.tasks.first(where: { $0.id == item.id }) else {
       model.error = "This task no longer exists."
+      titleSaveMessage = "Couldn't save"
       return
     }
     updated.title = title
     savingTitle = true
+    titleSaveMessage = "Saving…"
     Task {
       let saved = await model.perform(.editTask(updated, expectedRevision: updated.revision))
       savingTitle = false
-      if saved && editingTaskID == item.id { editingTaskID = nil }
+      if saved {
+        titleSaveMessage = nil
+        if editingTaskID == item.id { editingTaskID = nil }
+      } else {
+        titleSaveMessage = "Couldn't save"
+      }
     }
   }
 }

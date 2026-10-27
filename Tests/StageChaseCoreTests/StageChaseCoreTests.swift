@@ -744,9 +744,23 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     return
   }
   #expect(edited.tasks[0].title == "Edited")
+  #expect(edited.tasks[0].notes == "saved")
+
+  let nextEdit = SyncEnvelope(
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 3,
+    expectedRevision: edited.tasks[0].revision,
+    command: .editTask(id: taskID, title: "Latest title", notes: "Latest notes"))
+  guard case .applied(_, let latest) = try await repository.applyRemote(nextEdit)
+  else {
+    Issue.record("A subsequent combined title and notes edit must use the advanced revision")
+    return
+  }
+  #expect(latest.tasks[0].revision == edited.tasks[0].revision + 1)
+  #expect(latest.tasks[0].title == "Latest title")
+  #expect(latest.tasks[0].notes == "Latest notes")
 
   let stale = SyncEnvelope(
-    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 3,
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 4,
     expectedRevision: 0, editedAt: .distantPast,
     command: .editTask(id: taskID, title: "Stale", notes: ""))
   guard case .superseded(let staleSequence, _) = try await repository.applyRemote(stale)
@@ -761,8 +775,8 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   }
   #expect(replaySequence == staleSequence)
   let later = SyncEnvelope(
-    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 4,
-    expectedRevision: 1, command: .editTask(id: taskID, title: "Later", notes: ""))
+    libraryID: initial.libraryID, deviceID: deviceID, clientSequence: 5,
+    expectedRevision: 2, command: .editTask(id: taskID, title: "Later", notes: ""))
   guard case .applied = try await repository.applyRemote(later)
   else {
     Issue.record("A later operation must proceed after a superseded queue entry")
