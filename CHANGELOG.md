@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-27
+
+- Require a user-entered title when creating a task from a shared photo; keep
+  the source filename as attachment display metadata.
+- Add optional project emoji identity to Mac and iPhone project settings and
+  shared project rows, preserving the SF Symbol fallback. Carry emoji through
+  project snapshots and add a stale-value-checked phone update in sync protocol 17.
+
 ## 2026-10-26
 
 - Automatically save task title, notes, and task model edits on Mac and iPhone

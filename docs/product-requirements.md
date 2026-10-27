@@ -1,5 +1,16 @@
 # Product requirements
 
+## Project emoji identity
+
+- As a user, I want to choose or clear a single emoji in New Project and Project
+  Settings on Mac and paired iPhone, so each project is easy to recognize.
+- Show the selected emoji at the start of the shared project row, and keep the
+  existing SF Symbol when no emoji is selected. Include the emoji in the row's
+  accessibility label without displacing its project name or status counts.
+- Preserve the selection through save, relaunch, restore, and paired sync. A
+  phone edit must use the Mac-authoritative queue and reject a stale expected
+  emoji without changing project identity, order, tasks, or unrelated settings.
+
 ## Reversible project deletion
 
 - As a user, I want to delete a project from Mac or iPhone and hide it from my

@@ -3,6 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 17 adds optional project emoji snapshots and revision-checked phone emoji edits.
   // Version 16 adds canonical project ordering and revision-checked phone reorder commands.
   // Version 15 adds explicit, revision-checked phone feedback requests for revising plans.
   // Version 14 adds revision-checked task favorite and model-tag edits.
@@ -16,7 +17,7 @@ public enum SyncProtocol {
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 16
+  public static let version = 17
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -89,6 +90,10 @@ public enum SyncCommand: Codable, Equatable, Sendable {
     id: UUID, expectedProfile: CodexExecutionProfile,
     expectedModelOverride: CodexModelConfiguration?, profile: CodexExecutionProfile,
     modelOverride: CodexModelConfiguration?)
+  case updateProjectEmoji(
+    id: UUID, expectedEmoji: String?, emoji: String?,
+    expectedProfile: CodexExecutionProfile, expectedModelOverride: CodexModelConfiguration?,
+    profile: CodexExecutionProfile, modelOverride: CodexModelConfiguration?)
 }
 
 public enum SyncPhoneCodexAction: String, Codable, Sendable {
@@ -279,6 +284,20 @@ public enum SyncCommandValidator {
       project.executionProfile = profile
       project.modelOverride = modelOverride
       return .editProject(project)
+    case .updateProjectEmoji(
+      let id, let expectedEmoji, let emoji, let expectedProfile, let expectedModelOverride,
+      let profile, let modelOverride):
+      guard envelope.expectedRevision == nil,
+        var project = library.activeProjects.first(where: { $0.id == id })
+      else { throw BoardError.missing }
+      guard project.emoji == Project.normalizedEmoji(expectedEmoji),
+        project.executionProfile == expectedProfile,
+        project.modelOverride == expectedModelOverride
+      else { throw BoardError.conflict }
+      project.emoji = emoji
+      project.executionProfile = profile
+      project.modelOverride = modelOverride
+      return .editProject(project)
     }
   }
 }
@@ -357,6 +376,7 @@ public struct SyncTask: Codable, Equatable, Identifiable, Sendable {
 public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
   public var id: UUID
   public var name: String
+  public var emoji: String?
   public var automationEnabled: Bool
   public var usesWorktrees: Bool?
   public var modelOverride: CodexModelConfiguration?
@@ -373,6 +393,7 @@ public struct SyncProject: Codable, Equatable, Identifiable, Sendable {
   public init(_ project: Project) {
     id = project.id
     name = project.name
+    emoji = Project.normalizedEmoji(project.emoji)
     automationEnabled = project.automationEnabled
     usesWorktrees = project.usesWorktrees
     modelOverride = project.modelOverride
@@ -473,6 +494,7 @@ public struct SyncSnapshot: Codable, Equatable, Sendable {
     library.projects = projects.map {
       var project = Project(name: $0.name)
       project.id = $0.id
+      project.emoji = Project.normalizedEmoji($0.emoji)
       project.automationEnabled = $0.automationEnabled
       project.usesWorktrees = $0.usesWorktrees ?? false
       project.modelOverride = $0.modelOverride

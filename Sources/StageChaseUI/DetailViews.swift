@@ -149,6 +149,25 @@ struct ProjectEditor: View {
             .padding(.top, 5)
           #endif
         }
+        #if os(macOS)
+          Section {
+            ProjectEmojiPicker(selection: $project.emoji)
+          } header: {
+            Text("Project icon")
+          } footer: {
+            Text("Enter one emoji to identify this project. Clear it to use the default project icon.")
+          }
+        #else
+          if model.isConnectedPhone && !isNew {
+            Section {
+              ProjectEmojiPicker(selection: $project.emoji)
+            } header: {
+              Text("Project icon")
+            } footer: {
+              Text("Enter one emoji to identify this project. Clear it to use the default project icon.")
+            }
+          }
+        #endif
         Section {
           #if os(macOS)
             Toggle("Allow automatic Codex runs for this project", isOn: $project.automationEnabled)
@@ -262,6 +281,7 @@ struct ProjectEditor: View {
                   && model.library.projects.first(where: { $0.id == project.id }).map {
                     $0.executionProfile == project.executionProfile
                       && $0.modelOverride == project.modelOverride
+                      && $0.emoji == project.emoji
                   } == true)
             )
           }
@@ -702,6 +722,36 @@ struct NewTaskEditor: View {
     #if os(macOS)
       .frame(width: 500, height: 440)
     #endif
+  }
+}
+
+private struct ProjectEmojiPicker: View {
+  @Binding var selection: String?
+
+  private var emojiText: Binding<String> {
+    Binding(
+      get: { selection ?? "" },
+      set: { selection = Project.normalizedEmoji($0) })
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      TextField("Emoji", text: emojiText)
+        .frame(width: 72)
+        .accessibilityLabel("Project emoji")
+      if let selection {
+        Text(selection)
+          .font(.system(size: 24))
+          .accessibilityHidden(true)
+      } else {
+        Image(systemName: "square.stack.3d.up.fill")
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
+      }
+      Spacer()
+      Button("Clear") { selection = nil }
+        .disabled(selection == nil)
+    }
   }
 }
 

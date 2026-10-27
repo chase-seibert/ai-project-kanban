@@ -155,7 +155,6 @@ final class ShareViewController: UIViewController, UITextFieldDelegate, UITextVi
       return
     }
     imageName = provider.suggestedName ?? "Shared image"
-    titleField.text = Self.taskTitle(for: imageName)
     mediaType = mime
     statusLabel.text = "Loading photo…"
     statusLabel.isHidden = false
@@ -202,15 +201,6 @@ final class ShareViewController: UIViewController, UITextFieldDelegate, UITextVi
   private func updateProjectButton() {
     let title = selectedProject.map { "Project: \($0.name)  ▾" } ?? "Choose project"
     projectButton.setTitle(title, for: .normal)
-  }
-
-  private static func taskTitle(for imageName: String) -> String {
-    let suggestedTitle = URL(fileURLWithPath: imageName)
-      .deletingPathExtension().lastPathComponent
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    return suggestedTitle.isEmpty || suggestedTitle == "Shared image"
-      ? "Photo task"
-      : String(suggestedTitle.prefix(500))
   }
 
   private func updateSaveState() {

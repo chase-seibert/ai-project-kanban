@@ -1596,9 +1596,15 @@ private struct ProjectSidebarProjectRow: View {
   var body: some View {
     Button(action: action) {
       HStack(alignment: .top, spacing: 7) {
-        Image(systemName: "square.stack.3d.up.fill")
-          .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-          .padding(.top, 3)
+        if let emoji = project.emoji {
+          Text(emoji).font(.system(size: 16)).padding(.top, 1)
+            .accessibilityHidden(true)
+        } else {
+          Image(systemName: "square.stack.3d.up.fill")
+            .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            .padding(.top, 3)
+            .accessibilityHidden(true)
+        }
         Text(project.name).stageFont(.body, weight: .medium).foregroundStyle(.primary)
           .lineLimit(2).fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -1623,7 +1629,7 @@ private struct ProjectSidebarProjectRow: View {
     .buttonStyle(.plain)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(
-      "\(project.name), \(counts.total) items, "
+      "\(project.name)\(project.emoji.map { ", project emoji \($0)" } ?? ""), \(counts.total) items, "
         + "\(counts.planReview) ready for plan review, "
         + "\(counts.codeReview) ready for code review, "
         + "\(modelGitAccessibilityDescription)"

@@ -383,6 +383,9 @@ public enum CodexModelResolver {
 public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var id = UUID()
   public var name: String
+  public var emoji: String? {
+    didSet { emoji = Self.normalizedEmoji(emoji) }
+  }
   public var directory = ""
   public var automationEnabled = false
   public var usesWorktrees = false
@@ -402,20 +405,31 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
   public var isDeleted: Bool { deletedAt != nil }
 
   private enum CodingKeys: String, CodingKey {
-    case id, name, directory, automationEnabled, usesWorktrees, modelOverride, executionProfile
+    case id, name, emoji, directory, automationEnabled, usesWorktrees, modelOverride,
+      executionProfile
     case deployedCommitHash, deployedAt, favoriteMakeTargets, createdAt, projectOrder, deletedAt,
       deletionRevision
   }
 
   public init(name: String, directory: String = "") {
     self.name = name
+    emoji = nil
     self.directory = directory
+  }
+
+  /// Keeps project identity to one visible grapheme, including joined emoji sequences.
+  public static func normalizedEmoji(_ value: String?) -> String? {
+    guard let value, value.count == 1,
+      value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
+    else { return nil }
+    return value
   }
 
   public init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
     name = try values.decode(String.self, forKey: .name)
+    emoji = Self.normalizedEmoji(try values.decodeIfPresent(String.self, forKey: .emoji))
     directory = try values.decodeIfPresent(String.self, forKey: .directory) ?? ""
     automationEnabled = try values.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
     usesWorktrees = try values.decodeIfPresent(Bool.self, forKey: .usesWorktrees) ?? false
@@ -437,6 +451,7 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     var values = encoder.container(keyedBy: CodingKeys.self)
     try values.encode(id, forKey: .id)
     try values.encode(name, forKey: .name)
+    try values.encodeIfPresent(Self.normalizedEmoji(emoji), forKey: .emoji)
     try values.encode(directory, forKey: .directory)
     try values.encode(automationEnabled, forKey: .automationEnabled)
     try values.encode(usesWorktrees, forKey: .usesWorktrees)

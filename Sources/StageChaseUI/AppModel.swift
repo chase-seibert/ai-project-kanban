@@ -979,10 +979,18 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
             throw BoardError.invalid(
               "On iPhone, only project Codex settings can be changed on the Mac.")
           }
-          wireCommand = .updateProjectCodexSettings(
-            id: project.id, expectedProfile: existing.executionProfile,
-            expectedModelOverride: existing.modelOverride, profile: project.executionProfile,
-            modelOverride: project.modelOverride)
+          if Project.normalizedEmoji(project.emoji) != existing.emoji {
+            wireCommand = .updateProjectEmoji(
+              id: project.id, expectedEmoji: existing.emoji, emoji: project.emoji,
+              expectedProfile: existing.executionProfile,
+              expectedModelOverride: existing.modelOverride, profile: project.executionProfile,
+              modelOverride: project.modelOverride)
+          } else {
+            wireCommand = .updateProjectCodexSettings(
+              id: project.id, expectedProfile: existing.executionProfile,
+              expectedModelOverride: existing.modelOverride, profile: project.executionProfile,
+              modelOverride: project.modelOverride)
+          }
           revision = nil
         default:
           throw BoardError.invalid("This action is available on the Mac only while connected.")

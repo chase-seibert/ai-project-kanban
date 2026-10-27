@@ -144,7 +144,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(replica.tasks.first?.id == task.id)
   #expect(replica.tasks.first?.shortID == 23)
   #expect(replica.taskShortIDHighWaterMark == 30)
-  #expect(SyncProtocol.version == 16)
+  #expect(SyncProtocol.version == 17)
 }
 
 @Test func phonePlanFeedbackDirectRequestPreservesExactFeedbackAndRequestID() throws {
@@ -618,7 +618,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   let decoded = try JSONDecoder().decode(SyncSnapshot.self, from: encoded)
   let replica = try decoded.replica()
 
-  #expect(decoded.version == 16)
+  #expect(decoded.version == 17)
   #expect(decoded.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
   #expect(decoded.runs.first(where: { $0.id == unlinkedRun.id })?.threadID == nil)
   #expect(replica.runs.first(where: { $0.id == linkedRun.id })?.threadID == "desktop-thread-123")
@@ -941,7 +941,7 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
     try SyncCommandValidator.mutation(for: oldEnvelope, in: library)
   }
   let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 0, library: library)
-  #expect(snapshot.version == 16)
+  #expect(snapshot.version == 17)
   var oldSnapshot = snapshot
   oldSnapshot.version = SyncProtocol.version - 1
   #expect(throws: BoardError.self) { try oldSnapshot.replica() }
@@ -2414,8 +2414,54 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   object.removeValue(forKey: "deletionRevision")
   let oldProject = try JSONDecoder().decode(
     SyncProject.self, from: JSONSerialization.data(withJSONObject: object))
+  #expect(oldProject.emoji == nil)
   #expect(oldProject.deletedAt == nil)
   #expect(oldProject.deletionRevision == nil)
+}
+
+@Test func projectEmojiPersistsAndPhoneUpdatesRejectStaleValues() async throws {
+  let legacy = try JSONDecoder().decode(Project.self, from: Data("{\"name\":\"Legacy\"}".utf8))
+  #expect(legacy.emoji == nil)
+  #expect(Project.normalizedEmoji("📚") == "📚")
+  #expect(Project.normalizedEmoji("📚🎨") == nil)
+
+  var project = Project(name: "Creative")
+  project.emoji = "🎨"
+  var createdLibrary = try BoardReducer.apply(.createProject(project), to: Library())
+  #expect(createdLibrary.projects.first?.emoji == "🎨")
+  var editedProject = project
+  editedProject.name = "Creative Studio"
+  createdLibrary = try BoardReducer.apply(.editProject(editedProject), to: createdLibrary)
+  #expect(createdLibrary.projects.first?.emoji == "🎨")
+
+  var library = Library()
+  library.projects = [project]
+  let encodedProject = try JSONEncoder().encode(project)
+  #expect(try JSONDecoder().decode(Project.self, from: encodedProject) == project)
+
+  let snapshot = SyncSnapshot(libraryID: UUID(), sequence: 1, library: library)
+  let decodedSnapshot = try JSONDecoder.syncDecoder.decode(
+    SyncSnapshot.self, from: JSONEncoder.syncEncoder.encode(snapshot))
+  #expect(decodedSnapshot.projects.first?.emoji == "🎨")
+  #expect(try decodedSnapshot.replica().projects.first?.emoji == "🎨")
+
+  let command = SyncEnvelope(
+    libraryID: snapshot.libraryID, deviceID: UUID(),
+    command: .updateProjectEmoji(
+      id: project.id, expectedEmoji: "🎨", emoji: nil,
+      expectedProfile: project.executionProfile, expectedModelOverride: project.modelOverride,
+      profile: project.executionProfile, modelOverride: project.modelOverride))
+  let mutation = try SyncCommandValidator.mutation(for: command, in: library)
+  library = try BoardReducer.apply(mutation, to: library)
+  #expect(library.projects[0].emoji == nil)
+
+  let stale = SyncEnvelope(
+    libraryID: snapshot.libraryID, deviceID: UUID(),
+    command: .updateProjectEmoji(
+      id: project.id, expectedEmoji: "🎨", emoji: "📚",
+      expectedProfile: project.executionProfile, expectedModelOverride: project.modelOverride,
+      profile: project.executionProfile, modelOverride: project.modelOverride))
+  #expect(throws: BoardError.self) { try SyncCommandValidator.mutation(for: stale, in: library) }
 }
 
 @Test(arguments: [RunKind.implementation, .task, .planning])

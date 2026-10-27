@@ -1,5 +1,19 @@
 # Architecture
 
+## Project emoji identity
+
+Projects store an optional, single-grapheme emoji in their existing per-record
+JSON payload. Legacy records without the field decode without an emoji, and
+clearing the selection restores the shared SF Symbol fallback. Mac and iPhone
+project editors use text input with a visible selection and explicit Clear
+action. Project rows include the selected emoji in their accessibility label.
+
+Sync protocol v17 carries the optional emoji in `SyncProject` and accepts a
+dedicated phone update command that checks the expected current emoji and
+Codex settings before changing either. The command uses the durable offline
+outbox; stale edits conflict and reconcile to the Mac snapshot. Protocol v16
+and earlier clients must update before syncing.
+
 ## Project deletion and restoration
 
 Projects have an optional `deletedAt` timestamp and a `deletionRevision` counter.
