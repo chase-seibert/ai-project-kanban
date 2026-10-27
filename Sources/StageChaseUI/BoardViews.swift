@@ -823,8 +823,16 @@ struct TaskCard: View {
               .foregroundStyle(.primary)
               .focused($titleFieldFocused)
               .disabled(savingTitle)
+              .onSubmit { saveTitle() }
+              .onKeyPress(.return, phases: .down) { keyPress in
+                guard keyPress.modifiers.contains(.command) else { return .ignored }
+                saveTitle()
+                return .handled
+              }
               .accessibilityLabel("Task title")
-              .accessibilityHint("Changes save when focus leaves the title.")
+              .accessibilityHint(
+                "Changes save when focus leaves the title. Press Command-Return to save and close."
+              )
               .frame(maxWidth: .infinity, alignment: .leading)
               .background {
                 GeometryReader { geometry in
