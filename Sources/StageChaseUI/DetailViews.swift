@@ -155,7 +155,7 @@ struct ProjectEditor: View {
           } header: {
             Text("Project icon")
           } footer: {
-            Text("Type or paste one emoji, or choose one from the emoji picker.")
+            Text("Choose an emoji from Emoji & Symbols. Choose another to replace it, or clear it to use the default project icon.")
           }
         #else
           if model.isConnectedPhone && !isNew {
@@ -164,7 +164,7 @@ struct ProjectEditor: View {
             } header: {
               Text("Project icon")
             } footer: {
-              Text("Enter one emoji with the keyboard or paste it here.")
+              Text("Choose one emoji to identify this project. Clear it to use the default project icon.")
             }
           }
         #endif
@@ -727,43 +727,163 @@ struct NewTaskEditor: View {
 
 private struct ProjectEmojiPicker: View {
   @Binding var selection: String?
-  @FocusState private var emojiFieldFocused: Bool
-
-  private var emojiText: Binding<String> {
-    Binding(
-      get: { selection ?? "" },
-      set: { selection = Project.normalizedEmoji($0) })
-  }
+  #if os(macOS)
+    @State private var emojiInput = ""
+    @FocusState private var emojiFieldFocused: Bool
+#else
+    @State private var showingEmojiChoices = false
+  #endif
 
   var body: some View {
-    HStack(spacing: 12) {
-      TextField("", text: emojiText)
-        .frame(width: 64)
-        .accessibilityLabel("Project emoji")
-      if let selection {
-        Text(selection)
-          .font(.system(size: 24))
-          .accessibilityHidden(true)
-      } else {
-        Image(systemName: "square.stack.3d.up.fill")
-          .foregroundStyle(.secondary)
-          .accessibilityHidden(true)
-      }
-      Spacer()
-      #if os(macOS)
-        Button("Choose…") {
+    #if os(macOS)
+      macEmojiPicker
+    #else
+      phoneEmojiPicker
+    #endif
+  }
+
+  #if os(macOS)
+    private var macEmojiPicker: some View {
+      HStack {
+        Button {
           emojiFieldFocused = true
           DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+        } label: {
+          HStack(spacing: 10) {
+            if let selection {
+              Text(selection).font(.system(size: 24))
+            } else {
+              Image(systemName: "square.stack.3d.up.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.secondary)
+            }
+            Text(selection == nil ? "Choose…" : "Change")
+          }
+          .frame(minHeight: 34)
+          .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(selection.map { "Project emoji \($0). Choose another emoji" } ?? "Choose project emoji")
         .help("Choose an emoji from Emoji & Symbols")
-      #endif
-      if selection != nil {
-        Button("Clear") { selection = nil }
+
+        TextField("", text: $emojiInput)
+          .frame(width: 1, height: 1)
+          .opacity(0.01)
+          .accessibilityHidden(true)
+          .focused($emojiFieldFocused)
+          .onChange(of: emojiInput) { _, value in
+            guard let emoji = Project.normalizedEmoji(value) else { return }
+            selection = emoji
+            emojiInput = ""
+          }
+
+        Spacer()
+        if selection != nil {
+          Button("Clear") { selection = nil }
+            .accessibilityHint("Use the default project icon")
+        }
       }
     }
-    .focused($emojiFieldFocused)
+  #else
+    private var phoneEmojiPicker: some View {
+      HStack {
+        Button {
+          showingEmojiChoices = true
+        } label: {
+          HStack(spacing: 10) {
+            if let selection {
+              Text(selection).font(.system(size: 24))
+            } else {
+              Image(systemName: "square.stack.3d.up.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.secondary)
+            }
+            Text(selection == nil ? "Choose…" : "Change")
+          }
+          .frame(minHeight: 34)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(selection.map { "Project emoji \($0). Choose another emoji" } ?? "Choose project emoji")
+        .popover(isPresented: $showingEmojiChoices) {
+          ProjectEmojiChoiceGrid(selection: $selection) {
+            showingEmojiChoices = false
+          }
+          .frame(width: 360, height: 340)
+          .padding(12)
+          .presentationCompactAdaptation(.sheet)
+        }
+        Spacer()
+        if selection != nil {
+          Button("Clear") { selection = nil }
+            .accessibilityHint("Use the default project icon")
+        }
+      }
+    }
+  #endif
+}
+
+#if os(iOS)
+private struct ProjectEmojiChoiceGrid: View {
+  @Binding var selection: String?
+  let onSelect: () -> Void
+
+  private let columns = [GridItem(.adaptive(minimum: 38), spacing: 5)]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Choose a project emoji")
+        .font(.headline)
+      ScrollView {
+        VStack(alignment: .leading, spacing: 14) {
+          ForEach(ProjectEmojiCategory.all) { category in
+            VStack(alignment: .leading, spacing: 5) {
+              Text(category.title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              LazyVGrid(columns: columns, spacing: 5) {
+                ForEach(category.emojis, id: \.self) { emoji in
+                  Button {
+                    selection = emoji
+                    onSelect()
+                  } label: {
+                    Text(emoji)
+                      .font(.system(size: 23))
+                      .frame(width: 38, height: 38)
+                      .background(
+                        selection == emoji ? Color.accentColor.opacity(0.18) : .clear,
+                        in: RoundedRectangle(cornerRadius: 8))
+                  }
+                  .buttonStyle(.plain)
+                  .accessibilityLabel("\(emoji) emoji")
+                  .accessibilityValue(selection == emoji ? "Selected" : "")
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
+
+private struct ProjectEmojiCategory: Identifiable {
+  let title: String
+  let emojis: [String]
+
+  var id: String { title }
+
+  static let all = [
+    ProjectEmojiCategory(title: "Work", emojis: ["💼", "📁", "📂", "🗂️", "📋", "📝", "📌", "📊", "📈", "📉", "🗃️", "📦", "📇", "🔖", "📎", "✂️", "🖇️", "📐", "📏", "🧮"]),
+    ProjectEmojiCategory(title: "Technology", emojis: ["💻", "🖥️", "⌨️", "🖱️", "🖨️", "📱", "📲", "☎️", "🔌", "🔋", "💡", "🔦", "🧰", "⚙️", "🛠️", "🔧", "🔩", "🧪", "🔬", "🧬"]),
+    ProjectEmojiCategory(title: "Places & travel", emojis: ["🏠", "🏢", "🏗️", "🏭", "🏫", "🏥", "🏪", "🏰", "🌆", "🌇", "🚗", "🚲", "🚌", "🚆", "✈️", "🚀", "🛳️", "🗺️", "🧭", "⛺️"]),
+    ProjectEmojiCategory(title: "Nature", emojis: ["🌱", "🌿", "🍀", "🌳", "🌵", "🌷", "🌻", "🌈", "☀️", "🌙", "⭐️", "🔥", "💧", "🌊", "❄️", "🌍", "🌎", "🌏", "🪴", "🪵"]),
+    ProjectEmojiCategory(title: "Food", emojis: ["🍎", "🍓", "🍋", "🍇", "🥑", "🥕", "🌽", "🍕", "🍔", "🍜", "🍣", "🍰", "☕️", "🫖", "🍷", "🥤", "🍽️", "🧁", "🍪", "🥗"]),
+    ProjectEmojiCategory(title: "Activities", emojis: ["🎨", "🎭", "🎬", "🎧", "🎵", "🎹", "🎸", "📷", "🎮", "🕹️", "⚽️", "🏀", "🏈", "⚾️", "🎾", "🏋️", "🚴", "🏆", "🎯", "🧩"]),
+    ProjectEmojiCategory(title: "People & ideas", emojis: ["👤", "👥", "🧑‍💻", "🧑‍🔬", "🧑‍🎨", "🧑‍🍳", "🧑‍🚀", "🐶", "🐱", "🐻", "🦊", "🦉", "🐝", "🦋", "❤️", "💜", "💎", "🔑", "🔒", "✨"]),
+  ]
+}
+#endif
 
 struct TaskDetail: View {
   @Environment(AppModel.self) private var model

@@ -7,6 +7,8 @@
 - Add optional project emoji identity to Mac and iPhone project settings and
   shared project rows, preserving the SF Symbol fallback. Carry emoji through
   project snapshots and add a stale-value-checked phone update in sync protocol 17.
+- Use the full macOS Emoji & Symbols picker for project icons while keeping the
+  iPhone chooser app-owned and free of editable text entry.
 
 ## 2026-10-26
 
