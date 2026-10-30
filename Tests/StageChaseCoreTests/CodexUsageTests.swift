@@ -99,6 +99,58 @@ import Testing
   #expect(snapshot.nextUnscheduledWeeklyRefill == nil)
 }
 
+@Test func possibleWeeklyResetDateRollsForwardFromAnExpiredEstimate() {
+  let fetchedAt = Date(timeIntervalSince1970: 1_900_000_000)
+  let possibleReset = Date(timeIntervalSince1970: 2_000_000_000)
+  let scheduledReset = Date(timeIntervalSince1970: 2_000_000_100)
+  let snapshot = CodexUsageSnapshot(
+    planName: nil,
+    windows: [CodexQuotaWindow(kind: .weekly, usedPercent: 20, resetsAt: scheduledReset)],
+    remainingCredits: nil,
+    fetchedAt: fetchedAt,
+    recentWeeklyResetPattern: CodexWeeklyResetPattern(
+      averageIntervalDays: 7, earlyResetCount: 2, averageDaysEarly: 1,
+      nextReset: possibleReset))
+
+  #expect(snapshot.possibleWeeklyResetDate(now: possibleReset.addingTimeInterval(-1)) == possibleReset)
+  #expect(
+    snapshot.possibleWeeklyResetDate(now: possibleReset)
+      == possibleReset.addingTimeInterval(7 * 24 * 60 * 60))
+  #expect(
+    snapshot.possibleWeeklyResetDate(now: possibleReset.addingTimeInterval(1))
+      == possibleReset.addingTimeInterval(7 * 24 * 60 * 60))
+  #expect(snapshot.windows.first?.resetsAt == scheduledReset)
+  #expect(snapshot.fetchedAt == fetchedAt)
+}
+
+@Test func possibleWeeklyResetDateRequiresPatternAndWeeklyWindow() {
+  let now = Date(timeIntervalSince1970: 1_900_000_000)
+  let pattern = CodexWeeklyResetPattern(
+    averageIntervalDays: 7, earlyResetCount: 0, averageDaysEarly: nil,
+    nextReset: now.addingTimeInterval(60))
+  let withoutPattern = CodexUsageSnapshot(
+    planName: nil,
+    windows: [CodexQuotaWindow(kind: .weekly, usedPercent: 20, resetsAt: nil)],
+    remainingCredits: nil, fetchedAt: now)
+  let withoutWeeklyWindow = CodexUsageSnapshot(
+    planName: nil,
+    windows: [CodexQuotaWindow(kind: .session, usedPercent: 20, resetsAt: nil)],
+    remainingCredits: nil, fetchedAt: now, recentWeeklyResetPattern: pattern)
+
+  #expect(withoutPattern.possibleWeeklyResetDate(now: now) == nil)
+  #expect(withoutWeeklyWindow.possibleWeeklyResetDate(now: now) == nil)
+}
+
+@Test func futureResetRemainsAvailableWhenItsAverageIntervalIsInvalid() {
+  let now = Date(timeIntervalSince1970: 1_900_000_000)
+  let futureReset = now.addingTimeInterval(60)
+  let pattern = CodexWeeklyResetPattern(
+    averageIntervalDays: 0, earlyResetCount: 0, averageDaysEarly: nil, nextReset: futureReset)
+
+  #expect(pattern.nextFutureReset(after: now) == futureReset)
+  #expect(pattern.nextFutureReset(after: futureReset) == nil)
+}
+
 @Test func weeklyHistoryRecordsOnlyMaterialRefillsAndClassifiesAgainstSchedule() {
   let start = Date(timeIntervalSince1970: 2_000_000_000)
   let scheduled = start.addingTimeInterval(2 * 24 * 60 * 60)
@@ -179,6 +231,11 @@ import Testing
   #expect(estimate?.earliest == nextRefillIntervalMidpoint.addingTimeInterval(-12 * 60 * 60))
   #expect(estimate?.latest == nextRefillIntervalMidpoint.addingTimeInterval(12 * 60 * 60))
   #expect(history.nextUnscheduledRefillEstimate(now: origin.addingTimeInterval(5 * cadence)) == nil)
+
+  let now = origin.addingTimeInterval(3 * cadence)
+  let pattern = history.recentResetPattern(now: now)
+  #expect(pattern?.nextReset == origin.addingTimeInterval(4 * cadence - 15 * 60))
+  #expect(pattern?.nextFutureReset(after: now) == origin.addingTimeInterval(4 * cadence - 15 * 60))
 }
 
 @Test func syncSnapshotCarriesCodexUsageWithoutLibraryMutation() throws {

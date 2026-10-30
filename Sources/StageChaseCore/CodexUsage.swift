@@ -107,6 +107,21 @@ public struct CodexWeeklyResetPattern: Codable, Equatable, Sendable {
     self.averageDaysEarly = averageDaysEarly
     self.nextReset = nextReset
   }
+
+  public func nextFutureReset(after now: Date) -> Date? {
+    guard now.timeIntervalSinceReferenceDate.isFinite,
+      nextReset.timeIntervalSinceReferenceDate.isFinite
+    else { return nil }
+    guard nextReset <= now else { return nextReset }
+
+    let interval = averageIntervalDays * 24 * 60 * 60
+    guard interval.isFinite, interval > 0 else { return nil }
+    let elapsedIntervals = floor(now.timeIntervalSince(nextReset) / interval) + 1
+    guard elapsedIntervals.isFinite else { return nil }
+    let candidate = nextReset.addingTimeInterval(elapsedIntervals * interval)
+    guard candidate.timeIntervalSinceReferenceDate.isFinite, candidate > now else { return nil }
+    return candidate
+  }
 }
 
 /// Mac-local observations. This bounded raw history is never part of a sync payload.
@@ -209,12 +224,14 @@ public struct CodexWeeklyUsageHistory: Codable, Equatable, Sendable {
       let daysEarly = scheduled.timeIntervalSince(midpoint) / (24 * 60 * 60)
       return daysEarly >= 1 ? daysEarly : nil
     }
-    return CodexWeeklyResetPattern(
+    var pattern = CodexWeeklyResetPattern(
       averageIntervalDays: averageInterval / (24 * 60 * 60),
       earlyResetCount: earlyByDays.count,
       averageDaysEarly: earlyByDays.isEmpty
         ? nil : earlyByDays.reduce(0, +) / Double(earlyByDays.count),
       nextReset: midpoints[midpoints.count - 1].addingTimeInterval(averageInterval))
+    pattern.nextReset = pattern.nextFutureReset(after: now) ?? pattern.nextReset
+    return pattern
   }
 
   private mutating func compact(now: Date) {
@@ -391,6 +408,13 @@ public struct CodexUsageSnapshot: Codable, Equatable, Sendable {
   public var recentWeeklyResetPattern: CodexWeeklyResetPattern?
   public var flexCreditUSDValue: Double? {
     remainingCredits.map { Double($0) * CodexUsageMapper.creditUSDRate }
+  }
+
+  public func possibleWeeklyResetDate(now: Date) -> Date? {
+    guard windows.contains(where: { $0.kind == .weekly }),
+      let pattern = recentWeeklyResetPattern
+    else { return nil }
+    return pattern.nextFutureReset(after: now)
   }
 
   public init(

@@ -138,9 +138,11 @@ or ambiguous, so a due schedule stays distinguishable from a refill. Raw
 observations remain Mac-local. A compact pattern summary uses refill events from
 the latest 60 days to calculate the average gap, count events at least a day
 before their associated scheduled reset, average that lead time, and project the
-next date from the most recent event. The Mac panel and widget display only the
-possible next reset date. It is an inference from observed quota changes, not an
-API schedule. Optional snapshot fields preserve compatibility with older clients
+next date from the most recent event. When that date has passed, the Mac panel
+and widget advance it by the observed average interval to the next future
+projection. This remains an inference from observed quota changes, not an API
+schedule. The API-reported scheduled reset remains separate and continues to use
+`resetsAt`. Optional snapshot fields preserve compatibility with older clients
 and do not change the strict sync protocol version.
 Shared quota presentation keeps the session cutoffs at 30% red and 65% green.
 For weekly windows, green starts 10 percentage points below expected remaining

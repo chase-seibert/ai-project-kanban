@@ -19,14 +19,24 @@ private struct UsageProvider: TimelineProvider {
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<UsageEntry>) -> Void) {
-    let entry = currentEntry()
-    completion(Timeline(entries: [entry], policy: .after(.now.addingTimeInterval(30 * 60))))
+    let now = Date.now
+    let entry = currentEntry(now: now)
+    var entries = [entry]
+    if let snapshot = entry.snapshot {
+      var nextReset = snapshot.possibleWeeklyResetDate(now: now)
+      for _ in 0..<8 {
+        guard let reset = nextReset else { break }
+        entries.append(UsageEntry(date: reset, snapshot: snapshot))
+        nextReset = snapshot.possibleWeeklyResetDate(now: reset)
+      }
+    }
+    completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
   }
 
-  private func currentEntry() -> UsageEntry {
+  private func currentEntry(now: Date = .now) -> UsageEntry {
     let snapshot = UserDefaults(suiteName: usageSuite)?.data(forKey: usageKey)
       .flatMap { try? JSONDecoder().decode(CodexUsageSnapshot.self, from: $0) }
-    return UsageEntry(date: .now, snapshot: snapshot)
+    return UsageEntry(date: now, snapshot: snapshot)
   }
 }
 
@@ -138,9 +148,9 @@ private struct UsageWidgetView: View {
   }
 
   @ViewBuilder private var refillHistory: some View {
-    if let pattern = entry.snapshot?.recentWeeklyResetPattern {
+    if let reset = entry.snapshot?.possibleWeeklyResetDate(now: entry.date) {
       Text(
-        "Possible reset: \(pattern.nextReset.formatted(.dateTime.weekday(.wide).month(.wide).day()))."
+        "Possible reset: \(reset.formatted(.dateTime.weekday(.wide).month(.wide).day()))."
       )
       .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
     }

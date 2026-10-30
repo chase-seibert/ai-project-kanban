@@ -97,11 +97,11 @@ struct CodexUsageSummary: View {
   }
 
   @ViewBuilder private func weeklyHistory(_ snapshot: CodexUsageSnapshot) -> some View {
-    if snapshot.windows.contains(where: { $0.kind == .weekly }),
-      let pattern = snapshot.recentWeeklyResetPattern
-    {
-      Text("Possible reset: \(pattern.nextReset.formatted(.dateTime.weekday(.wide).month(.wide).day())).")
-        .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
+    TimelineView(.periodic(from: .now, by: 60)) { context in
+      if let nextReset = snapshot.possibleWeeklyResetDate(now: context.date) {
+        Text("Possible reset: \(nextReset.formatted(.dateTime.weekday(.wide).month(.wide).day())).")
+          .stageFont(.caption2).foregroundStyle(.secondary).lineLimit(2)
+      }
     }
   }
 
