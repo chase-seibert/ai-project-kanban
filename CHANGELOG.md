@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-05
+
+- Open task images from the Mac app in the system image viewer using a cached,
+  correctly typed copy, avoiding the in-app loading sheet.
+
 ## 2026-10-27
 
 - Require a user-entered title when creating a task from a shared photo; keep

@@ -1401,18 +1401,7 @@ struct TaskDetail: View {
         #else
         HStack(spacing: 8) {
           Button {
-            Task {
-              do {
-                attachmentPreviewData = try await model.taskAttachmentData(
-                  taskID: item.id, attachmentID: attachment.id)
-                showingAttachmentPreview = true
-                attachmentError = nil
-                attachmentErrorID = nil
-              } catch {
-                attachmentError = error.localizedDescription
-                attachmentErrorID = attachment.id
-              }
-            }
+            openTaskAttachmentInPreview(attachment, item: item)
           } label: {
             VStack(alignment: .leading, spacing: 2) {
               Text(attachment.displayName).lineLimit(1)
@@ -1464,6 +1453,40 @@ struct TaskDetail: View {
   #endif
 
   #if os(macOS)
+    private func openTaskAttachmentInPreview(_ attachment: TaskAttachment, item: WorkItem) {
+      Task {
+        do {
+          let data = try await model.taskAttachmentData(
+            taskID: item.id, attachmentID: attachment.id)
+          let fileManager = FileManager.default
+          let previewDirectory = try fileManager.url(
+            for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+          ).appendingPathComponent("StageChase/TaskAttachmentPreviews", isDirectory: true)
+          try fileManager.createDirectory(
+            at: previewDirectory, withIntermediateDirectories: true)
+          let fileExtension: String
+          switch attachment.mediaType {
+          case "image/jpeg": fileExtension = "jpg"
+          case "image/png": fileExtension = "png"
+          case "image/heic": fileExtension = "heic"
+          default: throw BoardError.invalid("This attachment has an unsupported image type.")
+          }
+          let previewURL = previewDirectory
+            .appendingPathComponent(attachment.id.uuidString.lowercased())
+            .appendingPathExtension(fileExtension)
+          try data.write(to: previewURL, options: .atomic)
+          guard NSWorkspace.shared.open(previewURL) else {
+            throw BoardError.invalid("macOS could not open this image in Preview.")
+          }
+          attachmentError = nil
+          attachmentErrorID = nil
+        } catch {
+          attachmentError = error.localizedDescription
+          attachmentErrorID = attachment.id
+        }
+      }
+    }
+
     private func clearRecoveredAttachmentError(in item: WorkItem?) async {
       guard attachmentError == "The attached image file is missing from this Mac.",
         let attachmentErrorID,

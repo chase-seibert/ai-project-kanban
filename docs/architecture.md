@@ -592,10 +592,11 @@ HEIC images (4 MB and 8,192 pixels per side maximum), written atomically, and
 checked against SHA-256 before preview. SQLite task payloads and sync snapshots
 contain IDs, names, media types, sizes, checksums, and transfer state only. A
 paired-phone attach uses one authenticated direct upload request; opening an
-uncached preview requests only that image. Snapshot refresh does not download
-image files. `BackupArchive` frames the library JSON and raw image files in a
-versioned container, while old JSON-only backups with no image references remain
-readable.
+uncached iPhone preview requests only that image. On Mac, opening an attachment
+verifies its bytes, writes a correctly typed copy to the app cache, and opens it
+with the system image viewer. Snapshot refresh does not download image files.
+`BackupArchive` frames the library JSON and raw image files in a versioned
+container, while old JSON-only backups with no image references remain readable.
 
 The iOS Share Extension accepts one JPEG, PNG, or HEIC image and presents a
 new-task composer with active phone projects, a required title, and an optional
