@@ -1,5 +1,8 @@
 # Architecture
 
+For the persisted schema, field types, logical UUID relationships, and declared
+indexes, see [the data model reference](data-model.md).
+
 ## Project emoji identity
 
 Projects store an optional, single-grapheme emoji in their existing per-record
@@ -118,6 +121,13 @@ device behavior remains a separate acceptance check from builds and fixtures.
 
 Xcode synchronized source groups compile shared files directly into each app.
 SwiftPM exposes StageChaseCore for tests. App targets do not import it separately.
+
+The photo share extension reads the current phone project list from the App
+Group and remembers the last project explicitly selected in that flow by UUID.
+Each new share restores that project only while it remains in the current list;
+otherwise it falls back to the first available project. The staged request keeps
+its own project UUID as the destination for that submitted task. This preference
+does not affect board selection or other task creation flows.
 
 ## Mac Codex usage
 

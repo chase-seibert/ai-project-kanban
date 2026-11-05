@@ -161,6 +161,10 @@
 - As a user, I want to share a photo from another iPhone app into Build Chase and
   compose an Inbox task with a project, title, description, and image, so visual
   work context is captured without saving and attaching it later.
+- As a user, I want the photo share flow to remember the last project I selected
+  in that flow, so I can share another photo without choosing the project again.
+  Restore the choice by project UUID only when it is still in the current phone
+  project list; otherwise select the first available project.
 - Sharing accepts one readable JPEG, PNG, or HEIC image within the existing size
   and dimension limits. A submitted request is staged in the App Group and
   imported when Build Chase becomes active; repeated activation must not create

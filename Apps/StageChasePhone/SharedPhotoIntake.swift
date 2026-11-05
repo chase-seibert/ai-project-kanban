@@ -18,6 +18,16 @@ struct SharedPhotoRequest: Codable, Identifiable {
 enum SharedPhotoIntake {
   static let appGroup = "group.com.cseibert.StageChase"
   static let projectsKey = "sharedPhotoProjects"
+  static let lastSelectedProjectKey = "sharedPhotoLastSelectedProjectID"
+
+  static func selectedProject(
+    from projects: [SharedPhotoProject], rememberedID: UUID?
+  ) -> SharedPhotoProject? {
+    if let rememberedID, let remembered = projects.first(where: { $0.id == rememberedID }) {
+      return remembered
+    }
+    return projects.first
+  }
 
   static func rootURL(fileManager: FileManager = .default) throws -> URL {
     guard let container = fileManager.containerURL(

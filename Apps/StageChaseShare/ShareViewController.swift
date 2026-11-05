@@ -21,7 +21,10 @@ final class ShareViewController: UIViewController, UITextFieldDelegate, UITextVi
     super.viewDidLoad()
     view.backgroundColor = .systemBackground
     projects = Self.loadProjects()
-    selectedProject = projects.first
+    let defaults = UserDefaults(suiteName: SharedPhotoIntake.appGroup)
+    let rememberedID = defaults?.string(forKey: SharedPhotoIntake.lastSelectedProjectKey)
+      .flatMap(UUID.init(uuidString:))
+    selectedProject = SharedPhotoIntake.selectedProject(from: projects, rememberedID: rememberedID)
     buildForm()
     loadSharedImage()
   }
@@ -189,6 +192,8 @@ final class ShareViewController: UIViewController, UITextFieldDelegate, UITextVi
     for project in projects {
       alert.addAction(UIAlertAction(title: project.name, style: .default) { [weak self] _ in
         self?.selectedProject = project
+        UserDefaults(suiteName: SharedPhotoIntake.appGroup)?.set(
+          project.id.uuidString, forKey: SharedPhotoIntake.lastSelectedProjectKey)
         self?.updateProjectButton()
         self?.updateSaveState()
       })
