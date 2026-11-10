@@ -735,7 +735,6 @@ struct TaskCard: View {
     }
     Divider()
     let ordered = model.library.items(in: item.projectID, section: item.section, completed: true)
-      .filter { $0.priority == item.priority }
     if scope == .board,
       let index = ordered.firstIndex(where: { $0.id == item.id }), index > 0
     {

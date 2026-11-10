@@ -98,6 +98,10 @@
 - As a user, I want Inbox tasks ordered by creation time with the newest first,
   so newly captured work is easy to find. Creation-time ties use a stable
   task-ID order.
+- As a user, I want to reorder tasks within a column by dragging or using the
+  task menu, and retain that order across refreshes. Before the first manual
+  reorder, Inbox and Planning/Implementing keep their automatic ordering; new
+  tasks added to a manually ordered column append at the end.
 - As a user, I want the Mac sections shown as three side-by-side columns with
   vertical task lists and iPhone sections kept as horizontal pages, so each
   device retains a useful board layout.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-10
+
+- Preserve explicit task reordering within a column and expose a revision-checked
+  `reorder_task` operation through the local MCP server.
+
 ## 2026-11-05
 
 - Open task images from the Mac app in the system image viewer using a cached,

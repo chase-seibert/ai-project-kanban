@@ -866,9 +866,20 @@ public struct Library: Codable, Equatable, Sendable {
   public func items(in project: UUID, section: WorkflowSection, completed: Bool = false)
     -> [WorkItem]
   {
-    tasks.filter {
+    let matching = tasks.filter {
       $0.projectID == project && $0.section == section && (completed || !$0.completed)
     }
+    // Nonnegative ranks retain the legacy automatic inbox/status ordering. Once a user
+    // explicitly reorders a column, the reducer assigns negative ranks to every item in
+    // that section. This keeps the user's order stable without adding a schema field, and
+    // newly added or moved tasks (which receive nonnegative ranks) append to that order.
+    if tasks.contains(where: { $0.projectID == project && $0.section == section && $0.rank < 0 }) {
+      return matching.sorted {
+        if $0.rank != $1.rank { return $0.rank < $1.rank }
+        return $0.id.uuidString < $1.id.uuidString
+      }
+    }
+    return matching
     .sorted {
       if section == .inbox {
         if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
@@ -996,7 +1007,7 @@ public enum Mutation: Sendable {
   case reportExternalRun(UUID, String, RunStatus, expectedTaskRevision: Int)
   case deleteTask(UUID, expectedRevision: Int)
   case restoreTask(UUID, WorkItem?, expectedRevision: Int?)
-  case reorder(UUID, before: UUID, expectedRevision: Int)
+  case reorder(UUID, before: UUID?, expectedRevision: Int)
   case retry(UUID, configuration: ResolvedCodexConfiguration? = nil)
   /// Revision-rebased edit from a paired device; preserves the existing run snapshot.
   case syncEditTask(WorkItem, expectedRevision: Int)
@@ -1432,23 +1443,26 @@ public enum BoardReducer {
           projectID: desired?.projectID ?? existing?.projectID, taskID: id))
     case .reorder(let id, let before, let revision):
       let sourceIndex = try taskIndex(id, revision)
-      var source = state.tasks[sourceIndex]
-      let target = state.tasks[try taskIndex(before)]
-      guard source.projectID == target.projectID, source.section == target.section
-      else {
-        throw BoardError.invalid("Reorder tasks within the same project section.")
+      let source = state.tasks[sourceIndex]
+      if let before {
+        let target = state.tasks[try taskIndex(before)]
+        guard source.projectID == target.projectID, source.section == target.section else {
+          throw BoardError.invalid("Reorder tasks within the same project column.")
+        }
+        if id == before { return state }
       }
-      if id == before { return state }
-      source.priority = target.priority
       var ordered = state.items(in: source.projectID, section: source.section, completed: true)
-        .filter { $0.priority == target.priority && $0.id != id }
-      let index = ordered.firstIndex { $0.id == before } ?? ordered.endIndex
+        .filter { $0.id != id }
+      let index = before.flatMap { targetID in ordered.firstIndex { $0.id == targetID } }
+        ?? ordered.endIndex
       ordered.insert(source, at: index)
-      for (rank, item) in ordered.enumerated() {
+      // Negative ranks mark an explicit manual order. Rank the whole column so drag/drop
+      // can cross status and priority groups and so later reads preserve the visible order.
+      for (offset, item) in ordered.enumerated() {
         let i = try taskIndex(item.id)
-        if state.tasks[i].rank != rank || state.tasks[i].priority != target.priority {
+        let rank = offset - ordered.count
+        if state.tasks[i].rank != rank {
           state.tasks[i].rank = rank
-          state.tasks[i].priority = target.priority
           state.tasks[i].revision += 1
           state.tasks[i].updatedAt = .now
         }

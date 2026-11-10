@@ -360,6 +360,24 @@ import Network
         .move(taskID, stage, expectedRevision: revision), operationID: operationID,
         arguments: arguments)
       return taskJSON(try requiredTask(taskID, in: result))
+    case "reorder_task":
+      let projectID = try uuid("project_id", arguments)
+      let taskID = try uuid("task_id", arguments)
+      guard library.tasks.contains(where: { $0.id == taskID && $0.projectID == projectID }) else {
+        throw BoardError.missing
+      }
+      let beforeTaskID: UUID?
+      if let rawBefore = arguments["before_task_id"], !(rawBefore is NSNull) {
+        beforeTaskID = try uuid("before_task_id", arguments)
+      } else {
+        beforeTaskID = nil
+      }
+      let revision = try integer("expected_revision", arguments)
+      let operationID = try uuid("operation_id", arguments)
+      let result = try await commit(
+        .reorder(taskID, before: beforeTaskID, expectedRevision: revision),
+        operationID: operationID, arguments: arguments)
+      return taskJSON(try requiredTask(taskID, in: result))
     case "attach_task_plan":
       let projectID = try uuid("project_id", arguments)
       let taskID = try uuid("task_id", arguments)
@@ -626,6 +644,19 @@ extension MCPServer {
           "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
           "expected_revision": ["type": "integer"], "stage": stageSchema,
         ], "required": ["project_id", "task_id", "operation_id", "expected_revision", "stage"],
+        "additionalProperties": false,
+      ]),
+    tool(
+      "reorder_task",
+      "Move a task within its current project column. Set before_task_id to another task in that column, or null to move it to the end. Requires the task's current revision and a fresh operation_id; this does not change its stage or start Codex.",
+      [
+        "type": "object",
+        "properties": [
+          "project_id": uuidSchema, "task_id": uuidSchema, "operation_id": uuidSchema,
+          "expected_revision": ["type": "integer"],
+          "before_task_id": ["type": ["string", "null"], "format": "uuid"],
+        ],
+        "required": ["project_id", "task_id", "operation_id", "expected_revision"],
         "additionalProperties": false,
       ]),
     tool(

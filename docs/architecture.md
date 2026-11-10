@@ -338,7 +338,7 @@ context remains copyable instead of constructing an unsupported remote URL.
 The Mac app can expose an opt-in, loopback-only MCP server at
 `Apps/StageChaseMac/MCPServer.swift`. It reads and mutates the same
 `LibraryRepository` as the board; no second process opens the SQLite library.
-Project/task reads are scoped by stable IDs. Create/move and plan attachment
+Project/task reads are scoped by stable IDs. Create/move/reorder and plan attachment
 writes use the normal reducer, persist bounded operation receipts
 and advance the phone-sync sequence in the same save. Existing-task updates
 require the current revision. `attach_task_plan` accepts only a readable,
@@ -357,6 +357,12 @@ that same task, keeps its history, and becomes the latest run. This replaces
 tracking only: it does not stop the underlying runner process. Updates from a
 superseded runner are ignored, while a second active Codex Desktop record still
 conflicts.
+`reorder_task` uses the current task revision and an optional `before_task_id`
+(null places the task last) to reorder within one project column. The reducer
+assigns negative ranks to the full column only after an explicit reorder; those
+ranks preserve manual order while nonnegative ranks retain the existing
+automatic Inbox/status ordering before the first manual reorder. Tasks newly
+created or moved into a manually ordered column append after its current items.
 MCP stage moves pass no model configuration and never call `kickRunner()`,
 regardless of automatic-invocation preferences. Stop the endpoint in Settings
 to disconnect Codex Desktop; it binds to `127.0.0.1` and uses a per-install
