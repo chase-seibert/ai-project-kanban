@@ -1438,6 +1438,49 @@ private let fixtureModelConfiguration = ResolvedCodexConfiguration(
   #expect(library.tasks[0].status == .planApproved)
 }
 
+@Test func bulkCompletionIsAtomicRevisionCheckedAndLimitedToImplementingTasks() throws {
+  let project = Project(name: "Bulk completion")
+  let first = WorkItem(projectID: project.id, title: "First", stage: .implementation)
+  let second = WorkItem(projectID: project.id, title: "Second", stage: .implementation)
+  let planning = WorkItem(projectID: project.id, title: "Planning", stage: .planned)
+  var alreadyCompleted = WorkItem(projectID: project.id, title: "Done", stage: .implementation)
+  alreadyCompleted.completed = true
+  alreadyCompleted.completedAt = Date(timeIntervalSince1970: 10)
+  var library = Library()
+  library.projects = [project]
+  library.tasks = [first, second, planning, alreadyCompleted]
+
+  let targets = [
+    TaskCompletionTarget(id: first.id, expectedRevision: first.revision),
+    TaskCompletionTarget(id: second.id, expectedRevision: second.revision),
+  ]
+  let completed = try BoardReducer.apply(
+    .completeTasks(projectID: project.id, targets: targets), to: library)
+  for task in [first, second] {
+    let updated = try #require(completed.tasks.first(where: { $0.id == task.id }))
+    #expect(updated.completed)
+    #expect(updated.completedAt != nil)
+    #expect(updated.revision == task.revision + 1)
+  }
+  #expect(completed.tasks.first(where: { $0.id == planning.id })?.completed == false)
+  #expect(completed.tasks.first(where: { $0.id == alreadyCompleted.id })?.completedAt == alreadyCompleted.completedAt)
+  #expect(completed.activity.filter { $0.taskID == first.id || $0.taskID == second.id }.count == 2)
+
+  var stale = library
+  stale.tasks[1].revision += 1
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.completeTasks(projectID: project.id, targets: targets), to: stale)
+  }
+  #expect(stale.tasks.allSatisfy { !$0.completed || $0.id == alreadyCompleted.id })
+
+  var active = library
+  active.runs = [AgentRun(task: first, kind: .implementation)]
+  #expect(throws: BoardError.self) {
+    try BoardReducer.apply(.completeTasks(projectID: project.id, targets: targets), to: active)
+  }
+  #expect(active.tasks.allSatisfy { !$0.completed || $0.id == alreadyCompleted.id })
+}
+
 @Test func sameStageConfirmationCanQueueOnlyAfterUserConfirms() throws {
   var project = Project(name: "A", directory: "/tmp/fixture")
   project.automationEnabled = true

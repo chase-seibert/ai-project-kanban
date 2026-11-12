@@ -102,6 +102,11 @@
   task menu, and retain that order across refreshes. Before the first manual
   reorder, Inbox and Planning/Implementing keep their automatic ordering; new
   tasks added to a manually ordered column append at the end.
+- As a Mac user, I want to Shift-click a range of open Implementing tasks and
+  complete that selection from a task's right-click menu, so I can close related
+  work together. The menu confirms the number affected; tasks with active Codex
+  runs are skipped and reported. Completion is atomic and rejects stale task
+  revisions. This action is limited to the Implementing column.
 - As a user, I want the Mac sections shown as three side-by-side columns with
   vertical task lists and iPhone sections kept as horizontal pages, so each
   device retains a useful board layout.

@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+  import AppKit
+#endif
 
 extension WorkflowSection {
   var color: Color {
@@ -317,11 +320,20 @@ struct BoardLane: View {
   @State private var targeted = false
   @State private var saving = false
   @State private var captureError: String?
+  @State private var selectedTaskIDs: [UUID] = []
+  @State private var selectionAnchorID: UUID?
+  @State private var pendingCompletion: PendingTaskCompletion?
   @FocusState private var captureFocused: Bool
   private var visibleItems: [WorkItem] { model.items(section) }
   private var openItems: [WorkItem] { visibleItems.filter { !$0.completed } }
   private var planReviewCount: Int { openItems.filter { $0.status == .planApproved }.count }
   private var codeReviewCount: Int { openItems.filter { $0.status == .reviewing }.count }
+
+  private struct PendingTaskCompletion {
+    let projectID: UUID
+    let targets: [TaskCompletionTarget]
+    let activeRunCount: Int
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -365,7 +377,15 @@ struct BoardLane: View {
       ScrollView(.vertical) {
         LazyVStack(alignment: .leading, spacing: 10) {
           ForEach(visibleItems) { item in
-            TaskCard(item: item, editingTaskID: $editingTaskID, onOpenTask: onOpenTask)
+            TaskCard(
+              item: item, editingTaskID: $editingTaskID, onOpenTask: onOpenTask,
+              isSelectedForCompletion: selectedTaskIDs.contains(item.id),
+              selectedTaskCount: selectedTaskIDs.count,
+              onSelect: section == .implementing
+                ? { selectTask(item.id) } : nil,
+              onShiftSelect: section == .implementing && !item.completed
+                ? { selectRange(through: item.id) } : nil,
+              onCompleteSelected: section == .implementing ? { prepareSelectedCompletion() } : nil)
           }
           if visibleItems.isEmpty && !adding {
             VStack(spacing: 8) {
@@ -474,6 +494,74 @@ struct BoardLane: View {
     } isTargeted: {
       targeted = $0
     }
+    #if os(macOS)
+      .confirmationDialog(
+        "Complete \(pendingCompletion?.targets.count ?? 0) selected tasks?",
+        isPresented: Binding(
+          get: { pendingCompletion != nil },
+          set: { if !$0 { pendingCompletion = nil } }),
+        titleVisibility: .visible
+      ) {
+        if let pendingCompletion {
+          Button("Complete \(pendingCompletion.targets.count) tasks", role: .destructive) {
+            Task {
+              if await model.perform(
+                .completeTasks(
+                  projectID: pendingCompletion.projectID, targets: pendingCompletion.targets))
+              {
+                selectedTaskIDs.removeAll()
+                selectionAnchorID = nil
+              }
+              self.pendingCompletion = nil
+            }
+          }.keyboardShortcut(.defaultAction)
+        }
+        Button("Cancel", role: .cancel) { pendingCompletion = nil }
+      } message: {
+        if let pendingCompletion, pendingCompletion.activeRunCount > 0 {
+          Text(
+            "\(pendingCompletion.activeRunCount) selected \(pendingCompletion.activeRunCount == 1 ? "task has" : "tasks have") active Codex runs and will be skipped.")
+        } else {
+          Text("This affects only the selected open tasks in Implementing.")
+        }
+      }
+    #endif
+  }
+
+  private func selectRange(through taskID: UUID) {
+    let ids = visibleItems.filter { !$0.completed }.map(\.id)
+    guard let end = ids.firstIndex(of: taskID) else { return }
+    guard let anchor = selectionAnchorID, let start = ids.firstIndex(of: anchor) else {
+      selectionAnchorID = taskID
+      selectedTaskIDs = [taskID]
+      return
+    }
+    selectedTaskIDs = Array(ids[min(start, end)...max(start, end)])
+  }
+
+  private func selectTask(_ taskID: UUID) {
+    selectedTaskIDs = [taskID]
+    selectionAnchorID = taskID
+  }
+
+  private func prepareSelectedCompletion() {
+    guard section == .implementing, let projectID = model.selectedProjectID else { return }
+    let selected = model.library.tasks.filter {
+      selectedTaskIDs.contains($0.id) && $0.projectID == projectID
+        && $0.section == .implementing && !$0.completed
+    }
+    let activeIDs = Set(model.library.runs.filter { $0.status.isActive }.map(\.taskID))
+    let targets = selected.filter { !activeIDs.contains($0.id) }.map {
+      TaskCompletionTarget(id: $0.id, expectedRevision: $0.revision)
+    }
+    guard !targets.isEmpty else {
+      model.error = selected.isEmpty
+        ? "The selection changed. Select the tasks again."
+        : "Selected tasks with active Codex runs cannot be completed."
+      return
+    }
+    pendingCompletion = PendingTaskCompletion(
+      projectID: projectID, targets: targets, activeRunCount: selected.count - targets.count)
   }
   private var hasActiveFilter: Bool { !model.search.isEmpty || model.boardFilter != .all }
 
@@ -551,6 +639,11 @@ struct TaskCard: View {
   var onOpenTask: ((UUID) -> Void)?
   var scope = TaskCardScope.board
   var projectName: String?
+  var isSelectedForCompletion = false
+  var selectedTaskCount = 0
+  var onSelect: (() -> Void)?
+  var onShiftSelect: (() -> Void)?
+  var onCompleteSelected: (() -> Void)?
   @State private var titleDraft = ""
   @State private var savingTitle = false
   @State private var titleSaveMessage: String?
@@ -583,6 +676,7 @@ struct TaskCard: View {
         if !isFocused { resolveTitleEditing() }
       #endif
     }
+    .accessibilityAddTraits(isSelectedForCompletion ? .isSelected : [])
   }
 
   @ViewBuilder private var interactiveContents: some View {
@@ -705,6 +799,14 @@ struct TaskCard: View {
   @ViewBuilder private var taskContextMenu: some View {
     Button("Edit title", systemImage: "pencil") { beginTitleEditing() }
     Divider()
+    if scope == .board, item.section == .implementing,
+      isSelectedForCompletion, selectedTaskCount > 1
+    {
+      Button("Complete \(selectedTaskCount) selected tasks", systemImage: "checkmark.circle.fill") {
+        onCompleteSelected?()
+      }
+      Divider()
+    }
     Button(
       item.isFavorite ? "Remove from favorites" : "Add to favorites",
       systemImage: item.isFavorite ? "star.slash" : "star"
@@ -918,7 +1020,13 @@ struct TaskCard: View {
                 TapGesture(count: 2).exclusively(before: TapGesture()).onEnded { result in
                   switch result {
                   case .first: beginTitleEditing()
-                  case .second: openDetails()
+                  case .second:
+                    if NSEvent.modifierFlags.contains(.shift) {
+                      onShiftSelect?()
+                    } else {
+                      onSelect?()
+                      openDetails()
+                    }
                   }
                 }
               )
@@ -961,7 +1069,8 @@ struct TaskCard: View {
       .background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
       .overlay(
         RoundedRectangle(cornerRadius: 12).stroke(
-          model.boardSelectedTaskID == item.id || model.selectedTaskID == item.id
+          isSelectedForCompletion || model.boardSelectedTaskID == item.id
+            || model.selectedTaskID == item.id
             ? Color.accentColor.opacity(0.65) : .primary.opacity(0.07))
       )
       .shadow(color: .black.opacity(0.035), radius: 3, y: 2)

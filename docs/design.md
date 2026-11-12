@@ -78,6 +78,12 @@ Codex model and effort. Workspace navigation on both devices is ordered All,
 Active, Favorites, and Recently Completed. All includes every task in active
 projects, including completed tasks. Active combines Plan Approved, Building,
 In Progress, and Reviewing tasks while excluding completed tasks.
+On the Mac board, Shift-clicking task titles in Implementing selects the range
+from the selection anchor through the clicked task. A selected card's
+right-click menu offers a counted bulk completion action. Confirmation states
+how many open tasks will be completed and how many selected tasks with active
+Codex runs will be skipped. The reducer validates every captured revision
+before changing any task, then records completion and activity per task.
 The Mac board exposes native task search in its toolbar. On iPhone, native
 search is available on the board and cross-project workspace task views. Search
 matches task titles and notes; workspace search also matches project names.

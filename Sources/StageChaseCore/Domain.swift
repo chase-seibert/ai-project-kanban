@@ -1003,6 +1003,7 @@ public enum Mutation: Sendable {
   case move(
     UUID, WorkflowStage, expectedRevision: Int, configuration: ResolvedCodexConfiguration? = nil)
   case complete(UUID, Bool, expectedRevision: Int)
+  case completeTasks(projectID: UUID, targets: [TaskCompletionTarget])
   case reportTaskUpdate(UUID, String, expectedRevision: Int)
   case reportExternalRun(UUID, String, RunStatus, expectedTaskRevision: Int)
   case deleteTask(UUID, expectedRevision: Int)
@@ -1015,6 +1016,16 @@ public enum Mutation: Sendable {
   case updateRun(AgentRun)
   case finishRun(UUID, planPath: String?)
   case log(Activity)
+}
+
+public struct TaskCompletionTarget: Hashable, Sendable {
+  public var id: UUID
+  public var expectedRevision: Int
+
+  public init(id: UUID, expectedRevision: Int) {
+    self.id = id
+    self.expectedRevision = expectedRevision
+  }
 }
 
 public enum BoardReducer {
@@ -1364,6 +1375,31 @@ public enum BoardReducer {
         Activity(
           complete ? "Task marked complete by you." : "Task reopened.",
           projectID: state.tasks[index].projectID, taskID: id))
+    case .completeTasks(let projectID, let targets):
+      guard !targets.isEmpty, Set(targets.map(\.id)).count == targets.count else {
+        throw BoardError.invalid("Select at least one distinct task to complete.")
+      }
+      try ensureActiveProject(projectID)
+      let indexes = try targets.map { target -> Int in
+        let index = try taskIndex(target.id, target.expectedRevision)
+        let item = state.tasks[index]
+        guard item.projectID == projectID, item.section == .implementing, !item.completed else {
+          throw BoardError.conflict
+        }
+        try ensureIdle(item.id)
+        return index
+      }
+      let completedAt = Date.now
+      for index in indexes {
+        state.tasks[index].completed = true
+        state.tasks[index].completedAt = completedAt
+        state.tasks[index].revision += 1
+        state.tasks[index].updatedAt = completedAt
+        state.activity.append(
+          Activity(
+            "Task marked complete by you.", projectID: projectID,
+            taskID: state.tasks[index].id))
+      }
     case .reportTaskUpdate(let id, let message, let revision):
       let index = try taskIndex(id, revision)
       let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
