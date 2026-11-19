@@ -455,6 +455,13 @@ Phone confirmation for automated transitions remains open.
 - Verify at startup and every five minutes while enabled. Do not overlap probes, and discard callbacks from an earlier listener generation after stop, failure, or restart.
 - Clicking the icon opens Settings with Mobile selected, where the detailed port-registration diagnostic and listener state remain available. Keep the phone Connection view and the separate MCP settings tab.
 
+## iPhone Settings and Mac connection
+
+- As a user, I want to open general Settings from the Projects list without entering a project, so app-wide preferences are available from the top-level screen.
+- As a user, I want general Settings to show the paired Mac server address and current sync status, so I can find the connection URL without searching for another screen.
+- General Settings links to the existing Connection screen for pairing, address changes, sync controls, and diagnostics. Project Settings remains project-specific.
+- Show only the saved `stagechase://` endpoint, pairing state, and existing sync status/result. Do not expose pairing credentials or duplicate connection persistence.
+
 ## Codex Desktop task tools
 
 - As a user, I want Codex Desktop to list, read, and create project tasks, so I

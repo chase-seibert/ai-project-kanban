@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-19
+
+- Added a Projects-list Settings button and a phone Settings summary for the saved Mac connection, with a link to Connection details.
+
+- Allow phone task reorder commands to omit the destination task when moving a
+  task to the end of its column; advance the local sync protocol to version 18.
+
 ## 2026-11-10
 
 - Preserve explicit task reordering within a column and expose a revision-checked

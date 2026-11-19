@@ -84,6 +84,10 @@ struct RootView: View {
             )
             .navigationTitle("Projects")
             .toolbar {
+              ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "gearshape") { model.sheet = .settings }
+                  .accessibilityIdentifier("projects-settings")
+              }
               ToolbarItem(placement: .primaryAction) {
                 Button("New project", systemImage: "plus") { model.sheet = .newProject }
               }
@@ -589,18 +593,6 @@ struct ProjectSidebar: View {
             .accessibilityIdentifier("workspace-\(preset.rawValue)-navigation")
           }
         }
-        // The final drop target lets a project move to the end without needing
-        // to drop precisely on the last row.
-        Color.clear
-          .frame(height: 24)
-          .contentShape(Rectangle())
-          .dropDestination(for: String.self) { items, _ in
-            guard let value = items.first, let draggedID = UUID(uuidString: value) else {
-              return false
-            }
-            moveProjectToEnd(draggedID)
-            return true
-          }
       #endif
       #if os(iOS)
         Section {
@@ -709,13 +701,6 @@ struct ProjectSidebar: View {
     Task { _ = await model.reorderProjects(ids) }
   }
 
-  private func moveProjectToEnd(_ id: UUID) {
-    var ids = model.library.activeProjects.map(\.id)
-    guard let source = ids.firstIndex(of: id), source != ids.endIndex - 1 else { return }
-    ids.remove(at: source)
-    ids.append(id)
-    Task { _ = await model.reorderProjects(ids) }
-  }
 }
 
 #if os(macOS)
@@ -1380,6 +1365,32 @@ private struct PhoneSettingsForm: View {
   @State private var importing = false
   var body: some View {
     Form {
+      #if os(iOS)
+      Section("Connection to Mac") {
+        if model.syncClient.isPaired {
+          LabeledContent("Server address") {
+            Text(model.syncClient.savedServerAddress ?? "Address unavailable")
+              .textSelection(.enabled)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          LabeledContent("Status", value: model.syncClient.status)
+          LabeledContent("Latest result", value: model.syncClient.lastResultMessage)
+          if let date = model.syncClient.lastCompletedSyncAt {
+            LabeledContent(
+              "Last successful sync", value: date.formatted(date: .abbreviated, time: .shortened))
+          }
+        } else {
+          Text("No Mac is paired with this phone.")
+            .foregroundStyle(.secondary)
+        }
+        NavigationLink {
+          SyncConnectionView().navigationTitle("Connection")
+        } label: {
+          Label("Connection details", systemImage: "network")
+        }
+        .accessibilityIdentifier("settings-connection-details")
+      }
+      #endif
       Section("Appearance") {
         Picker("Appearance", selection: $appearancePreference) {
           ForEach(AppAppearancePreference.allCases) { preference in

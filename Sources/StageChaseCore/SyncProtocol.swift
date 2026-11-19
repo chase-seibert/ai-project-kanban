@@ -3,6 +3,7 @@ import Foundation
 
 /// Versioned, intentionally narrow protocol for a phone replica of one Mac library.
 public enum SyncProtocol {
+  // Version 18 allows phone task reorders to omit the before ID to append at the end.
   // Version 17 adds optional project emoji snapshots and revision-checked phone emoji edits.
   // Version 16 adds canonical project ordering and revision-checked phone reorder commands.
   // Version 15 adds explicit, revision-checked phone feedback requests for revising plans.
@@ -17,7 +18,7 @@ public enum SyncProtocol {
   // Version 6 adds explicit project creation from a paired phone.
   // Version 5 adds the linked Codex thread ID to read-only run snapshots.
   // Older clients are rejected before any replica or outbox state is changed.
-  public static let version = 17
+  public static let version = 18
   public static let maximumMessageBytes = 5_800_000
   public static let maximumPairingSecretBytes = 64
 }
@@ -79,7 +80,7 @@ public enum SyncCommand: Codable, Equatable, Sendable {
   case setTaskFavorite(id: UUID, isFavorite: Bool)
   case setTaskModelTag(id: UUID, modelTag: TaskModelTag?)
   case moveTask(id: UUID, stage: WorkflowStage)
-  case reorderTask(id: UUID, beforeID: UUID, orderDigest: String)
+  case reorderTask(id: UUID, beforeID: UUID?, orderDigest: String)
   case completeTask(id: UUID, completed: Bool)
   case deleteTask(id: UUID)
   /// Retired in protocol v13; retained only so persisted phone outboxes remain readable.
@@ -253,10 +254,13 @@ public enum SyncCommandValidator {
       return .move(id, stage, expectedRevision: revision)
     case .reorderTask(let id, let beforeID, let digest):
       guard let revision = envelope.expectedRevision,
-        let item = library.tasks.first(where: { $0.id == id }),
-        let target = library.tasks.first(where: { $0.id == beforeID }),
-        item.projectID == target.projectID, item.section == target.section
+        let item = library.tasks.first(where: { $0.id == id })
       else { throw BoardError.missing }
+      if let beforeID {
+        guard let target = library.tasks.first(where: { $0.id == beforeID }),
+          item.projectID == target.projectID, item.section == target.section
+        else { throw BoardError.missing }
+      }
       guard digest == orderDigest(projectID: item.projectID, stage: item.stage, in: library) else {
         throw BoardError.conflict
       }

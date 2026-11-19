@@ -523,9 +523,13 @@ in the background.
 ## Experimental local Wi-Fi synchronization
 
 `Sources/StageChaseCore/SyncProtocol.swift` defines versioned phone commands and
-sanitized snapshots. Protocol version 13 removes unread acknowledgment commands
-and read-marker maps from snapshots; clients using earlier protocol versions are
-rejected before replica or outbox state changes and must update before syncing.
+sanitized snapshots. Protocol version 18 allows a task reorder command to omit
+its `beforeID`, which appends the task to the end of its column. Protocol version
+17 adds optional project emoji snapshots and revision-checked phone emoji edits;
+version 16 adds canonical project ordering and revision-checked phone reorder
+commands. Clients using earlier protocol versions are rejected before replica or
+outbox state changes and must update before syncing. Protocol version 13 removes
+unread acknowledgment commands and read-marker maps from snapshots.
 The legacy acknowledgment command shape remains decodable only so a saved phone
 outbox can be opened; sending one is rejected as retired. Old sync metadata keys
 and old `Activity.taskChange` payload fields are ignored on decode and are not

@@ -100,6 +100,7 @@ private struct PhoneOutbox: Codable {
   }
 
   var isPaired: Bool { credential != nil }
+  var savedServerAddress: String? { isPaired && !savedEndpoint.isEmpty ? savedEndpoint : nil }
   var hasUnsavedEndpoint: Bool { isPaired && endpoint != savedEndpoint }
   var lastCompletedSyncAt: Date? {
     lastSuccessfulSync

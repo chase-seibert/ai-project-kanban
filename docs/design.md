@@ -243,12 +243,15 @@ shares title-first detail and collapsible history/context, retaining its native
 phone-specific actions. Completion remains explicit and independent of run state.
 
 Paired iPhone mode displays the Mac replica, sync status, pending count, and
-last successful refresh. The phone's Connection screen and the Mac Settings'
-Mobile tab show sync progress, the saved endpoint, and listener status. Recent
-local Wi-Fi exchange sizes and results open from a button in the Mobile tab and
+last successful refresh. General Settings is reachable from the Projects list
+and shows the saved Mac endpoint, pairing state, and latest sync result; its
+Connection details link opens the phone's existing Connection screen. The phone's
+Connection screen and the Mac Settings' Mobile tab show sync progress, the
+saved endpoint, and listener status. Recent local Wi-Fi exchange sizes and
+results open from a button in the Mobile tab and
 do not expose payloads. The Mac Settings' MCP tab manages the independent Codex
-Desktop listener. The phone's Connection screen offers supported task edits, stage moves,
-ordering, and project Codex profile/model edits. Task detail can explicitly ask
+Desktop listener. The phone's Connection screen offers supported task edits,
+stage moves, ordering, and project Codex profile/model edits. Task detail can explicitly ask
 the Mac to prepare a planning or task run; both actions use the existing Mac
 confirmation before Codex starts. Background refresh remains read-only with
 respect to Codex.
