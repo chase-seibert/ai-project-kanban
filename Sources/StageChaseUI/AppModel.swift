@@ -187,7 +187,6 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
     var gitBusyProjectIDs: Set<UUID> = []
     var gitActionMessages: [UUID: String] = [:]
     private let gitService = GitService()
-    let makeTargetService = MakeTargetService()
   #endif
 
   #if os(iOS)
@@ -1290,7 +1289,7 @@ enum TaskBoardFilter: String, CaseIterable, Identifiable {
       guard project.favoriteMakeTargets.contains(target) else {
         throw MakeTargetError.invalidTarget
       }
-      try makeTargetService.start(target: target, project: project)
+      try MakeTargetService.run(target: target, project: project)
     }
 
     func commitProjectChanges(projectID: UUID) async {
@@ -1937,7 +1936,6 @@ enum AppSheet: Identifiable {
   case newTask(WorkflowSection)
   case settings
   #if os(macOS)
-    case makeOutput
     case githubProjects
   #endif
   var id: String {
@@ -1948,7 +1946,6 @@ enum AppSheet: Identifiable {
     case .newTask(let stage): "new-task-\(stage.id)"
     case .settings: "settings"
     #if os(macOS)
-      case .makeOutput: "make-output"
       case .githubProjects: "github-projects"
     #endif
     }

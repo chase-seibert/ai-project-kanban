@@ -460,18 +460,17 @@ the phone can preserve the data but has no editor or execution command. The Mac
 project editor trims names and rejects empty, duplicate, leading-dash, and
 control-character values.
 
-`MakeTargetService` resolves the latest project from the library by ID, checks
-its configured directory, and launches `/usr/bin/make` directly with one target
-argument and that directory as its working folder. It captures stdout and
-stderr into a bounded in-memory buffer, keeps one app-wide process active, and
-reports running, succeeded, failed, or stopped state compactly in the header.
-`AppSheet.makeOutput` uses the shared presenter to display `MakeOutputSheet`.
-The service outlives sheet dismissal; Show output reopens the retained result.
-Output truncation is explicit in the sheet and copied text. Stop remains distinct
-from Close/Escape. The original project/target identity belongs to the service,
-not whichever board is currently selected.
-This local action is separate from task placement/completion, Codex runs, Git
-commits, and phone-triggered work.
+The Mac project header renders every saved favorite as a direct button.
+`MakeTargetService` resolves the latest active project by ID, validates its
+configured directory and the selected favorite, then asks Terminal to activate
+and run `/usr/bin/make` from that directory. It uses AppleScript's `quoted form`
+for the directory and target so shell metacharacters remain argument data.
+The Mac app declares `NSAppleEventsUsageDescription` for this Terminal action.
+Terminal owns the process and its stdout/stderr; Build Chase does not capture,
+retain, display, or track Make output or process status. Only directory,
+validation, or Terminal-launch errors return to the app. This local action is
+separate from task placement/completion, Codex runs, Git commits, and
+phone-triggered work.
 
 ## Plan feedback
 

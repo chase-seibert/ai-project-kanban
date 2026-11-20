@@ -50,13 +50,13 @@ opens a refreshable usage panel. In the Mac Projects List, refresh and
 last-updated status sit at the lower right of the usage panel.
 Failed refreshes preserve the last-good numbers with a stale indicator.
 
-Project Settings stores an ordered list of favorite Make targets. Running a
-favorite opens a native output sheet with project, target, status, Copy output,
-Stop, and Close. Closing or pressing Escape leaves the process running. Make
-keeps a compact result in the header and offers Show output to reopen it.
-The service retains a bounded output tail and labels truncation. Failure does
-not reopen a dismissed sheet. Settings and execution remain Mac-only;
-favorites travel in project snapshots so phone refreshes preserve them.
+Project Settings stores an ordered list of favorite Make targets. The Mac
+project header shows each saved target as its own button; selecting one opens
+Terminal in the project's folder and runs that target there. Terminal owns the
+command and its output. Build Chase does not capture output or show command
+status. With no favorites, the header links to Project Settings. Favorites
+remain Mac-editable project data and travel in project snapshots so phone
+refreshes preserve them.
 
 The board has three sections in order: Inbox, Planning, and Implementing. Mac
 shows them as three side-by-side columns with independently vertical-scrolling

@@ -105,7 +105,6 @@ struct RootView: View {
         case .deletedProjects: DeletedProjectsView()
         case .newTask(let stage): NewTaskEditor(stage: stage)
         #if os(macOS)
-          case .makeOutput: MakeOutputSheet()
           case .githubProjects: GitHubProjectsView()
         #endif
         case .settings:

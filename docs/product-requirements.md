@@ -248,15 +248,16 @@ Phone confirmation for automated transitions remains open.
 - As a user, I want to add, remove, and reorder favorite Make target names in
   Mac Project Settings, so that frequently used project actions are easy to
   find.
-- As a user, I want to explicitly run one of a project's favorites from its Mac
-  board header, stop an active target, and see bounded output in a native modal,
-  so that I can run common repository actions without leaving the board.
-- Closing the output modal keeps the command running. Make retains a compact
-  result and Show output entry; errors never push terminal output into the board.
+- As a user, I want each saved favorite to appear as a direct button in its Mac
+  project header, so that I can run it without opening a menu.
+- As a user, I want a selected target to run in Terminal from the project's
+  folder, so that I can work with its output in the terminal window.
+- Build Chase does not capture or retain Make output or command status; it shows
+  only validation and Terminal-launch errors.
 - Favorites are project-specific Codable data and round-trip through phone
   snapshots. Settings and execution remain Mac-only. Runs use the latest saved
-  project folder, one target argument, and one app-wide active process; they
-  never alter tasks, start Codex, or commit Git changes.
+  project folder and pass the target safely as one Make argument; they never
+  alter tasks, start Codex, or commit Git changes.
 
 ## Planned automation
 

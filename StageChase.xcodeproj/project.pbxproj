@@ -402,6 +402,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Build Chase";
 				INFOPLIST_KEY_CFBundleName = "Build Chase";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Build Chase opens Terminal to run the Make targets you select in a project folder.";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cseibert.StageChaseMac;
 				PRODUCT_MODULE_NAME = StageChaseMac;
@@ -422,6 +423,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Build Chase";
 				INFOPLIST_KEY_CFBundleName = "Build Chase";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Build Chase opens Terminal to run the Make targets you select in a project folder.";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cseibert.StageChaseMac;
 				PRODUCT_MODULE_NAME = StageChaseMac;

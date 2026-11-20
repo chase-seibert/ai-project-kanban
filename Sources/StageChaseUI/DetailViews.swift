@@ -324,7 +324,7 @@ struct ProjectEditor: View {
     }
     var body: some View {
       HStack(spacing: 12) {
-        makeTargetMenu
+        makeTargetButtons
         Button {
           showingGit = true
         } label: {
@@ -389,97 +389,38 @@ struct ProjectEditor: View {
         )
     }
 
-    private var makeTargetMenu: some View {
-      let service = model.makeTargetService
-      return Menu {
+    private var makeTargetButtons: some View {
+      Group {
         if currentProject.favoriteMakeTargets.isEmpty {
-          Button("Add favorites in Project settings…") {
+          Button("Add Make targets…", systemImage: "plus") {
             model.sheet = .editProject(currentProject)
           }
+          .help("Add favorite Make targets in Project settings")
         } else {
-          ForEach(currentProject.favoriteMakeTargets, id: \.self) { target in
-            Button("Run \(target)", systemImage: "play.fill") {
-              do {
-                try model.runFavoriteMakeTarget(target, projectID: currentProject.id)
-                model.sheet = .makeOutput
-              } catch MakeTargetError.launch {
-                model.sheet = .makeOutput
-              } catch {
-                model.error = error.localizedDescription
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+              ForEach(currentProject.favoriteMakeTargets, id: \.self) { target in
+                Button {
+                  do {
+                    try model.runFavoriteMakeTarget(target, projectID: currentProject.id)
+                  } catch {
+                    model.error = error.localizedDescription
+                  }
+                } label: {
+                  Label(target, systemImage: "play.fill").lineLimit(1)
+                }
+                .buttonStyle(.borderless)
+                .help("Run \(target) in Terminal")
+                .accessibilityLabel("Run \(target) in Terminal")
+                .accessibilityIdentifier("project-make-target-\(target)")
               }
-            }.disabled(service.isRunning)
-          }
-        }
-        if service.projectID != nil {
-          Divider()
-          Button("Show output · \(service.projectName) / \(service.target)") {
-            model.sheet = .makeOutput
-          }
-          if service.isRunning {
-            Button("Stop \(service.target)", systemImage: "stop.fill", role: .destructive) {
-              service.stop()
             }
+            .fixedSize(horizontal: true, vertical: false)
           }
+          .frame(maxWidth: 560, alignment: .leading)
+          .accessibilityIdentifier("project-make-target-buttons")
         }
-      } label: {
-        Label(
-          service.projectID == project.id || service.isRunning
-            ? "Make · \(service.status.label)" : "Make",
-          systemImage: service.isRunning ? "gearshape.2" : "hammer"
-        )
-        .lineLimit(1)
       }
-      .menuStyle(.borderlessButton)
-      .help("Run a favorite Make target in \(currentProject.name)")
-      .accessibilityIdentifier("project-make-target-menu")
-    }
-  }
-
-  struct MakeOutputSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-      let service = model.makeTargetService
-      VStack(alignment: .leading, spacing: 14) {
-        Text("\(service.projectName) / \(service.target)").stageFont(.title2, weight: .bold)
-        HStack {
-          if service.isRunning { ProgressView().controlSize(.small) }
-          Text(service.status.label).stageFont(.headline)
-          if case .failed(let message) = service.status {
-            Text(message).foregroundStyle(.orange).textSelection(.enabled)
-          }
-        }
-        if service.outputWasTruncated {
-          Text("Showing the retained output tail (32 KB).").stageFont(.caption).foregroundStyle(
-            .secondary)
-        }
-        ScrollView([.horizontal, .vertical]) {
-          Text(
-            service.output.isEmpty
-              ? (service.isRunning ? "Waiting for output…" : "No output.") : service.output
-          )
-          .font(.system(.body, design: .monospaced)).textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(10).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 8))
-        HStack {
-          Button("Copy output", systemImage: "doc.on.doc") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(service.copyableOutput, forType: .string)
-          }.disabled(service.output.isEmpty)
-          if service.isRunning {
-            Button("Stop", systemImage: "stop.fill", role: .destructive) { service.stop() }
-          }
-          Spacer()
-          Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
-        }
-        if service.isRunning {
-          Text("Closing this window keeps the command running.")
-            .stageFont(.caption).foregroundStyle(.secondary)
-        }
-      }.padding(20).frame(minWidth: 600, idealWidth: 760, minHeight: 400, idealHeight: 520).tint(
-        .primary)
     }
   }
 

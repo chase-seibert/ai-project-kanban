@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-20
+
+- Show each saved Make target as a direct project-header button and run it in
+  Terminal from the project folder. Build Chase no longer captures or retains
+  Make output.
+
 ## 2026-11-19
 
 - Added a Projects-list Settings button and a phone Settings summary for the saved Mac connection, with a link to Connection details.
